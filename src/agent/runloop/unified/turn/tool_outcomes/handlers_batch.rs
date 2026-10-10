@@ -34,15 +34,17 @@ fn flush_loop_notices(ctx: &mut TurnProcessingContext<'_>, loop_tracker: &mut su
     if loop_tracker.take_focused_search_notice() {
         ctx.push_system_message("Several searches have concentrated on one file this turn. Reuse the gathered context and take the next concrete edit, verification, or synthesis step when it is sufficient. Search again only for a specific missing fact. This is coaching, not a read cap; distinct queries and tools remain available under existing limits.");
     }
-    if loop_tracker.take_redundant_navigation_notice() {
-        const DIRECTIVE: &str = "This inspection returned only text evidence already gathered this turn. Reuse it to edit, verify, or synthesize; read only missing or changed ranges. Do not copy a capped file to another path to evade the cap. Tools remain available under the existing limits; this notice grants no permissions, verification credit, or repair edits.";
+    if let Some(guidance) = loop_tracker.take_redundant_navigation_guidance() {
         ctx.renderer
             .line(
                 vtcode_core::utils::ansi::MessageStyle::Info,
                 "Inspection repeated retained evidence; continue from the existing context.",
             )
             .unwrap_or(());
-        ctx.push_system_message(DIRECTIVE);
+        ctx.push_system_message(guidance);
+    }
+    if let Some(guidance) = loop_tracker.take_verifier_failed_guidance() {
+        ctx.push_system_message(guidance);
     }
     if loop_tracker.take_verification_result_lost_notice() {
         ctx.renderer

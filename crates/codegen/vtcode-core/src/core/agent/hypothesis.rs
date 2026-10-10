@@ -3,8 +3,8 @@
 //! desirable loop: hypothesis → observation → mismatch → inspect evidence →
 //! revise hypothesis. This module is the pure, testable core of that loop:
 //! it names the mismatch, but never blocks, retries, or performs I/O. The
-//! binary's deterministic failure diagnosis calls into it to frame the
-//! model-facing `next_action`; the evaluator scores the behavior.
+//! binary's failure diagnosis and loop notices call into it to frame
+//! model-facing feedback; the evaluator provides a count-based heuristic.
 //!
 //! Dimension key for [`MismatchEvidence`] (index → field → meaning):
 //!
@@ -78,9 +78,9 @@ pub fn classify_mismatch(evidence: &MismatchEvidence) -> Option<MismatchKind> {
 
 /// Model-facing revision guidance for a classified mismatch.
 ///
-/// `None` (unknown context) yields the generic framing. Every variant names
-/// inspection before retry; only [`MismatchKind::EmptySearch`] redirects to
-/// a new scope instead of a re-read.
+/// `None` (unknown context) yields the generic framing. Inspection can use
+/// already-visible evidence; fresh reads are needed for stale patch context
+/// or insufficient evidence. This guidance neither grants nor schedules retries.
 #[must_use]
 pub fn revision_guidance(kind: Option<MismatchKind>) -> &'static str {
     match kind {
@@ -103,7 +103,7 @@ pub fn revision_guidance(kind: Option<MismatchKind>) -> &'static str {
     }
 }
 
-/// Append revision guidance to a deterministic `next_action`.
+/// Append revision guidance to a `next_action` or loop notice.
 ///
 /// An empty base yields the guidance alone so callers never emit a leading
 /// separator without content.

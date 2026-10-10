@@ -44,9 +44,12 @@ Empty searches are evidence of absence within the queried scope, so retries shou
 For optional tooling, inspect the declared project/CI commands and check availability once; report an unavailable check
 as skipped and continue. A failure from an available checker still needs to be resolved.
 
-Frame work as hypothesis, compare observation, on mismatch inspect evidence and revise hypothesis before retrying;
-never retry an unchanged approach. A mismatch (non-zero exit, empty search, patch context-mismatch, verifier fail,
-repeated evidence) requires a targeted re-read or spool page before the next mutation.
+VT Code's compiled agent guidance names the HOVER loop: **Hypothesize → Observe → Verify → Evaluate → Revise → Repeat**.
+Use evidence to evaluate the hypothesis and continuously correct the approach. On mismatch, inspect evidence and revise
+before retrying; never retry an unchanged approach. A mismatch (non-zero exit, empty search, patch context-mismatch,
+verifier fail, repeated evidence) requires an evidence-supported corrective action. Already-visible, current evidence can
+be sufficient; obtain fresh targeted context or a spool page when evidence is stale or insufficient. Rereading alone
+is not revision.
 
 Verify edits in place. When a checker fails and a baseline comparison is useful, read the baseline files separately
 instead of stashing and restoring workspace edits. Report the failing check and baseline comparison separately; an
@@ -168,6 +171,11 @@ reference is emitted only after its file is open and has not reported a write fa
 regular-file identity, length, and digest validation. Pending live references permit only bounded, explicitly unverified
 reads. Exited sessions with an unfinished spool retain the session and defer the reference until a later wait can safely
 observe the complete file.
+
+When the spool-read guard reaches its cap, recovery retains a bounded snapshot of the spool prefix. It reads at most
+32 KiB and uses UTF-8-safe byte budgets of 8 KiB each for the snapshot's head and tail. Any omitted-byte count describes
+that snapshot, not the whole file. The feedback explicitly identifies potentially missing later content; a partial
+snapshot cannot establish command completion. Existing read caps, containment checks, and tool-free recovery still apply.
 
 Background execution is owned by `ExecSessionManager`, the single registry for pipe and PTY sessions. `exec_command`
 accepts `background: true`, and `Ctrl+B` promotes the active foreground session into the same registry without replacing

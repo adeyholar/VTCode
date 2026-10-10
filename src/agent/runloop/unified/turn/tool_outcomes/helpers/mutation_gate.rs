@@ -261,6 +261,7 @@ pub(crate) fn update_repetition_tracker(
             loop_tracker.mark_verification_complete();
         } else {
             loop_tracker.record_failed_verification();
+            loop_tracker.verifier_failed_notice_pending = true;
         }
         loop_tracker.reset_navigation_window(true);
         return exit_code != 0;
@@ -364,6 +365,9 @@ pub(crate) fn update_repetition_tracker(
                     // opens the fix-up window. Tool-level Failure/Timeout (never
                     // executed, e.g. argument errors) must not grant edits.
                     loop_tracker.record_failed_verification();
+                    loop_tracker.verifier_failed_notice_pending = matches!(&outcome.status,
+                        ToolExecutionStatus::Success { output, .. }
+                            if output.get("exit_code").and_then(serde_json::Value::as_i64).is_some_and(|code| code != 0));
                     loop_tracker.reset_navigation_window(low_signal_family.is_none());
                     return true;
                 } else if loop_tracker.verification_is_pending()

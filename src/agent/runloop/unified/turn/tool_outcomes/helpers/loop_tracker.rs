@@ -1,6 +1,7 @@
 //! LoopTracker: cross-tool loop, low-signal, and verification gate state.
 
 use super::*;
+use vtcode_core::core::agent::hypothesis::{MismatchKind, append_revision_guidance};
 
 /// Threshold: number of consecutive read/search operations before the Navigation
 pub(crate) const NAVIGATION_LOOP_THRESHOLD: usize = 15;
@@ -80,6 +81,8 @@ pub(crate) struct LoopTracker {
     pub auto_verification_executed: bool,
     /// Live verifier identity for this turn; a running response is not a verdict.
     pub pending_verifier_session_id: Option<String>,
+    /// Feedback for an observed terminal verifier failure, never a lost result.
+    pub(super) verifier_failed_notice_pending: bool,
     /// Counter for consecutive read/search operations without action or synthesis
     pub consecutive_navigations: usize,
     /// Number of times navigation-loop recovery has fired in this session.
@@ -127,6 +130,7 @@ impl LoopTracker {
             verification_auto_recovery_attempts: 0,
             auto_verification_executed: false,
             pending_verifier_session_id: None,
+            verifier_failed_notice_pending: false,
             consecutive_navigations: 0,
             navigation_loop_recoveries: 0,
             consecutive_low_signal_navigations: 0,
@@ -214,6 +218,29 @@ impl LoopTracker {
         }
         self.redundant_navigation_notice_emitted = true;
         true
+    }
+
+    pub(crate) fn take_verifier_failed_notice(&mut self) -> bool {
+        std::mem::take(&mut self.verifier_failed_notice_pending)
+    }
+
+    /// Both ordinary history and native provider replies use the same framing.
+    pub(crate) fn take_redundant_navigation_guidance(&mut self) -> Option<String> {
+        self.take_redundant_navigation_notice().then(|| {
+            append_revision_guidance(
+                "This inspection returned only text evidence already gathered this turn. Reuse it to edit, verify, or synthesize; read only missing or changed ranges. Do not copy a capped file to another path to evade the cap. Tools remain available under the existing limits; this notice grants no permissions, verification credit, or repair edits.",
+                Some(MismatchKind::RepeatedEvidence),
+            )
+        })
+    }
+
+    pub(crate) fn take_verifier_failed_guidance(&mut self) -> Option<String> {
+        self.take_verifier_failed_notice().then(|| {
+            append_revision_guidance(
+                "The verifier reported a terminal non-zero exit; success remains unverified. Use the reported cause to repair within the existing limits, then obtain a terminal exit 0. This notice grants no permissions or extra repair edits.",
+                Some(MismatchKind::VerifierFailed),
+            )
+        })
     }
 
     pub(crate) fn clear_navigation_evidence(&mut self) {
@@ -436,6 +463,7 @@ impl LoopTracker {
 
     pub(super) fn mark_verification_complete(&mut self) {
         self.pending_verifier_session_id = None;
+        self.verifier_failed_notice_pending = false;
         self.consecutive_mutations = 0;
         self.verification_pending = false;
         self.fix_edits_remaining = 0;

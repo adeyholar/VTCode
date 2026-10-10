@@ -723,8 +723,13 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
     let workspace = temp.path().to_path_buf();
     let target = workspace.join("blocked.rs");
     let blocked_target = workspace.join("blocked-after-checkpoint.rs");
+    std::fs::write(workspace.join("invalid.rs"), "pub fn value() -> u8 { \"bad\" }\n").unwrap();
+    std::fs::write(workspace.join("context.txt"), "retained evidence\n").unwrap();
 
     let mut tool_registry = ToolRegistry::new(workspace).await;
+    let mut commands = tool_registry.commands_config();
+    commands.allow_list.push("sed".to_owned());
+    tool_registry.apply_commands_config(&commands);
     let tool_result_cache = Arc::new(RwLock::new(ToolResultCache::new(8)));
     let mut session = create_headless_session();
     let handle = session.clone_inline_handle();
@@ -856,6 +861,65 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
     );
 
     assert!(runtime_host.session_stats.verification_snapshot().0);
+    let response = runtime_host
+        .handle_vtcode_tool_call(
+            &mut renderer,
+            vtcode_core::copilot::CopilotToolCallRequest {
+                tool_call_id: "failed-verification-call".to_string(),
+                tool_name: vtcode_core::config::constants::tools::EXEC_COMMAND.to_string(),
+                arguments: json!({"cmd":"rustc --crate-type lib invalid.rs -o invalid.rlib"}),
+            },
+        )
+        .await
+        .unwrap();
+    let CopilotToolCallResponse::Failure(failure) = response else {
+        panic!("invalid source must fail verification");
+    };
+    assert!(
+        failure
+            .text_result_for_llm
+            .contains("The verifier reported a terminal non-zero exit")
+    );
+    assert!(failure.text_result_for_llm.contains("revise the fix hypothesis"));
+    assert!(!temp.path().join("invalid.rlib").exists());
+    assert!(runtime_host.session_stats.verification_snapshot().0);
+    assert!(!runtime_host.loop_tracker.as_deref_mut().unwrap().take_verifier_failed_notice());
+
+    for (index, command) in [
+        "sed -n '1,2p' context.txt",
+        "sed -n '1,1p' context.txt",
+        "sed -n '1,3p' context.txt",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let response = runtime_host
+            .handle_vtcode_tool_call(
+                &mut renderer,
+                vtcode_core::copilot::CopilotToolCallRequest {
+                    tool_call_id: format!("retained-evidence-{index}"),
+                    tool_name: vtcode_core::config::constants::tools::EXEC_COMMAND.to_string(),
+                    arguments: json!({"cmd":command}),
+                },
+            )
+            .await
+            .unwrap();
+        let CopilotToolCallResponse::Success(success) = response else {
+            panic!("inspection must succeed");
+        };
+        assert_eq!(
+            success
+                .text_result_for_llm
+                .contains("revise the hypothesis and change scope or approach"),
+            index == 1,
+        );
+        assert!(
+            !success
+                .text_result_for_llm
+                .contains("The verifier reported a terminal non-zero exit")
+        );
+    }
+
     let response = runtime_host
         .handle_vtcode_tool_call(
             &mut renderer,

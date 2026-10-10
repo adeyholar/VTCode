@@ -25,6 +25,7 @@ fn rejected_verifier_does_not_grant_repair_edits() {
         assert!(tracker.verification_is_pending());
         assert_eq!(tracker.fix_edits_remaining, 0);
         assert!(!tracker.take_verification_result_lost_notice());
+        assert!(!tracker.take_verifier_failed_notice());
     }
 }
 
@@ -44,6 +45,8 @@ fn running_verifier_requires_its_own_terminal_session_result() {
         assert_eq!(tracker.pending_verifier_session_id.as_deref(), Some("run-verifier"));
         assert_eq!(tracker.fix_edits_remaining, 0);
 
+        assert!(!tracker.take_verifier_failed_notice(), "running is not failed");
+
         let terminal = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
             output: json!({"exit_code": exit_code}),
             stdout: None,
@@ -57,6 +60,7 @@ fn running_verifier_requires_its_own_terminal_session_result() {
             &json!({"session_id": "run-unrelated", "action": "wait"}),
         );
         assert!(tracker.verification_is_pending(), "unrelated completion cannot verify changes");
+        assert!(!tracker.take_verifier_failed_notice(), "unrelated completion is not the verifier verdict");
         update_repetition_tracker(
             &mut tracker,
             &terminal,
@@ -65,6 +69,8 @@ fn running_verifier_requires_its_own_terminal_session_result() {
         );
         assert_eq!(tracker.verification_is_pending(), exit_code != 0);
         assert!(tracker.pending_verifier_session_id.is_none());
+        assert_eq!(tracker.take_verifier_failed_notice(), exit_code != 0);
+        assert!(!tracker.take_verifier_failed_notice(), "terminal feedback is consumed once");
         assert_eq!(
             tracker.fix_edits_remaining,
             if exit_code == 0 {
@@ -576,6 +582,7 @@ fn pure_and_chained_verifiers_are_admitted_and_clear_gate() {
     tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
     tracker.verification_result_lost_notice_pending = true;
     tracker.piped_verification_notice_pending = true;
+    tracker.verifier_failed_notice_pending = true;
     for command in [
         "cargo fmt --all -- --check && cargo check --locked",
         "cargo check --locked && cargo nextest run --locked -p vtcode-ui",
@@ -603,6 +610,7 @@ fn pure_and_chained_verifiers_are_admitted_and_clear_gate() {
     assert_eq!(tracker.consecutive_mutations, 0);
     assert!(!tracker.take_verification_result_lost_notice());
     assert!(!tracker.take_piped_verification_notice());
+    assert!(!tracker.take_verifier_failed_notice());
 }
 
 #[test]

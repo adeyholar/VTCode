@@ -2,13 +2,34 @@
 
 use serde_json::Value;
 use vtcode_commons::ErrorCategory;
-use vtcode_core::core::agent::hypothesis::{MismatchEvidence, append_revision_guidance, classify_mismatch};
+use vtcode_core::core::agent::hypothesis::{MismatchEvidence, MismatchKind, classify_mismatch};
 use vtcode_core::tools::names::is_apply_patch_shell_collision_command;
 use vtcode_core::tools::registry::ToolExecutionError;
 
 use super::ToolFailureDiagnosis;
 use super::evidence::bounded_field;
 use crate::agent::runloop::unified::turn::tool_outcomes::is_grep_style_no_match;
+
+pub(super) fn output_mismatch(tool_name: &str, args: &Value, output: &Value) -> Option<MismatchKind> {
+    use vtcode_core::tools::tool_intent::{ShellActivity, classify_shell_activity, shell_args_as_executed};
+
+    let exit_code = output.get("exit_code").and_then(Value::as_i64);
+    let executed = shell_args_as_executed(tool_name, args);
+    classify_mismatch(&MismatchEvidence {
+        exit_code,
+        empty_search_no_match: is_grep_style_no_match(tool_name, args, output),
+        verifier_failed: exit_code.is_some_and(|code| code != 0)
+            && matches!(classify_shell_activity(tool_name, &executed), ShellActivity::Verification),
+        ..Default::default()
+    })
+}
+
+pub(super) fn error_mismatch(error: &ToolExecutionError) -> Option<MismatchKind> {
+    classify_mismatch(&MismatchEvidence {
+        patch_mismatch: error.patch_context_mismatch_path().is_some(),
+        ..Default::default()
+    })
+}
 
 pub(crate) fn deterministic_preflight_diagnosis(
     tool_name: &str,
@@ -66,11 +87,7 @@ pub(crate) fn deterministic_output_diagnosis(tool_name: &str, args: &Value, outp
     let apply_patch_collision = command.as_deref().is_some_and(is_apply_patch_shell_collision_command)
         && (exit_code == Some(127) || command_not_found);
 
-    let mismatch_kind = classify_mismatch(&MismatchEvidence {
-        exit_code,
-        empty_search_no_match: grep_no_match,
-        ..Default::default()
-    });
+    let mismatch_kind = output_mismatch(&tool_name, args, output);
 
     let mut observed = match exit_code {
         Some(code) => format!("'{tool_name}' returned exit code {code}."),
@@ -117,7 +134,7 @@ pub(crate) fn deterministic_output_diagnosis(tool_name: &str, args: &Value, outp
     };
 
     let mut diagnosis =
-        ToolFailureDiagnosis::new(observed, likely_cause, append_revision_guidance(next_action, mismatch_kind));
+        ToolFailureDiagnosis::new(observed, likely_cause, next_action).with_revision_guidance(mismatch_kind);
     diagnosis.no_matches = grep_no_match;
     diagnosis
 }
@@ -132,29 +149,20 @@ pub(crate) fn deterministic_error_diagnosis(error: &ToolExecutionError, failure_
         error.category.user_label(),
         error_message
     );
-    let mismatch_kind = classify_mismatch(&MismatchEvidence {
-        patch_mismatch: error.patch_context_mismatch_path().is_some(),
-        ..Default::default()
-    });
+    let mismatch_kind = error_mismatch(error);
     if error.patch_context_mismatch_path().is_some() {
         return ToolFailureDiagnosis::new(
             observed,
             "The patch context or deletion lines do not match the current file exactly.",
-            append_revision_guidance(
-                "Use one fresh file read (1-200 lines) or single sed -n range of the affected path, then retry apply_patch with exact current context.",
-                mismatch_kind,
-            ),
-        );
+            "Use one fresh file read (1-200 lines) or single sed -n range of the affected path, then retry apply_patch with exact current context.",
+        ).with_revision_guidance(mismatch_kind);
     }
     if error.is_exec_session_not_found() {
         return ToolFailureDiagnosis::new(
             observed,
             "The supplied exec session ID is absent from this runtime; this does not establish the command's outcome.",
-            append_revision_guidance(
-                "Recover the exact session ID from the original response. If completion is recorded, reuse its output. Rerun only if fresh execution is still needed.",
-                mismatch_kind,
-            ),
-        );
+            "Recover the exact session ID from the original response. If completion is recorded, reuse its output. Rerun only if fresh execution is still needed.",
+        ).with_revision_guidance(mismatch_kind);
     }
     if let Some(correction) =
         vtcode_core::tools::error_messages::agent_execution::preflight_policy_correction(&error_message)
@@ -162,7 +170,7 @@ pub(crate) fn deterministic_error_diagnosis(error: &ToolExecutionError, failure_
         return ToolFailureDiagnosis::new(
             observed,
             "The requested action was rejected by planning or command security policy.",
-            append_revision_guidance(correction, mismatch_kind),
+            correction,
         );
     }
     let likely_cause = match error.category {
@@ -215,7 +223,12 @@ pub(crate) fn deterministic_error_diagnosis(error: &ToolExecutionError, failure_
         ErrorCategory::Cancelled => "Wait for a new turn and retry only if the requested operation is still needed.",
         ErrorCategory::ExecutionError => "Inspect the bounded error evidence and retry with corrected arguments.",
     };
-    ToolFailureDiagnosis::new(observed, likely_cause, append_revision_guidance(next_action, mismatch_kind))
+    let diagnosis = ToolFailureDiagnosis::new(observed, likely_cause, next_action);
+    if is_safeguard_failure(error) || error.category == ErrorCategory::Cancelled {
+        diagnosis
+    } else {
+        diagnosis.with_revision_guidance(mismatch_kind)
+    }
 }
 
 pub(super) fn is_policy_sensitive(category: ErrorCategory) -> bool {
@@ -233,6 +246,7 @@ pub(super) fn is_policy_sensitive(category: ErrorCategory) -> bool {
 
 pub(super) fn is_deterministic_only_error(error: &ToolExecutionError) -> bool {
     error.patch_failure.is_some()
+        || error.category == ErrorCategory::Cancelled
         || error.is_exec_session_not_found()
         || is_safeguard_failure(error)
         || matches!(error.category, ErrorCategory::InvalidParameters | ErrorCategory::ToolNotFound)

@@ -418,14 +418,14 @@ impl<'a> CopilotRuntimeHost<'a> {
             self.harness_state.record_failed_tool_call();
         }
 
-        match pipeline_outcome.status {
+        let mut response = match pipeline_outcome.status {
             ToolExecutionStatus::Success { output, command_success, .. } if command_success => {
                 let text_result = last_stdout
                     .filter(|s: &String| !s.trim().is_empty())
                     .unwrap_or_else(|| serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string()));
-                Ok(CopilotToolCallResponse::Success(CopilotToolCallSuccess {
+                CopilotToolCallResponse::Success(CopilotToolCallSuccess {
                     text_result_for_llm: copilot_tool_result_text(&canonical_tool_name, text_result),
-                }))
+                })
             }
             ToolExecutionStatus::Success { output, .. } => {
                 let diagnosis = deterministic_output_diagnosis(&canonical_tool_name, &effective_arguments, &output);
@@ -437,7 +437,7 @@ impl<'a> CopilotRuntimeHost<'a> {
                     &diagnosis,
                 );
                 let evidence = bounded_output_evidence(&canonical_tool_name, &effective_arguments, &output);
-                Ok(copilot_failure_response_with_diagnosis(
+                copilot_failure_response_with_diagnosis(
                     &canonical_tool_name,
                     &evidence,
                     &format!(
@@ -445,7 +445,7 @@ impl<'a> CopilotRuntimeHost<'a> {
                         canonical_tool_name, diagnosis.likely_cause
                     ),
                     &diagnosis,
-                ))
+                )
             }
             ToolExecutionStatus::Failure { error } => {
                 let diagnosis = deterministic_error_diagnosis(&error, "execution");
@@ -457,12 +457,12 @@ impl<'a> CopilotRuntimeHost<'a> {
                     &diagnosis,
                 );
                 let evidence = bounded_error_evidence(&canonical_tool_name, &effective_arguments, &error, "execution");
-                Ok(copilot_failure_response_with_diagnosis(
+                copilot_failure_response_with_diagnosis(
                     &canonical_tool_name,
                     &evidence,
                     &format!("tool '{canonical_tool_name}' failed: {}", error.message),
                     &diagnosis,
-                ))
+                )
             }
             ToolExecutionStatus::Timeout { error } => {
                 let diagnosis = deterministic_error_diagnosis(&error, "timeout");
@@ -474,15 +474,26 @@ impl<'a> CopilotRuntimeHost<'a> {
                     &diagnosis,
                 );
                 let evidence = bounded_error_evidence(&canonical_tool_name, &effective_arguments, &error, "timeout");
-                Ok(copilot_failure_response_with_diagnosis(
+                copilot_failure_response_with_diagnosis(
                     &canonical_tool_name,
                     &evidence,
                     &format!("tool '{canonical_tool_name}' timed out: {}", error.message),
                     &diagnosis,
-                ))
+                )
             }
-            ToolExecutionStatus::Cancelled => Ok(tool_cancelled_response(&canonical_tool_name)),
+            ToolExecutionStatus::Cancelled => return Ok(tool_cancelled_response(&canonical_tool_name)),
+        };
+        // Native ACP replies bypass the ordinary history flush. Consume the
+        // same notices here after the outcome; cancelled work returns above.
+        if let Some(loop_tracker) = self.loop_tracker.as_deref_mut() {
+            if let Some(guidance) = loop_tracker.take_redundant_navigation_guidance() {
+                response = append_tool_reply_guidance(response, &guidance);
+            }
+            if let Some(guidance) = loop_tracker.take_verifier_failed_guidance() {
+                response = append_tool_reply_guidance(response, &guidance);
+            }
         }
+        Ok(response)
     }
 
     async fn prepare_vtcode_tool_execution(
@@ -1130,9 +1141,13 @@ fn append_session_limit_grant_guidance(
         return response;
     }
 
+    append_tool_reply_guidance(response, SESSION_LIMIT_GRANT_DIRECTIVE)
+}
+
+fn append_tool_reply_guidance(response: CopilotToolCallResponse, guidance: &str) -> CopilotToolCallResponse {
     let append_guidance = |text: &mut String| {
         text.push_str("\n\n");
-        text.push_str(SESSION_LIMIT_GRANT_DIRECTIVE);
+        text.push_str(guidance);
     };
 
     match response {

@@ -235,7 +235,7 @@ pub fn default_code_rubric_with_hypothesis_revision() -> EvaluationRubric {
     rubric
 }
 
-/// Score hypothesis-revision behavior from harness-observed counts.
+/// Count-based heuristic for hypothesis-revision behavior, not proof of revision.
 ///
 /// - `stubborn_retries`: retries with unchanged arguments and no new evidence.
 /// - `evidence_rereads`: targeted re-reads or spool pages after a mismatch.
@@ -243,6 +243,8 @@ pub fn default_code_rubric_with_hypothesis_revision() -> EvaluationRubric {
 ///
 /// Returns `(score 0.0..=1.0, notes)`. A run with no mismatches scores `1.0`
 /// (vacuous pass): clean runs are not punished for having nothing to revise.
+/// Rereads alone can score fully; acceptance requires an observed mismatch,
+/// an evidence-supported corrective action, and an independent outcome check.
 pub fn score_hypothesis_revision(
     stubborn_retries: u32,
     evidence_rereads: u32,
@@ -255,9 +257,9 @@ pub fn score_hypothesis_revision(
     }
     let score = productive as f32 / total as f32;
     let notes = if score >= 0.7 {
-        "revises the hypothesis from evidence on mismatch"
+        "inspection/revision count heuristic meets threshold; corrective action unverified"
     } else {
-        "retries without revising the hypothesis"
+        "inspection/revision count heuristic below threshold; corrective action unverified"
     };
     (score.clamp(0.0, 1.0), notes)
 }
@@ -393,7 +395,7 @@ mod tests {
     fn stubborn_only_scores_zero() {
         let (score, notes) = score_hypothesis_revision(3, 0, 0);
         assert!((score - 0.0).abs() < f32::EPSILON);
-        assert!(notes.contains("without revising"));
+        assert!(notes.contains("heuristic below threshold"));
     }
 
     #[test]
@@ -403,12 +405,19 @@ mod tests {
     }
 
     #[test]
+    fn rereads_alone_remain_a_heuristic_not_proven_revision() {
+        let (score, notes) = score_hypothesis_revision(0, 3, 0);
+        assert!((score - 1.0).abs() < f32::EPSILON);
+        assert!(notes.contains("corrective action unverified"));
+    }
+
+    #[test]
     fn mixed_counts_score_proportionally() {
         let (half, _) = score_hypothesis_revision(1, 1, 0);
         assert!((half - 0.5).abs() < f32::EPSILON);
         let (three_quarters, notes) = score_hypothesis_revision(1, 2, 1);
         assert!((three_quarters - 0.75).abs() < f32::EPSILON);
-        assert!(notes.contains("revises the hypothesis"));
+        assert!(notes.contains("corrective action unverified"));
     }
 
     #[test]

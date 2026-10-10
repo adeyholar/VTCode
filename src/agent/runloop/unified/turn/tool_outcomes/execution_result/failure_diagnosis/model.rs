@@ -218,6 +218,10 @@ pub(super) fn parse_model_diagnosis(raw: &str) -> Option<ToolFailureDiagnosis> {
         return None;
     }
     let parsed = serde_json::from_str::<ModelDiagnosis>(raw.trim()).ok()?;
-    let diagnosis = ToolFailureDiagnosis::new(parsed.observed, parsed.likely_cause, parsed.next_action);
+    let diagnosis = ToolFailureDiagnosis::new(
+        parsed.observed,
+        parsed.likely_cause,
+        super::evidence::bounded_field(&parsed.next_action),
+    );
     (diagnosis.is_complete() && diagnosis.is_safe_model_output()).then_some(diagnosis)
 }
