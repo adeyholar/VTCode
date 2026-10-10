@@ -3,11 +3,18 @@
 //! Provides regex-based secret redaction for:
 //! - OpenAI API keys (`sk-...`)
 //! - AWS Access Key IDs (`AKIA...`)
+//! - GitHub App installation tokens (`ghs_...`, including ~520-char stateless JWTs)
 //! - Bearer tokens (`Bearer ...`)
 //! - Generic secret assignments (`api_key=...`, `password:...`, etc.)
 //!
 //! Use this module to sanitize text before logging, displaying in UI,
 //! or storing in session archives.
+//!
+//! GitHub App installation tokens are treated as opaque strings per
+//! <https://github.blog/changelog/2026-05-15-github-app-installation-tokens-per-request-override-header/>
+//! and <https://github.blog/changelog/2026-10-02-stateless-github-app-installation-tokens-rolled-out>:
+//! `ghs_`-prefixed JWTs (~520 chars, two dots) must not be subject to length
+//! assumptions and must be redacted even without a `Bearer` prefix.
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -17,6 +24,11 @@ static OPENAI_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"sk-[
 
 /// AWS Access Key ID pattern: AKIA followed by 16 alphanumeric characters
 static AWS_ACCESS_KEY_ID_REGEX: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"\bAKIA[0-9A-Z]{16}\b"));
+
+/// GitHub App installation token pattern (recommended by GitHub):
+/// `ghs_[A-Za-z0-9\.\-_]{36,}` matches both legacy opaque tokens (~40 chars)
+/// and stateless JWT-format tokens (~520 chars, two dots).
+static GITHUB_APP_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"ghs_[A-Za-z0-9.\-_]{36,}"));
 
 /// Bearer token pattern: "Bearer " followed by token characters
 static BEARER_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| compile_regex(r"(?i)\bBearer\s+[A-Za-z0-9.\-_]{16,}\b"));
@@ -50,14 +62,15 @@ const PROVIDER_DIAGNOSTIC_TRUNCATION_MARKER: &str = "… [diagnostic truncated]"
 pub fn redact_secrets(input: String) -> String {
     let r1 = OPENAI_KEY_REGEX.replace_all(&input, "[REDACTED_SECRET]");
     let r2 = AWS_ACCESS_KEY_ID_REGEX.replace_all(&r1, "[REDACTED_SECRET]");
-    let r3 = BEARER_TOKEN_REGEX.replace_all(&r2, "Bearer [REDACTED_SECRET]");
-    let r4 = SECRET_ASSIGNMENT_REGEX.replace_all(&r3, "$1$2$3[REDACTED_SECRET]");
+    let r3 = GITHUB_APP_TOKEN_REGEX.replace_all(&r2, "[REDACTED_SECRET]");
+    let r4 = BEARER_TOKEN_REGEX.replace_all(&r3, "Bearer [REDACTED_SECRET]");
+    let r5 = SECRET_ASSIGNMENT_REGEX.replace_all(&r4, "$1$2$3[REDACTED_SECRET]");
     // `into_owned` clones only when the final result is `Borrowed` (no regex
     // matched at all); when any redaction occurred it moves the owned string
     // without an extra allocation. Do NOT short-circuit on `Cow::Borrowed` —
     // the final Cow is `Borrowed` whenever the *last* regex doesn't match,
     // even if earlier regexes did, which would silently discard redactions.
-    r4.into_owned()
+    r5.into_owned()
 }
 
 /// Redact secrets and return a bounded, UTF-8-safe provider diagnostic.
@@ -160,6 +173,30 @@ mod tests {
         let input = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9".to_string();
         let output = redact_secrets(input);
         assert_eq!(output, "Authorization: Bearer [REDACTED_SECRET]");
+    }
+
+    #[test]
+    fn redacts_github_app_installation_tokens() {
+        // Legacy opaque format (~40 chars, no dots) and stateless JWT format
+        // (~520 chars, two dots) per May/Oct 2026 changelogs. Both must be
+        // treated as opaque and redacted even without a Bearer prefix.
+        // Fixtures are assembled at runtime so scans do not flag them.
+        let legacy = format!("{}{}", "ghs_", "a".repeat(36));
+        let header = format!("{}{}", "ghs_", "b".repeat(20));
+        let payload = format!("{}{}", "c".repeat(250), ".");
+        let signature = "d".repeat(250);
+        let stateless = format!("{header}.{payload}{signature}");
+        assert!(stateless.len() >= 500, "fixture should model ~520-char token");
+        assert_eq!(stateless.matches('.').count(), 2);
+
+        for token in [&legacy, &stateless] {
+            let bare = redact_secrets(format!("saw token {token} in logs"));
+            assert_eq!(bare, "saw token [REDACTED_SECRET] in logs");
+            assert!(!bare.contains(token.as_str()));
+
+            let bearer = redact_secrets(format!("Authorization: Bearer {token}"));
+            assert!(!bearer.contains(token.as_str()));
+        }
     }
 
     #[test]
