@@ -76,7 +76,8 @@ make no additional probe requests. The toggle persists across provider changes a
 This uses your OpenAI API billing. Decisions gets four seconds and may use one configured generation fallback within
 the shared eight-second deadline; absent usage leaves cost unknown. The TUI shows **Checking tool output...** during
 both attempts and clears it on cancellation. See the [probe guide](../development/decisions-probe.md) for evidence
-bounds, accounting, and experimental limitations.
+bounds, accounting, and experimental limitations, and the [usage guide](./decisions-probe.md) for flowcharts and
+enablement.
 
 ## Rule Grammar
 

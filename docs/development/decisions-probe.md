@@ -48,6 +48,17 @@ The idle input loop reevaluates live capability and planning after provider/sett
 session-statistics latch allows one informational suggestion, only on the interactive idle surface while disabled.
 There is no request, modal, automatic enablement, or model-facing instruction/tool schema change.
 
+```mermaid
+flowchart LR
+    Probe["runloop auto_permission/probe.rs\nshared 8s deadline, cancel,\nfallback, per-attempt accounting"] --> Trait["LLMProvider trait\nsupports_decisions /\ndecide_choice\n(default: unsupported)"]
+    Trait --> Fwd["ContextWindowProvider\nforwards both to inner"]
+    Fwd --> OpenAI["OpenAI provider\ndecisions_eligible:\nno key/endpoint overrides,\nno ChatGPT auth, ApiKey backend,\nkey set, https://api.openai.com/v1"]
+    OpenAI --> Client["Origin-bound client\nrejects redirects, existing\ntimeouts + proxy, one shot,\nno app retries"]
+    Client --> Post["POST /v1/decisions\nmodel gpt-6-luna\nchoice tool_output_injection"]
+    Post --> Validate["Validate: exactly 1 choice answer,\nname match, finite 0-1 confidence\nand per-option probabilities"]
+    Validate --> Usage["Parse usage independently;\nqueue advisory warning"]
+```
+
 ## Validation
 
 Focused regressions cover defaults/serialization, settings persistence and reload, provider switches, wrapper forwarding,

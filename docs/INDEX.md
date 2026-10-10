@@ -30,6 +30,7 @@ Last reviewed: 2026-08-28
   bounded standalone workspace bridge.
 - [Planning Workflow](guides/planning-workflow.md) - `/plan`, review gate, plan handoff to build/auto agents.
 - [Permissions Guide](guides/permissions.md) - Granular agent permissions and rule grammar.
+- [Decisions Probe Guide](guides/decisions-probe.md) - Experimental OpenAI Decisions tool-output probe usage.
 - [Provider Guides](providers/PROVIDER_GUIDES.md) - LLM provider setup and behavior.
 - [Security Model](security/SECURITY_MODEL.md) - Security architecture.
 - [Process Hardening](development/PROCESS_HARDENING.md) - Runtime hardening controls.

@@ -86,6 +86,19 @@ share the original eight-second deadline. After Decisions, there is no further m
 the dispatch and prevents fallback. V1 uses a validated choice without a confidence threshold; two inconclusive
 attempts retain the existing probe-failure behavior and execution continues.
 
+```mermaid
+flowchart TD
+    Ev["Tool output + last 2 user messages"] --> D["Decisions (4s)\nPOST /v1/decisions"]
+    D -- "SAFE" --> OK(["No warning"])
+    D -- "SUSPECT" --> Warn(["Queue warning"])
+    D -- "Inconclusive / error / timeout" --> G["Generation fallback\n(shared 8s deadline)"]
+    G -- "SAFE" --> OK
+    G -- "SUSPECT" --> Warn
+    G -- "Inconclusive" --> Keep(["Probe-failure behavior;\nexecution continues"])
+```
+
+Full lifecycle, eligibility, billing, and limitations: [Decisions probe usage guide](./decisions-probe.md).
+
 Both attempts contribute to session usage and cost, separately from prompt-cache health. Missing usage makes the
 complete cost unknown. The bounded standard-endpoint Decisions estimate uses $0.10 per million input tokens and no
 output charge. Regional and long-context premiums may apply to other usage. For example, 10,000 requests of 1,000 billed

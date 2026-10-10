@@ -335,7 +335,14 @@ impl OpenAIProvider {
 
         crate::providers::common::ensure_model(&mut request, &self.model);
 
-        if Self::requires_streaming_responses(&request.model) {
+        // The ChatGPT subscription backend (chatgpt.com/backend-api/codex)
+        // rejects non-streaming Responses requests with `400 Stream must be
+        // set to true`. `supports_non_streaming()` already reports false for
+        // that backend, but `generate` callers (planner, evaluator, skeptic
+        // panel) hardcode `stream: false`. Honor the capability here so every
+        // direct `generate` caller transparently uses the streaming path,
+        // mirroring `collect_single_response` behavior.
+        if self.is_chatgpt_backend() || Self::requires_streaming_responses(&request.model) {
             request.stream = true;
             let stream = self.stream_request(request).await?;
             return collect_streamed_response(stream).await;

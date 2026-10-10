@@ -557,6 +557,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Configuring the inline status line?", "How does Available modes
     work?", "How does Command payload structure work?"
 
+- **File**: `docs/guides/decisions-probe.md`
+  - **Content**: Decisions Probe Usage Guide
+  - **Topics**: What It Does, How the Decisions API Works, Eligibility, Probe Lifecycle, Enablement
+  - **User Questions**: "What can you tell me about Decisions Probe Usage Guide?", "How does What It Does work?", "How
+    does How the Decisions API Works work?"
+
 - **File**: `docs/guides/eval.md`
   - **Content**: Eval framework guide
   - **Topics**: One-command usage, What `--format json` emits, Authoring suites, Related
