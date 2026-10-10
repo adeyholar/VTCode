@@ -32,6 +32,9 @@ pub(super) async fn persist_selection(
     config.agent.default_model = selection.model.clone();
     config.agent.reasoning_effort = selection.reasoning;
     config.provider.openai.service_tier = synced_openai_service_tier(selection);
+    if let Some(enabled) = selection.decisions_probe {
+        config.permissions.auto_permission.use_decisions_probe = enabled;
+    }
 
     // Store MiMo auth method when provider is MiMo
     if selection.provider_enum == Some(Provider::MiMo) {
@@ -131,6 +134,8 @@ mod tests {
             service_tier_supported: false,
             service_tier: None,
             service_tier_changed: false,
+            decisions_probe: None,
+            decisions_probe_changed: false,
             api_key: None,
             credential_source: None,
             env_key: "TEST_API_KEY".to_string(),

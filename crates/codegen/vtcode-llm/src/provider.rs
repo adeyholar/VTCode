@@ -65,7 +65,7 @@ mod tool;
 pub use call::{FunctionCall, ToolCall};
 pub use decisions::{
     ChoiceDecisionAnswer, ChoiceDecisionRequest, ChoiceDecisionResponse, DECISIONS_MODEL, DecisionChoiceOption,
-    DecisionProbability,
+    DecisionProbability, is_standard_decisions_endpoint,
 };
 pub use message::{AssistantPhase, ContentPart, ImageDetail, Message, MessageClearAt, MessageContent, MessageRole};
 pub use provider_trait::{

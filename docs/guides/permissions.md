@@ -67,7 +67,8 @@ trusted_services = []
 After repeated classifier denials, VT Code falls back to manual prompts where an interactive prompt is possible.
 
 The experimental, default-off `use_decisions_probe` option is also available in `/settings` → **Approvals & Security**
-for ordinary TUI sessions with either Build or Auto selected. It requires the built-in direct OpenAI API-key provider
+for ordinary TUI sessions with either Build or Auto selected, plus an OpenAI-only `/model` follow-up when you pick a
+direct OpenAI API-key model at the standard endpoint while disabled. It requires the built-in direct OpenAI API-key provider
 at the standard endpoint, but no full-auto flag or acknowledgement profile. It classifies tool output after execution
 and queues an advisory warning for `SUSPECT`; manual approvals and explicit deny rules continue to apply before execution.
 Subscription access, gateways, custom endpoints, other providers, planning, and headless sessions outside full-auto

@@ -308,6 +308,13 @@ pub(crate) async fn finalize_model_selection(
         renderer.line(MessageStyle::Info, &message)?;
     }
 
+    if selection.decisions_probe_changed {
+        renderer.line(
+            MessageStyle::Info,
+            "Decisions probe enabled (permissions.auto.use_decisions_probe). See docs/guides/decisions-probe.md.",
+        )?;
+    }
+
     if using_chatgpt_auth {
         renderer.line(MessageStyle::Info, "Using ChatGPT subscription for OpenAI.")?;
     } else if selection.provider_enum == Some(Provider::Copilot) {
@@ -592,6 +599,8 @@ mod tests {
             service_tier_supported: false,
             service_tier: None,
             service_tier_changed: false,
+            decisions_probe: None,
+            decisions_probe_changed: false,
             api_key: api_key.map(ToString::to_string),
             credential_source: None,
             env_key: env_key.to_string(),

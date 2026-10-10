@@ -104,3 +104,26 @@ fn decisions_request_is_one_named_text_choice_and_rejects_duplicate_options() {
     request.choices[1].value = "SAFE".into();
     assert!(request.payload().is_err());
 }
+
+#[test]
+fn standard_decisions_endpoint_accepts_only_native_https_v1_origin() {
+    for accepted in ["https://api.openai.com/v1", "https://api.openai.com:443/v1/"] {
+        assert!(is_standard_decisions_endpoint(accepted), "should accept {accepted}");
+    }
+    for rejected in [
+        "",
+        "http://api.openai.com/v1",
+        "https://api.openai.com.evil.test/v1",
+        "https://evil.test/api.openai.com/v1",
+        "https://api.openai.com@evil.test/v1",
+        "https://user@api.openai.com/v1",
+        "https://api.openai.com:444/v1",
+        "https://api.openai.com/v1/gateway",
+        "https://api.openai.com/v10",
+        "https://api.openai.com/v1?x=1",
+        "https://api.openai.com/v1#x",
+        "https://api.openai.com./v1",
+    ] {
+        assert!(!is_standard_decisions_endpoint(rejected), "should reject {rejected}");
+    }
+}

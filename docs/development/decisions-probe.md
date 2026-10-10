@@ -6,7 +6,11 @@ evidence bounds, deadlines, fallback, and the advisory warning. The setting uses
 schema, `/settings` persistence, and reload flow.
 
 Enable it through `/settings` → **Approvals & Security** in an ordinary interactive TUI session. Both Build and Auto
-are eligible without a full-auto flag or acknowledgement profile. Existing enabled settings activate this path after
+are eligible without a full-auto flag or acknowledgement profile. The `/model` picker also offers an OpenAI-only
+follow-up after selecting a direct OpenAI API-key model at the standard endpoint while the toggle is off: `yes` enables,
+`no` keeps it disabled, and `skip` leaves the value unchanged. The picker mirrors the same eligibility gate as
+`supports_decisions()` (OpenAI enum, no ChatGPT subscription auth, parsed standard endpoint) without credential lookup
+or dispatch, and persists the choice with the model selection. Existing enabled settings activate this path after
 upgrade. Manual approvals and tool permissions keep their existing behavior; the output classifier is advisory.
 
 ## Implementation Boundaries
@@ -16,7 +20,8 @@ upgrade. Manual approvals and tool permissions keep their existing behavior; the
 authentication and a parsed standard HTTPS origin and `/v1` base path. Custom providers and gateways remain unsupported;
 the capability check does not look up credentials or send requests.
 
-`provider/decisions.rs` owns typed text choice requests and answer validation. OpenAI's
+`provider/decisions.rs` owns typed text choice requests, answer validation, and the shared
+`is_standard_decisions_endpoint` predicate used by both the runtime eligibility gate and the picker mirror. OpenAI's
 `provider/decisions.rs` transport uses an origin-bound client with the existing timeout and platform proxy policy and
 API key. It rejects redirects without resending evidence, fails closed if client construction fails, performs one request
 without application retries, bounds the answer body, and never incorporates evidence or error bodies into diagnostics. Refusal,

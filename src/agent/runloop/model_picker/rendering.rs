@@ -15,15 +15,17 @@ use super::selection::SelectionDetail;
 
 mod prompts;
 pub(super) use prompts::{
-    prompt_api_key_plain, prompt_custom_model_entry, prompt_mimo_auth_method_plain, prompt_reasoning_plain,
-    prompt_service_tier_plain, render_mimo_auth_method_inline, render_reasoning_inline, render_service_tier_inline,
-    show_secure_api_modal,
+    DECISIONS_PROBE_DISABLE_ACTION, DECISIONS_PROBE_ENABLE_ACTION, DECISIONS_PROBE_SKIP_ACTION, prompt_api_key_plain,
+    prompt_custom_model_entry, prompt_decisions_probe_plain, prompt_mimo_auth_method_plain, prompt_reasoning_plain,
+    prompt_service_tier_plain, render_decisions_probe_inline, render_mimo_auth_method_inline, render_reasoning_inline,
+    render_service_tier_inline, show_secure_api_modal,
 };
 
 pub(super) const CLOSE_THEME_MESSAGE: &str = "Close the active model picker before selecting a theme.";
 const STEP_ONE_TITLE: &str = "Model";
 const STEP_TWO_TITLE: &str = "Reasoning";
 const STEP_THREE_TITLE: &str = "Service Tier";
+const STEP_FOUR_TITLE: &str = "Decisions Probe";
 
 pub(super) const CUSTOM_PROVIDER_TITLE: &str = "Custom provider + model";
 pub(super) const CUSTOM_PROVIDER_SUBTITLE: &str = "Provide the provider name and model identifier manually.";

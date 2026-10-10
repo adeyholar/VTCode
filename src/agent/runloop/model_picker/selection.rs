@@ -63,6 +63,8 @@ pub(crate) struct ModelSelectionResult {
     pub(crate) service_tier_supported: bool,
     pub(crate) service_tier: Option<OpenAIServiceTier>,
     pub(crate) service_tier_changed: bool,
+    pub(crate) decisions_probe: Option<bool>,
+    pub(crate) decisions_probe_changed: bool,
     pub(crate) api_key: Option<String>,
     /// Source of a credential discovered by the central resolver. `None`
     /// means the user entered the key during this picker session.

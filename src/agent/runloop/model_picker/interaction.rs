@@ -292,3 +292,35 @@ pub(super) fn select_service_tier_with_ratatui(
 
     Ok(Some(choices[index].2))
 }
+
+pub(super) fn select_decisions_probe_with_ratatui() -> Result<Option<Option<bool>>> {
+    let choices = [
+        (
+            "Keep current (disabled)".to_string(),
+            "Leave permissions.auto.use_decisions_probe unchanged.".to_string(),
+            None,
+        ),
+        (
+            "Enable Decisions probe".to_string(),
+            "Experimental OpenAI Decisions classification for suspicious tool output. Billed to your OpenAI API account.".to_string(),
+            Some(true),
+        ),
+        (
+            "Keep disabled".to_string(),
+            "Continue with the generation probe only.".to_string(),
+            Some(false),
+        ),
+    ];
+    let entries: Vec<SelectionEntry> = choices
+        .iter()
+        .map(|(title, subtitle, _)| SelectionEntry::new(title.clone(), Some(subtitle.clone())))
+        .collect();
+    let instructions =
+        "Enable the experimental Decisions probe? Esc keeps the current setting. See docs/guides/decisions-probe.md."
+            .to_string();
+    let selection_index = run_interactive_selection("Decisions probe", &instructions, &entries, 0)?;
+    let Some(index) = selection_index else {
+        return Ok(None);
+    };
+    Ok(Some(choices[index].2))
+}

@@ -11,7 +11,7 @@ use super::super::selection::{
     SelectionDetail, available_service_tiers, reasoning_level_description, reasoning_level_label,
     service_tier_choice_meta, service_tier_label,
 };
-use super::{KEEP_CURRENT_DESCRIPTION, STEP_THREE_TITLE, STEP_TWO_TITLE};
+use super::{KEEP_CURRENT_DESCRIPTION, STEP_FOUR_TITLE, STEP_THREE_TITLE, STEP_TWO_TITLE};
 use vtcode_commons::modal_hints::MODEL_PICKER_FOLLOW_UP_HINT;
 
 fn back_to_model_list_row() -> InlineListItem {
@@ -353,6 +353,59 @@ pub(crate) fn prompt_mimo_auth_method_plain(renderer: &mut AnsiRenderer) -> Resu
     renderer.line(
         MessageStyle::Info,
         "Note: Token Plan defaults to Europe cluster (token-plan-ams). Set MIMO_TOKEN_PLAN_BASE_URL to use China (token-plan-cn) or Singapore (token-plan-sgp).",
+    )?;
+    Ok(())
+}
+
+pub(crate) const DECISIONS_PROBE_ENABLE_ACTION: &str = "decisions-probe:enable";
+pub(crate) const DECISIONS_PROBE_DISABLE_ACTION: &str = "decisions-probe:disable";
+pub(crate) const DECISIONS_PROBE_SKIP_ACTION: &str = "decisions-probe:skip";
+
+pub(crate) fn render_decisions_probe_inline(renderer: &mut AnsiRenderer, selection: &SelectionDetail) -> Result<()> {
+    let items = vec![
+        back_to_model_list_row(),
+        vtcode_ui::design::list::current_choice(
+            "Keep current (disabled)",
+            Some("Leave permissions.auto.use_decisions_probe unchanged.".to_string()),
+            Some(InlineListSelection::ConfigAction(DECISIONS_PROBE_SKIP_ACTION.to_string())),
+        ),
+        vtcode_ui::design::list::choice(
+            "Enable Decisions probe",
+            Some("Experimental OpenAI Decisions classification for suspicious tool output. Billed to your OpenAI API account.".to_string()),
+            Some(InlineListSelection::ConfigAction(DECISIONS_PROBE_ENABLE_ACTION.to_string())),
+        ),
+        vtcode_ui::design::list::choice(
+            "Keep disabled",
+            Some("Continue with the generation probe only.".to_string()),
+            Some(InlineListSelection::ConfigAction(DECISIONS_PROBE_DISABLE_ACTION.to_string())),
+        ),
+    ];
+    renderer.show_list_modal_with_footer(
+        STEP_FOUR_TITLE,
+        vec![
+            format!("Selected: {}", selection.model_display),
+            "Experimental, default-off. OpenAI API-key at the standard endpoint only.".to_string(),
+            "See docs/guides/decisions-probe.md for costs and limits.".to_string(),
+        ],
+        items,
+        Some(InlineListSelection::ConfigAction(DECISIONS_PROBE_SKIP_ACTION.to_string())),
+        None,
+        Some(MODEL_PICKER_FOLLOW_UP_HINT.to_string()),
+    );
+    Ok(())
+}
+
+pub(crate) fn prompt_decisions_probe_plain(renderer: &mut AnsiRenderer, selection: &SelectionDetail) -> Result<()> {
+    renderer.line(
+        MessageStyle::Info,
+        &format!(
+            "Decisions probe for {} ({}): type 'yes' to enable, 'no' to keep disabled, or 'skip' to leave unchanged.",
+            selection.model_display, selection.model_id
+        ),
+    )?;
+    renderer.line(
+        MessageStyle::Info,
+        "Experimental, default-off. OpenAI API-key at the standard endpoint only; billed to your OpenAI API account. See docs/guides/decisions-probe.md.",
     )?;
     Ok(())
 }

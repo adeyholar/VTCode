@@ -115,6 +115,9 @@ use_decisions_probe = false
 
 - Interactive TUI: `/settings` → **Approvals & Security**, works with Build or Auto selected, no full-auto flag or
   acknowledgement profile required.
+- `/model` offers an OpenAI-only follow-up when you pick a direct OpenAI API-key model at the standard endpoint
+  while the toggle is disabled: `yes` enables it, `no` keeps it disabled, `skip` leaves it unchanged. Other
+  providers, ChatGPT subscription auth, and custom endpoints skip the prompt.
 - The toggle persists across provider changes and settings reloads via the ordinary configuration layers.
 - While disabled, an eligible interactive session shows one informational suggestion at an idle boundary. It sends no
   API request and does not enable the option.

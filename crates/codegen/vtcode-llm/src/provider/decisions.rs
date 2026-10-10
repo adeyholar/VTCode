@@ -9,6 +9,26 @@ use super::{LLMError, Usage};
 /// The model supported by the experimental Decisions endpoint.
 pub const DECISIONS_MODEL: &str = "gpt-6-luna";
 
+/// Whether `base_url` is the direct standard OpenAI endpoint Decisions requires.
+///
+/// Shared by the runtime `OpenAIProvider::decisions_eligible` gate and the
+/// `/model` picker's non-I/O eligibility mirror, so the two cannot drift. Empty
+/// input is not standard: callers that treat "no override" as eligible must
+/// filter empties before calling this.
+pub fn is_standard_decisions_endpoint(base_url: &str) -> bool {
+    let Ok(url) = url::Url::parse(base_url) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.host_str() == Some("api.openai.com")
+        && url.port_or_known_default() == Some(443)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && matches!(url.path(), "/v1" | "/v1/")
+        && url.query().is_none()
+        && url.fragment().is_none()
+}
+
 /// One supplied text category and its meaning.
 #[derive(Debug, Clone, Serialize)]
 pub struct DecisionChoiceOption {

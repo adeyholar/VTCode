@@ -8,9 +8,9 @@
 //! | `selection` | `SelectionDetail` construction from options, dynamic entries, custom providers, or raw input | `SelectionDetail`, `parse_model_selection`, `selection_from_option`, `selection_from_dynamic`, `selections_from_custom_provider` |
 //! | `dynamic_models` | Dynamic model inventory (Ollama, LM Studio, LlamaCpp, Copilot) with cache | `DynamicModelRegistry` |
 //! | `rendering` | Step-one list rendering (inline + plain) | `render_step_one_inline`, `render_step_one_plain`, `custom_provider_subtitle`, `static_model_subtitle`, `dynamic_model_subtitle` |
-//! | `rendering/prompts` | Per-step prompt text (reasoning, API key, service tier, MiMo auth) | `render_reasoning_inline`, `prompt_reasoning_plain`, `show_secure_api_modal`, `prompt_api_key_plain`, `render_service_tier_inline`, `prompt_service_tier_plain`, `render_mimo_auth_method_inline`, `prompt_mimo_auth_method_plain` |
-//! | `interaction` | Ratatui interactive list selection for reasoning, service tier, model list | `select_model_with_ratatui_list`, `select_reasoning_with_ratatui`, `select_service_tier_with_ratatui` |
-//! | `state_machine` | Step-transition logic: model → reasoning → MiMo auth → service tier → API key | `process_model_selection`, `handle_reasoning`, `handle_mimo_auth_method`, `handle_service_tier`, `handle_api_key`, `build_result` |
+//! | `rendering/prompts` | Per-step prompt text (reasoning, API key, service tier, MiMo auth, Decisions probe) | `render_reasoning_inline`, `prompt_reasoning_plain`, `show_secure_api_modal`, `prompt_api_key_plain`, `render_service_tier_inline`, `prompt_service_tier_plain`, `render_mimo_auth_method_inline`, `prompt_mimo_auth_method_plain`, `render_decisions_probe_inline`, `prompt_decisions_probe_plain` |
+//! | `interaction` | Ratatui interactive list selection for reasoning, service tier, model list, Decisions probe | `select_model_with_ratatui_list`, `select_reasoning_with_ratatui`, `select_service_tier_with_ratatui`, `select_decisions_probe_with_ratatui` |
+//! | `state_machine` | Step-transition logic: model → reasoning → MiMo auth → service tier → API key → Decisions probe | `process_model_selection`, `handle_reasoning`, `handle_mimo_auth_method`, `handle_service_tier`, `handle_api_key`, `handle_decisions_probe`, `build_result` |
 //! | `config_persistence` | Persisting completed selection to `vtcode.toml` | `persist_selection` |
 //!
 //! ## State machine contract
@@ -18,8 +18,12 @@
 //! `ModelPickerState` is the single owner of picker state. Step transitions follow this order:
 //!
 //! ```text
-//! AwaitModel -> AwaitReasoning -> AwaitMiMoAuthMethod -> AwaitServiceTier -> AwaitApiKey -> Completed
+//! AwaitModel -> AwaitReasoning -> AwaitMiMoAuthMethod -> AwaitServiceTier -> AwaitApiKey -> AwaitDecisionsProbe -> Completed
 //! ```
+//!
+//! `AwaitDecisionsProbe` runs only for eligible OpenAI API-key selections at the
+//! standard endpoint while `permissions.auto.use_decisions_probe` is disabled;
+//! all other routes complete directly. See `docs/guides/decisions-probe.md`.
 //!
 //! Each step returns `ModelPickerProgress::InProgress` to stay in the picker,
 //! `Completed(result)` to finish, `Cancelled` to abort, or `NeedsRefresh` to reload dynamic models.
@@ -46,16 +50,17 @@ use vtcode_ui::tui::ui::interactive_list::SelectionInterrupted;
 
 use crate::agent::runloop::unified::state::CtrlCState;
 use interaction::{
-    ModelSelectionListOutcome, select_model_with_ratatui_list, select_reasoning_with_ratatui,
-    select_service_tier_with_ratatui,
+    ModelSelectionListOutcome, select_decisions_probe_with_ratatui, select_model_with_ratatui_list,
+    select_reasoning_with_ratatui, select_service_tier_with_ratatui,
 };
 use options::{
     ModelOption, build_filtered_options, find_option_index, picker_provider_order, picker_provider_order_with_whitelist,
 };
 use rendering::{
-    CLOSE_THEME_MESSAGE, prompt_api_key_plain, prompt_custom_model_entry, prompt_mimo_auth_method_plain,
-    prompt_reasoning_plain, prompt_service_tier_plain, render_mimo_auth_method_inline, render_reasoning_inline,
-    render_service_tier_inline, render_step_one_inline, render_step_one_plain, show_secure_api_modal,
+    CLOSE_THEME_MESSAGE, prompt_api_key_plain, prompt_custom_model_entry, prompt_decisions_probe_plain,
+    prompt_mimo_auth_method_plain, prompt_reasoning_plain, prompt_service_tier_plain, render_decisions_probe_inline,
+    render_mimo_auth_method_inline, render_reasoning_inline, render_service_tier_inline, render_step_one_inline,
+    render_step_one_plain, show_secure_api_modal,
 };
 #[cfg(test)]
 use rendering::{dynamic_model_subtitle, model_search_value, static_model_subtitle};
@@ -106,6 +111,7 @@ enum PickerStep {
     AwaitMiMoAuthMethod,
     AwaitServiceTier,
     AwaitApiKey,
+    AwaitDecisionsProbe,
 }
 
 pub(crate) enum ModelPickerProgress {
@@ -126,6 +132,7 @@ pub(crate) struct PickerSettings {
     provider_order: Vec<Provider>,
     current_reasoning: ReasoningEffortLevel,
     current_service_tier: Option<OpenAIServiceTier>,
+    current_decisions_probe: bool,
     current_provider: String,
     current_model: String,
 }
@@ -139,6 +146,7 @@ pub(crate) struct ModelPickerState {
     selected_reasoning: Option<ReasoningEffortLevel>,
     selected_service_tier: Option<Option<OpenAIServiceTier>>,
     selected_mimo_auth: Option<MiMoAuthMethod>,
+    selected_decisions_probe: Option<bool>,
     pending_api_key: Option<String>,
     pending_credential_source: Option<vtcode_config::api_keys::CredentialSource>,
     plain_mode_active: bool,
@@ -191,6 +199,10 @@ impl ModelPickerState {
             })
             .unwrap_or_default();
 
+        let current_decisions_probe = vt_cfg
+            .as_ref()
+            .map(|cfg| cfg.permissions.auto_permission.use_decisions_probe)
+            .unwrap_or(false);
         let settings = PickerSettings {
             options,
             inline_enabled,
@@ -201,6 +213,7 @@ impl ModelPickerState {
             provider_order,
             current_reasoning,
             current_service_tier,
+            current_decisions_probe,
             current_provider,
             current_model,
         };
@@ -213,6 +226,7 @@ impl ModelPickerState {
             selected_reasoning: None,
             selected_service_tier: None,
             selected_mimo_auth: None,
+            selected_decisions_probe: None,
             pending_api_key: None,
             pending_credential_source: None,
             dynamic_models,
@@ -274,6 +288,7 @@ impl ModelPickerState {
         self.selected_reasoning = None;
         self.selected_service_tier = None;
         self.selected_mimo_auth = None;
+        self.selected_decisions_probe = None;
         self.pending_api_key = None;
         self.pending_credential_source = None;
         self.status_wait = None;
@@ -312,6 +327,7 @@ impl ModelPickerState {
         self.selected_reasoning = None;
         self.selected_service_tier = None;
         self.selected_mimo_auth = None;
+        self.selected_decisions_probe = None;
         self.pending_api_key = None;
         self.pending_credential_source = None;
         if self.settings.inline_enabled {
@@ -359,6 +375,7 @@ impl ModelPickerState {
             PickerStep::AwaitMiMoAuthMethod => self.handle_mimo_auth_method(renderer, trimmed),
             PickerStep::AwaitServiceTier => self.handle_service_tier(renderer, trimmed),
             PickerStep::AwaitApiKey => self.handle_api_key(renderer, trimmed, url_guard).await,
+            PickerStep::AwaitDecisionsProbe => self.handle_decisions_probe(renderer, trimmed),
         }
     }
 
@@ -628,6 +645,31 @@ impl ModelPickerState {
                 renderer.line(MessageStyle::Info, "Enter the API key in the input field or type 'skip'.")?;
                 Ok(ModelPickerProgress::InProgress)
             }
+            PickerStep::AwaitDecisionsProbe => match choice {
+                InlineListSelection::ConfigAction(action) if action == rendering::PICKER_BACK_ACTION => {
+                    self.back_to_model_list(renderer)
+                }
+                InlineListSelection::ConfigAction(action) if action == rendering::DECISIONS_PROBE_ENABLE_ACTION => {
+                    self.apply_decisions_probe_choice(Some(true))
+                }
+                InlineListSelection::ConfigAction(action) if action == rendering::DECISIONS_PROBE_DISABLE_ACTION => {
+                    self.apply_decisions_probe_choice(Some(false))
+                }
+                InlineListSelection::ConfigAction(action) if action == rendering::DECISIONS_PROBE_SKIP_ACTION => {
+                    self.apply_decisions_probe_choice(None)
+                }
+                InlineListSelection::Theme(_) => {
+                    renderer.line(MessageStyle::Error, CLOSE_THEME_MESSAGE)?;
+                    Ok(ModelPickerProgress::InProgress)
+                }
+                _ => {
+                    renderer.line(
+                        MessageStyle::Error,
+                        "Decisions selection is active. Choose an option or press Esc to cancel.",
+                    )?;
+                    Ok(ModelPickerProgress::InProgress)
+                }
+            },
         }
     }
 

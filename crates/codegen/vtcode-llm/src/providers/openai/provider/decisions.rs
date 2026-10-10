@@ -2,7 +2,7 @@
 
 use super::super::backend_setup::OpenAIBackendKind;
 use super::OpenAIProvider;
-use crate::provider::{ChoiceDecisionRequest, ChoiceDecisionResponse, LLMError};
+use crate::provider::{ChoiceDecisionRequest, ChoiceDecisionResponse, LLMError, is_standard_decisions_endpoint};
 
 impl OpenAIProvider {
     pub(super) fn decisions_eligible(&self) -> bool {
@@ -12,7 +12,7 @@ impl OpenAIProvider {
             && self.openai_chatgpt_auth.is_none()
             && matches!(self.backend_setup.kind(), OpenAIBackendKind::ApiKey)
             && !self.api_key.trim().is_empty()
-            && standard_decisions_base(&self.base_url)
+            && is_standard_decisions_endpoint(&self.base_url)
     }
 
     pub(super) async fn decide_choice_request(
@@ -32,20 +32,6 @@ impl OpenAIProvider {
         )
         .await
     }
-}
-
-fn standard_decisions_base(base_url: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(base_url) else {
-        return false;
-    };
-    url.scheme() == "https"
-        && url.host_str() == Some("api.openai.com")
-        && url.port_or_known_default() == Some(443)
-        && url.username().is_empty()
-        && url.password().is_none()
-        && matches!(url.path(), "/v1" | "/v1/")
-        && url.query().is_none()
-        && url.fragment().is_none()
 }
 
 fn decisions_error(message: &str) -> LLMError {
