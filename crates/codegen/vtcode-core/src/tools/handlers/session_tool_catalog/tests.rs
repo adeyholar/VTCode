@@ -1641,10 +1641,13 @@ fn lean_defaults_defer_planner_and_skills_tools_outside_planning() {
         tools::APPLY_PATCH,
         tools::CODE_SEARCH,
         tools::GREP_FILE,
-    ];
-    let deferrable = [
+        // Workflow-coordination control-plane tools stay directly callable in
+        // every mode: full-auto references them in `allowed_tools` and OpenAI
+        // rejects deferred references with 400 "not found in 'tools'".
         tools::TASK_TRACKER,
         tools::START_PLANNING,
+    ];
+    let deferrable = [
         tools::AGENT,
         tools::LIST_SKILLS,
         tools::LOAD_SKILL,
@@ -1706,6 +1709,75 @@ fn lean_defaults_defer_planner_and_skills_tools_outside_planning() {
             "{name} must stay eager while planning is active"
         );
     }
+}
+
+#[test]
+fn workflow_coordination_tools_stay_eager_under_hosted_deferral_outside_planning() {
+    // Regression guard for full-auto turn 1 on OpenAI (gpt-6-luna,
+    // gpt-5.6-sol): `task_tracker`/`start_planning` deferred outside planning
+    // made the Responses `allowed_tools` reference unresolvable, and the
+    // backend rejected the request with 400 "Tool choice 'task_tracker' not
+    // found in 'tools' parameter". Workflow-coordination tools bypass the
+    // full-auto allow-list, so they must stay directly callable in every
+    // mode without a prior discovery round-trip.
+    let registrations = [tools::TASK_TRACKER, tools::START_PLANNING, tools::AGENT]
+        .into_iter()
+        .map(|name| {
+            registration(name)
+                .with_description("tool")
+                .with_parameter_schema(empty_object_schema())
+        })
+        .collect::<Vec<_>>();
+    let catalog = SessionToolCatalog::rebuild_from_registrations(registrations);
+    let policy = DeferredToolPolicy::openai_hosted(Vec::<String>::new());
+    let caps = ToolModelCapabilities { supports_apply_patch_tool: true };
+    // Real full-auto runs under the AdvancedVtCode profile, where these tools
+    // are visible: assert through `model_tools` (not just raw entries) so the
+    // guard also fails if the tools ever drop out of the visible catalog.
+    let execution_config = SessionToolsConfig::full_public(
+        SessionSurface::AgentRunner,
+        CapabilityLevel::CodeSearch,
+        ToolDocumentationMode::Full,
+        caps,
+    )
+    .with_tool_profile(ToolProfile::AdvancedVtCode)
+    .with_deferred_tool_policy(policy);
+
+    for name in [tools::TASK_TRACKER, tools::START_PLANNING] {
+        let entry = catalog
+            .entries()
+            .iter()
+            .find(|entry| entry.public_name == name)
+            .unwrap_or_else(|| panic!("missing {name}"));
+        assert!(
+            !should_defer_tool_loading(entry, &execution_config),
+            "{name} must stay eager outside planning so allowed_tools references resolve"
+        );
+    }
+
+    // Non-workflow tools keep the lean-defaults deferral outside planning.
+    let entry = catalog
+        .entries()
+        .iter()
+        .find(|entry| entry.public_name == tools::AGENT)
+        .expect("missing agent");
+    assert!(should_defer_tool_loading(entry, &execution_config), "agent must still defer outside planning");
+
+    // End-to-end through the real pipeline: the workflow tools must reach the
+    // wire catalog as eager definitions (no `defer_loading` marker), with the
+    // hosted discovery tool present for the still-deferred `agent` tool.
+    let wire = catalog.model_tools(execution_config);
+    for name in [tools::TASK_TRACKER, tools::START_PLANNING] {
+        let tool = wire
+            .iter()
+            .find(|tool| tool.function_name() == name)
+            .unwrap_or_else(|| panic!("{name} must be visible in model_tools under AdvancedVtCode"));
+        assert!(tool.defer_loading.is_none(), "{name} must be eager on the wire so allowed_tools references resolve");
+    }
+    assert!(
+        wire.iter().any(|tool| tool.is_tool_search()),
+        "hosted tool_search must be injected while deferrable tools remain"
+    );
 }
 
 #[test]

@@ -889,11 +889,19 @@ fn is_core_tool_entry(entry: &ToolCatalogEntry, config: &SessionToolsConfig) -> 
         | tools::SEARCH_TOOLS
         | tools::CODE_SEARCH
         | tools::GREP_FILE
-        | tools::MATRIX => true,
-        // Planning keeps its workflow surface on the wire even when MCP tools
-        // force deferral. Structured search (code_search/grep_file) is
-        // always-eager above; read_file/list_files stay planning-only.
-        tools::TASK_TRACKER | tools::START_PLANNING if config.planning_active => true,
+        | tools::MATRIX
+        // Workflow-coordination control-plane tools stay directly callable in
+        // every mode: full-auto lists them in `allowed_tools` (they bypass
+        // the allow-list) and the model needs them for checklist/planning
+        // progress without a prior discovery round-trip. Deferring them
+        // outside planning made OpenAI reject `allowed_tools` references
+        // with 400 "Tool choice 'task_tracker' not found in 'tools'".
+        | tools::TASK_TRACKER
+        | tools::START_PLANNING => true,
+        // Planning keeps its read-only inspection surface on the wire even
+        // when MCP tools force deferral. Structured search
+        // (code_search/grep_file) is always-eager above; read_file/list_files
+        // stay planning-only.
         tools::READ_FILE | tools::LIST_FILES if config.planning_active => true,
         tools::MCP_SEARCH_TOOLS | tools::MCP_GET_TOOL_DETAILS | tools::MCP_LIST_SERVERS => {
             config.deferred_tool_policy.is_client_local()

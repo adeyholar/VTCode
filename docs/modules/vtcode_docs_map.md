@@ -201,6 +201,12 @@ below based on the topic area.
   - **Topics**: Scope, Oracles, Fuzzer-first fixes, Basic Commands, Corpus and Artifacts
   - **User Questions**: "What can you tell me about Fuzzing Guide?", "How does Scope work?", "How does Oracles work?"
 
+- **File**: `docs/development/hypothesis-revision-validation.md`
+  - **Content**: Hypothesis revision validation
+  - **Topics**: Acceptance, Deterministic checks, Live replay pilot
+  - **User Questions**: "What can you tell me about Hypothesis revision validation?", "How does Acceptance work?", "How
+    does Deterministic checks work?"
+
 - **File**: `docs/development/refactor-scan-2026-10-04.md`
   - **Content**: Large-file and reusable-component refactor plan
   - **Topics**: Inventory and interpretation, Production responsibility hotspots, Concrete deduplication opportunities,
