@@ -181,9 +181,9 @@ mod tests {
         // (~520 chars, two dots) per May/Oct 2026 changelogs. Both must be
         // treated as opaque and redacted even without a Bearer prefix.
         // Fixtures are assembled at runtime so scans do not flag them.
-        let legacy = format!("{}{}", "ghs_", "a".repeat(36));
-        let header = format!("{}{}", "ghs_", "b".repeat(20));
-        let payload = format!("{}{}", "c".repeat(250), ".");
+        let legacy = format!("ghs_{}", "a".repeat(36));
+        let header = format!("ghs_{}", "b".repeat(20));
+        let payload = format!("{}.", "c".repeat(250));
         let signature = "d".repeat(250);
         let stateless = format!("{header}.{payload}{signature}");
         assert!(stateless.len() >= 500, "fixture should model ~520-char token");
@@ -197,6 +197,31 @@ mod tests {
             let bearer = redact_secrets(format!("Authorization: Bearer {token}"));
             assert!(!bearer.contains(token.as_str()));
         }
+    }
+
+    #[test]
+    fn github_app_token_threshold_is_36_chars() {
+        // Locks the GitHub-recommended `ghs_[A-Za-z0-9.\-_]{36,}` boundary:
+        // 35 chars must not redact on its own, 36 chars must.
+        let short = format!("ghs_{}", "a".repeat(35));
+        let exact = format!("ghs_{}", "a".repeat(36));
+        assert_eq!(redact_secrets(format!("saw {short} here")), format!("saw {short} here"));
+        assert_eq!(redact_secrets(format!("saw {exact} here")), "saw [REDACTED_SECRET] here");
+    }
+
+    #[test]
+    fn redacts_github_app_token_split_across_stream_chunks() {
+        // A ~526-char stateless token fits in the 1_024-byte carry window, so
+        // halves split at an IO boundary must still redact on finish.
+        let token = format!("ghs_{}.{}.{}", "b".repeat(20), "c".repeat(250), "d".repeat(250));
+        let mid = token.floor_char_boundary(token.len() / 2);
+        let (first, second) = token.split_at(mid);
+        let mut redactor = StreamingSecretRedactor::default();
+        let mut output = redactor.push(first);
+        output.push_str(&redactor.push(&format!("{second}\n")));
+        output.push_str(&redactor.finish());
+        assert!(!output.contains(token.as_str()));
+        assert!(output.contains("[REDACTED_SECRET]"));
     }
 
     #[test]
