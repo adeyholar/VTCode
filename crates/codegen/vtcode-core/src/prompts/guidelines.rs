@@ -321,7 +321,8 @@ pub fn append_runtime_tool_prompt_sections_for_model(
     config: Option<&crate::config::VTCodeConfig>,
 ) {
     let names = snapshot_tool_names(tool_snapshot);
-    append_runtime_tool_sections_with_names(prompt, tool_snapshot, &names, include_catalog_metadata, shell_profile);
+    let default_guidance =
+        append_runtime_tool_sections_with_names(prompt, tool_snapshot, &names, include_catalog_metadata, shell_profile);
     let pricing = crate::config::models::model_catalog_entry(provider.name(), model).map(|entry| entry.pricing);
     let profile = ToolGuidanceProfile::resolve(
         crate::compaction::effective_context_budget(config, provider, model),
@@ -338,8 +339,27 @@ pub fn append_runtime_tool_prompt_sections_for_model(
     }
     remove_prompt_section(prompt, "## Active Tools");
     let capability_level = Some(infer_capability_level(&names));
-    let mut guidance =
-        generate_tool_guidelines_with_capabilities(&names, capability_level, shell_profile, profile, parallel_tools);
+    let mut guidance = match profile {
+        ToolGuidanceProfile::Default => {
+            let mut guidance = default_guidance;
+            let presence = ToolPresence::of(&names);
+            if let (Some(original), Some(effective)) = (
+                capability_mode_line(None, presence.exec, presence.apply_patch),
+                capability_mode_line(capability_level, presence.exec, presence.apply_patch),
+            ) && original != effective
+                && let Some(start) = guidance.find(original)
+            {
+                guidance.replace_range(start..start + original.len(), effective);
+            }
+            if !parallel_tools && let Some(start) = guidance.find(PARALLEL_TOOLS_LINE) {
+                guidance.replace_range(start.saturating_sub(1)..start + PARALLEL_TOOLS_LINE.len(), "");
+            }
+            guidance
+        }
+        ToolGuidanceProfile::Minimal => {
+            generate_tool_guidelines_with_capabilities(&names, capability_level, shell_profile, profile, parallel_tools)
+        }
+    };
     if tool_snapshot.planning_active {
         append_minimal_planning_addendum(&mut guidance, &names);
     }
@@ -347,15 +367,15 @@ pub fn append_runtime_tool_prompt_sections_for_model(
 }
 
 /// Replace the runtime tool sections with guidance built from `names`, plus
-/// optional catalog metadata. Callers that continue into a density rebuild
-/// pass the same `names` through instead of re-deriving them.
+/// optional catalog metadata. Return the Default guidance so model-aware
+/// callers can reuse it after measuring the assembled prompt.
 fn append_runtime_tool_sections_with_names(
     prompt: &mut String,
     tool_snapshot: &SessionToolCatalogSnapshot,
     names: &[String],
     include_catalog_metadata: bool,
     shell_profile: ResolvedShellPromptProfile,
-) {
+) -> String {
     remove_prompt_section(prompt, "## Active Tools");
     remove_prompt_section(prompt, "[Runtime Tool Catalog]");
     while prompt.ends_with('\n') {
@@ -384,6 +404,7 @@ fn append_runtime_tool_sections_with_names(
         );
         append_prompt_block(prompt, &catalog_metadata);
     }
+    guidelines
 }
 
 /// Compact tool reminders; the planning mode section retains the canonical
@@ -697,6 +718,157 @@ mod tests {
             ShellPromptProfile::Auto.resolve_for_current_platform(),
             true,
         )
+    }
+
+    /// Reference the previous model-aware assembly: measure Default guidance,
+    /// then regenerate it with resolved density and capabilities.
+    fn rebuilt_model_tool_prompt(
+        mut prompt: String,
+        snapshot: &SessionToolCatalogSnapshot,
+        metadata: bool,
+        shell: ResolvedShellPromptProfile,
+        provider: &dyn crate::llm::provider::LLMProvider,
+        model: &str,
+        config: &crate::config::VTCodeConfig,
+    ) -> String {
+        append_runtime_tool_prompt_sections_for_profile(&mut prompt, snapshot, metadata, shell);
+        let names = snapshot_tool_names(snapshot);
+        let pricing = crate::config::models::model_catalog_entry(provider.name(), model).map(|entry| entry.pricing);
+        let profile = ToolGuidanceProfile::resolve(
+            crate::compaction::effective_context_budget(Some(config), provider, model),
+            vtcode_commons::estimate_tokens(&prompt),
+            config.agent.max_system_prompt_tokens as usize,
+            pricing.and_then(|price| price.input),
+            config.agent.harness.max_budget_usd,
+        );
+        if snapshot.planning_active && profile == ToolGuidanceProfile::Default {
+            return prompt;
+        }
+        remove_prompt_section(&mut prompt, "## Active Tools");
+        let mut guidance = generate_tool_guidelines_with_capabilities(
+            &names,
+            Some(infer_capability_level(&names)),
+            shell,
+            profile,
+            provider.supports_parallel_tool_config(model),
+        );
+        if snapshot.planning_active {
+            append_minimal_planning_addendum(&mut guidance, &names);
+        }
+        append_prompt_block(&mut prompt, guidance.trim_start_matches('\n'));
+        prompt
+    }
+
+    #[test]
+    fn model_tool_prompt_reuse_matches_rebuild_across_density_and_capabilities() {
+        use crate::config::constants::models;
+        use crate::llm::provider::LLMProvider;
+        use crate::llm::providers::{AnthropicProvider, HuggingFaceProvider};
+
+        struct ProviderCase {
+            provider: Box<dyn LLMProvider>,
+            model: &'static str,
+            parallel: bool,
+        }
+        let providers = [
+            ProviderCase {
+                provider: Box::new(AnthropicProvider::new("offline-fixture".into())),
+                model: models::anthropic::DEFAULT_MODEL,
+                parallel: true,
+            },
+            ProviderCase {
+                provider: Box::new(HuggingFaceProvider::new("offline-fixture".into())),
+                model: "offline-fixture",
+                parallel: false,
+            },
+        ];
+        let initial = "Base prompt\n\n## Active Tools\nold guidance\n\n# PLANNING WORKFLOW (READ-ONLY)\nKeep the canonical contract.\n\n[Runtime Tool Catalog]\nold metadata\n\n## Tail\nKeep this section.\n\n";
+        for case in providers {
+            assert_eq!(case.provider.supports_parallel_tool_config(case.model), case.parallel);
+            for names in [
+                None,
+                Some(&[][..]),
+                Some(&[TOOL_TASK_TRACKER, TOOL_REQUEST_USER_INPUT][..]),
+                Some(&[TOOL_READ_FILE][..]),
+                Some(&[TOOL_WRITE_STDIN][..]),
+                Some(&[TOOL_EXEC_COMMAND, TOOL_APPLY_PATCH, TOOL_CODE_SEARCH, "record_decision"][..]),
+            ] {
+                for planning in [false, true] {
+                    let snapshot = SessionToolCatalogSnapshot::new(
+                        7,
+                        9,
+                        planning,
+                        true,
+                        names.map(|names| {
+                            std::sync::Arc::new(
+                                names
+                                    .iter()
+                                    .map(|name| {
+                                        ToolDefinition::function(
+                                            (*name).to_string(),
+                                            "fixture".to_string(),
+                                            serde_json::json!({"type": "object"}),
+                                        )
+                                    })
+                                    .collect(),
+                            )
+                        }),
+                        false,
+                    );
+                    for shell in [
+                        ResolvedShellPromptProfile::UnixLike,
+                        ResolvedShellPromptProfile::PowerShell,
+                    ] {
+                        for metadata in [false, true] {
+                            let mut measured = initial.to_string();
+                            append_runtime_tool_prompt_sections_for_profile(&mut measured, &snapshot, metadata, shell);
+                            let measured_tokens = vtcode_commons::estimate_tokens(&measured) as u64;
+                            for budget in [1, measured_tokens - 1, measured_tokens, 100_000] {
+                                let mut config = crate::config::VTCodeConfig::default();
+                                config.context.max_context_tokens = 128_000;
+                                config.agent.max_system_prompt_tokens = budget;
+                                let expected = rebuilt_model_tool_prompt(
+                                    initial.to_string(),
+                                    &snapshot,
+                                    metadata,
+                                    shell,
+                                    case.provider.as_ref(),
+                                    case.model,
+                                    &config,
+                                );
+                                let mut actual = initial.to_string();
+                                append_runtime_tool_prompt_sections_for_model(
+                                    &mut actual,
+                                    &snapshot,
+                                    metadata,
+                                    shell,
+                                    case.provider.as_ref(),
+                                    case.model,
+                                    Some(&config),
+                                );
+
+                                assert_eq!(
+                                    actual,
+                                    expected,
+                                    "provider={}, names={names:?}, planning={planning}, shell={shell:?}, metadata={metadata}, budget={budget}",
+                                    case.provider.name()
+                                );
+                                assert_eq!(
+                                    actual.matches("## Active Tools").count(),
+                                    usize::from(
+                                        budget >= measured_tokens || names.is_some_and(|names| !names.is_empty())
+                                    )
+                                );
+                                assert!(
+                                    actual.contains("# PLANNING WORKFLOW (READ-ONLY)\nKeep the canonical contract.")
+                                );
+                                assert!(actual.contains("## Tail\nKeep this section."));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -318,6 +318,136 @@ async fn active_primary_agent_policy_filters_provider_exposure_and_execution() {
 }
 
 #[tokio::test]
+async fn advertisement_and_admission_preserve_global_and_agent_permission_precedence() {
+    struct PermissionCase {
+        global_deny: bool,
+        global_ask: bool,
+        agent_default: Option<PermissionDefault>,
+        agent_deny: bool,
+        exposed: bool,
+    }
+
+    for case in [
+        PermissionCase {
+            global_deny: true,
+            global_ask: false,
+            agent_default: Some(PermissionDefault::Auto),
+            agent_deny: false,
+            exposed: false,
+        },
+        PermissionCase {
+            global_deny: false,
+            global_ask: false,
+            agent_default: Some(PermissionDefault::Auto),
+            agent_deny: true,
+            exposed: false,
+        },
+        PermissionCase {
+            global_deny: false,
+            global_ask: true,
+            agent_default: Some(PermissionDefault::Auto),
+            agent_deny: false,
+            exposed: true,
+        },
+        PermissionCase {
+            global_deny: false,
+            global_ask: true,
+            agent_default: Some(PermissionDefault::Deny),
+            agent_deny: false,
+            exposed: false,
+        },
+        PermissionCase {
+            global_deny: true,
+            global_ask: false,
+            agent_default: None,
+            agent_deny: false,
+            exposed: false,
+        },
+        PermissionCase {
+            global_deny: false,
+            global_ask: true,
+            agent_default: None,
+            agent_deny: false,
+            exposed: true,
+        },
+    ] {
+        let temp = TempDir::new().expect("workspace");
+        let mut config = VTCodeConfig::default();
+        config.permissions.allow = vec!["Bash".to_string()];
+        if case.global_deny {
+            config.permissions.deny = vec!["Bash".to_string()];
+        }
+        if case.global_ask {
+            config.permissions.ask = vec!["Bash".to_string()];
+        }
+        let mut runner = Box::pin(AgentRunner::new_with_bootstrap(
+            AgentType::Single,
+            ModelId::default(),
+            "test-key".to_string(),
+            temp.path().to_path_buf(),
+            "thread-permission-precedence".to_string(),
+            RunnerSettings { reasoning_effort: None, verbosity: None },
+            None,
+            ThreadBootstrap::new(None),
+            Some(config),
+            None,
+        ))
+        .await
+        .expect("runner");
+        runner.active_primary_agent = case.agent_default.map(|default| {
+            let mut spec = vtcode_config::builtin_primary_auto_agent();
+            spec.permissions = AgentPermissionsConfig::new(default);
+            if case.agent_deny {
+                spec.permissions.deny = vec!["Bash".to_string()];
+                spec.permissions.allow = vec!["Bash".to_string()];
+            }
+            ActivePrimaryAgent::from_spec(&spec)
+        });
+
+        assert_eq!(runner.is_tool_exposed(tools::EXEC_COMMAND).await, case.exposed);
+        let mut state = AgentSessionState::new("thread-permission-precedence".to_string(), 1, 1, 8_000);
+        assert_eq!(
+            runner
+                .admit_tool_call(tools::EXEC_COMMAND, json!({"cmd": "true"}), &mut state)
+                .is_ok(),
+            case.exposed
+        );
+    }
+}
+
+#[tokio::test]
+async fn advertisement_keeps_multi_action_tools_conservative_with_and_without_an_agent() {
+    for has_agent in [false, true] {
+        for deny_write in [false, true] {
+            let temp = TempDir::new().expect("workspace");
+            let mut config = VTCodeConfig::default();
+            if deny_write {
+                config.permissions.deny = vec!["Write".to_string()];
+            }
+            let mut runner = Box::pin(AgentRunner::new_with_bootstrap(
+                AgentType::Single,
+                ModelId::default(),
+                "test-key".to_string(),
+                temp.path().to_path_buf(),
+                "thread-multi-action-permissions".to_string(),
+                RunnerSettings { reasoning_effort: None, verbosity: None },
+                None,
+                ThreadBootstrap::new(None),
+                Some(config),
+                None,
+            ))
+            .await
+            .expect("runner");
+            runner.active_primary_agent =
+                has_agent.then(|| ActivePrimaryAgent::from_spec(&vtcode_config::builtin_primary_auto_agent()));
+
+            assert_eq!(runner.is_tool_permitted_for_advertisement(tools::UNIFIED_FILE).await, !deny_write);
+            assert!(runner.is_tool_exposed(tools::APPLY_PATCH).await);
+        }
+    }
+}
+
+#[tokio::test]
 async fn explicit_tool_policy_deny_filters_runtime_state_and_allowed_tools() {
     let temp = TempDir::new().expect("tempdir");
     let runner = Box::pin(AgentRunner::new_with_bootstrap(
