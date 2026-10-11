@@ -103,6 +103,20 @@ and fall back to Nextest's `default` profile when a local checkout does not prov
 prevent the checks from running. `check-dev.sh --changed` performs its own changed-package filtering because Nextest
 does not provide Cargo's `--changed --since` selection flags.
 
+The fast gate runs Cargo checks, Clippy, changed-package metadata, and Nextest with `--locked`; verification never
+updates `Cargo.lock`. Tests require `cargo-nextest` and fail if the selected suite contains no tests. A successful
+`--changed` selection with no changed packages explicitly skips testing; metadata failures fail the gate instead.
+Install the runner with `cargo install cargo-nextest --locked`.
+
+| Fast gate | Command | Test selection |
+| --- | --- | --- |
+| Checks and lints | `./scripts/check-dev.sh` | Tests excluded |
+| Checks, lints, and tests | `./scripts/check-dev.sh --test` | Quick profile when configured, otherwise default |
+| Changed packages | `./scripts/check-dev.sh --changed` | Changed packages in the selected scope |
+| Full workspace | `./scripts/check-dev.sh --workspace --test` | All workspace packages |
+
+Run the script regressions with `python3 -m unittest discover -s scripts/tests -p 'test_check_dev.py'`.
+
 ### Agent-Friendly Quiet Mode
 
 `check-dev.sh --quiet` (or `-q`) suppresses progress banners and cargo noise so an agent turn or CI job sees only the
