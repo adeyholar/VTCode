@@ -2,6 +2,7 @@ use super::*;
 use crate::skills::CommandSkillBackend;
 use crate::skills::command_skills::command_skill_specs;
 use crate::skills::system::{install_system_skills, system_cache_root_dir};
+use hashbrown::HashMap;
 use serial_test::serial;
 use std::fs;
 use tempfile::TempDir;
