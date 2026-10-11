@@ -13,7 +13,7 @@ use crate::agent::runloop::unified::tool_pipeline::{
     run_tool_call_with_args,
 };
 use crate::agent::runloop::unified::turn::context::{
-    PreparedAssistantToolCall, TurnHandlerOutcome, TurnProcessingContext,
+    PreparedAssistantToolCall, TurnHandlerOutcome, TurnLoopResult, TurnProcessingContext,
 };
 use crate::agent::runloop::unified::turn::tool_outcomes::execution_result::{
     handle_tool_execution_result, handle_tool_execution_result_with_spinner,
@@ -171,7 +171,7 @@ async fn interrupt_parallel_group<F>(
     registry: &vtcode_core::tools::registry::ToolRegistry,
     execution_futures: &mut FuturesUnordered<F>,
     group_has_exec_sessions: bool,
-    turn_result: crate::agent::runloop::unified::turn::context::TurnLoopResult,
+    turn_result: TurnLoopResult,
     log_message: &str,
 ) -> TurnHandlerOutcome
 where
@@ -288,9 +288,9 @@ async fn execute_parallel_group<'a, 'b>(
         {
             spinner.finish_with_restore(false);
             let turn_result = if t_ctx.ctx.ctrl_c_state.is_exit_requested() {
-                crate::agent::runloop::unified::turn::context::TurnLoopResult::Exit
+                TurnLoopResult::Exit
             } else {
-                crate::agent::runloop::unified::turn::context::TurnLoopResult::Cancelled
+                TurnLoopResult::Cancelled
             };
             return Ok(Some(
                 interrupt_parallel_group(
@@ -310,9 +310,9 @@ async fn execute_parallel_group<'a, 'b>(
                 {
                     spinner.finish_with_restore(false);
                     let turn_result = if t_ctx.ctx.ctrl_c_state.is_exit_requested() {
-                        crate::agent::runloop::unified::turn::context::TurnLoopResult::Exit
+                        TurnLoopResult::Exit
                     } else {
-                        crate::agent::runloop::unified::turn::context::TurnLoopResult::Cancelled
+                        TurnLoopResult::Cancelled
                     };
                     return Ok(Some(interrupt_parallel_group(
                         &registry,
@@ -371,10 +371,7 @@ async fn execute_parallel_group<'a, 'b>(
         };
         flush_loop_notices(t_ctx.ctx, t_ctx.repeated_tool_attempts);
         if let Some(outcome) = handler_outcome {
-            if let TurnHandlerOutcome::Break(
-                turn_result @ (crate::agent::runloop::unified::turn::context::TurnLoopResult::Exit
-                | crate::agent::runloop::unified::turn::context::TurnLoopResult::Cancelled),
-            ) = outcome
+            if let TurnHandlerOutcome::Break(turn_result @ (TurnLoopResult::Exit | TurnLoopResult::Cancelled)) = outcome
             {
                 spinner.finish_with_restore(false);
                 return Ok(Some(
@@ -410,6 +407,12 @@ async fn execute_parallel_group<'a, 'b>(
     Ok(None)
 }
 
+fn drain_validated_preflight_calls(ctx: &mut TurnProcessingContext<'_>, calls: &[ValidatedToolCall<'_>]) {
+    for call in calls {
+        super::drain_preflight_circuit_responses(ctx, std::slice::from_ref(call.tool_call));
+    }
+}
+
 pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
     t_ctx: &mut ToolOutcomeContext<'a, 'b>,
     tool_calls: &[PreparedAssistantToolCall],
@@ -417,14 +420,20 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
     use crate::agent::runloop::unified::run_loop_context::TurnPhase;
     t_ctx.ctx.set_phase(TurnPhase::ExecutingTools);
 
-    let mut validated_calls = Vec::with_capacity(tool_calls.len());
+    let mut validated_calls: Vec<ValidatedToolCall<'_>> = Vec::with_capacity(tool_calls.len());
 
     for (index, tool_call) in tool_calls.iter().enumerate() {
         let Some(args) = tool_call.args() else {
             if let Some(err) = tool_call.args_error() {
-                if let Some(outcome) =
-                    super::handle_preflight_failure(t_ctx.ctx, tool_call.call_id(), tool_call.tool_name(), err, None)
-                {
+                if let Some(outcome) = super::handle_preflight_failure(
+                    t_ctx.ctx,
+                    tool_call.call_id(),
+                    tool_call.tool_name(),
+                    err,
+                    None,
+                    None,
+                ) {
+                    drain_validated_preflight_calls(t_ctx.ctx, &validated_calls);
                     super::drain_preflight_circuit_responses(t_ctx.ctx, &tool_calls[index + 1..]);
                     flush_budget_synthesis_directives(t_ctx.ctx);
                     return Ok(Some(outcome));
@@ -479,9 +488,12 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
                 }
             }
             ValidationTransition::Return(Some(outcome)) => {
-                if t_ctx.ctx.harness_state.consecutive_preflight_failures
-                    >= super::max_consecutive_blocked_tool_calls_per_turn(t_ctx.ctx)
+                if matches!(&outcome, TurnHandlerOutcome::Break(TurnLoopResult::Cancelled | TurnLoopResult::Exit))
+                    || t_ctx.ctx.session_stats.preflight_recovery.exhausted()
+                    || t_ctx.ctx.harness_state.consecutive_preflight_failures
+                        >= super::max_consecutive_blocked_tool_calls_per_turn(t_ctx.ctx)
                 {
+                    drain_validated_preflight_calls(t_ctx.ctx, &validated_calls);
                     super::drain_preflight_circuit_responses(t_ctx.ctx, &tool_calls[index + 1..]);
                 }
                 if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {

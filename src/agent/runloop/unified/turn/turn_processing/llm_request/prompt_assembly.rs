@@ -75,6 +75,10 @@ pub(super) fn recovery_mode_directive(planning_active: bool, recovery_reason: Op
         directive.push_str("- keep_response_brief: true\n");
     }
 
+    if recovery_reason == Some("preflight validation circuit breaker") {
+        directive.push_str("- summarize the rejected operation and validation errors; automatic recovery permits at most one fresh corrective turn under current policy, so do not ask the user to restate the request merely to refresh tools\n");
+    }
+
     if let Some(reason) = recovery_reason {
         let _ = writeln!(directive, "- recovery_reason: {reason}");
     }

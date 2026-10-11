@@ -175,8 +175,12 @@ pub enum PromptCacheRetention {
     #[default]
     #[serde(rename = "24h")]
     H24,
-    /// Forward-compatible catch-all for unknown retention values
-    #[serde(other)]
+    /// Forward-compatible catch-all for unknown retention values.
+    ///
+    /// The explicit `rename` keeps the serialized form (`"unknown"`) aligned
+    /// with [`PromptCacheRetention::as_str`]; bare `#[serde(other)]` would
+    /// serialize the variant name as `"Unknown"`.
+    #[serde(other, rename = "unknown")]
     Unknown,
 }
 
@@ -760,6 +764,26 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.prompt_cache_retention, Some(PromptCacheRetention::Unknown));
+    }
+
+    /// `PromptCacheRetention` exposes the same value through `as_str()`/
+    /// `Display` and the serde wire form. Both the config table and the OpenAI
+    /// API wire format read this enum, so a one-sided change (e.g. a bare
+    /// `#[serde(other)]` that serializes `Unknown` as `"Unknown"`) would desync
+    /// them. Pin every variant.
+    #[test]
+    fn prompt_cache_retention_as_str_matches_serde() {
+        for retention in [
+            PromptCacheRetention::InMemory,
+            PromptCacheRetention::H24,
+            PromptCacheRetention::Unknown,
+        ] {
+            assert_eq!(
+                serde_json::to_value(retention).unwrap(),
+                serde_json::json!(retention.as_str()),
+                "serde wire form drifted from as_str() for {retention:?}"
+            );
+        }
     }
 
     #[test]

@@ -2162,14 +2162,56 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 // line is the single user-facing nudge; suppress the generic
                 // blocked-handoff "Type continue" stack and blocked placeholder
                 // for this recoverable budget end.
+                use crate::agent::runloop::unified::turn::tool_outcomes::helpers as tracker_continue;
                 let mut tracker_auto_continue_exhausted = false;
+                let max_corrective_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
+                let corrective_budget_remaining = if tool_registry.is_planning_active() {
+                    session_stats.plan_continuation_turns() < max_corrective_turns
+                } else {
+                    session_stats.tracker_continuation_turns() < max_corrective_turns
+                };
+                // Validation owns one corrective turn independently of tracker progress
+                // and model refusal prose. Permission, verification and stop gates remain
+                // authoritative; queue failure falls through to the existing handoff.
+                if session_stats.preflight_recovery.corrective_pending()
+                    && !turn_refused
+                    && crate::agent::runloop::unified::stop_requests::stop_outcome(&ctrl_c_state).is_none()
+                    && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref())
+                    && corrective_budget_remaining
+                    && !session_stats.verification_snapshot().0
+                    && (matches!(outcome_result, RunLoopTurnLoopResult::Completed { .. })
+                        || matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { reason }
+                            if tracker_continue::tracker_auto_continue_is_recoverable_block(reason.as_deref())
+                                && !reason.as_deref().is_some_and(tracker_continue::is_pending_verification_block)))
+                    && !(tool_registry.is_planning_active()
+                        && crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(
+                            &tool_registry.planning_workflow_state(),
+                        )
+                        .await)
                 {
-                    use crate::agent::runloop::unified::turn::tool_outcomes::helpers as tracker_continue;
+                    let follow_up = format!(
+                        "{} Tools are available under current policy. Resume the original request by correcting the rejected arguments against the current tool schema. Omit unused fields; do not repeat an unchanged rejected call. This is the single automatic corrective turn; no user reply is needed.",
+                        crate::agent::runloop::unified::state::PREFLIGHT_CORRECTIVE_FOLLOW_UP_PREFIX
+                    );
+                    if runtime.try_queue_follow_up_input(follow_up).is_ok() {
+                        session_stats.preflight_recovery.begin_corrective_turn();
+                        if tool_registry.is_planning_active() {
+                            session_stats.record_plan_continuation_turn_with_limit(max_corrective_turns);
+                        } else {
+                            session_stats.record_tracker_continuation_turn_with_limit(max_corrective_turns);
+                        }
+                        continue;
+                    }
+                    tracing::warn!("Preflight corrective queue full; falling through to handoff");
+                }
+                {
                     let planning_active = tool_registry.is_planning_active();
                     let tracker_kill_switch =
                         !matches!(outcome_result, RunLoopTurnLoopResult::Cancelled | RunLoopTurnLoopResult::Exit)
                             && crate::agent::runloop::unified::stop_requests::stop_outcome(&ctrl_c_state).is_none()
-                            && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref());
+                            && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref())
+                            && !session_stats.preflight_recovery.exhausted()
+                            && !session_stats.preflight_recovery.corrective_pending();
                     let is_verification_block = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { reason }
                     if reason.as_deref().is_some_and(tracker_continue::is_pending_verification_block));
                     let turn_completed = matches!(&outcome_result, RunLoopTurnLoopResult::Completed { .. });
@@ -2405,10 +2447,14 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         }
                         let _ =
                             renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", false, 0, 0));
-                    } else if !planning_active && incomplete.as_ref().is_none_or(|items| items.is_empty()) {
+                    } else if !planning_active
+                        && session_stats.preflight_recovery.is_clear()
+                        && !crate::agent::runloop::unified::turn::is_internal_harness_follow_up(&next_turn_input)
+                        && incomplete.as_ref().is_none_or(|items| items.is_empty())
+                    {
                         // Tracker work cleared (or none) outside planning: reset the
-                        // episode budgets. Planning ends must not silently restore the
-                        // shared plan/tracker continuation budget.
+                        // episode budgets only at a user boundary. Internal correction
+                        // success must not restore consumed continuation turns.
                         session_stats.reset_tracker_continuation_budget();
                         session_stats.reset_plan_continuation_budget();
                     }
@@ -2441,6 +2487,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     // feeds failures back as continued work) rather than a
                     // human-gated stop.
                     if is_verification_block
+                        && !session_stats.preflight_recovery.exhausted()
                         && !escalated
                         && verification_gate::verification_block_allows_auto_recovery(
                             base,

@@ -53,6 +53,20 @@ has incomplete steps, and when a turn ends on a recoverable block — in every m
   approval handoffs. Planning never auto-approves or auto-implements. Plan-mode and tracker auto-continue share the
   `cross_turn_turns` episode budget; a planning episode can exhaust it for later tracker auto-continue until a genuine
   user turn resets the episode.
+- Preflight validation: the existing per-turn failure cap first schedules tool-free synthesis, followed by at most one
+  fresh corrective turn. Runtime state controls this decision, independently of assistant refusal prose. Repeating a
+  rejected tool/category/argument identity ends automatic recovery immediately; reordered JSON keys and changes to
+  `max_output_tokens` do not make a new identity. Different invalid arguments remain bounded by the same failure cap.
+  Identities use registry-canonical tool names, so aliases cannot bypass repetition detection. Successful corrections
+  match valid operation selectors: tracker updates retain their item target, equivalent flat indices and index paths
+  match, and invalid actions or indices can be repaired. A different tracker item is unrelated work.
+  Only successful execution of a correction admitted by the live schema clears the validation episode. Unrelated
+  reads or verifiers do not clear it or restore tracker continuation budgets. Internal follow-ups retain the episode;
+  genuine user input resets it. Approved-plan implementation starts with a cleared validation episode in both current
+  and fresh contexts, preserving consumed continuation budgets. Cancellation, provider refusal, permission/policy,
+  verification, and existing continuation limits remain authoritative. Rejections preserve parsed arguments in
+  canonical invocation events; malformed JSON has no parsed
+  arguments. Every skipped call in a batch receives one terminal response.
 - Kill-switch: `[agent.harness.continuation].auto_continue_tracker = false`.
 
 Harness-generated tracker, plan, blocked-end, verification, and background continuations preserve the existing episode

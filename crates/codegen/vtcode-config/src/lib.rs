@@ -78,6 +78,9 @@ pub mod update;
 pub mod webmcp;
 pub mod workspace_env;
 
+#[cfg(test)]
+mod test_support;
+
 pub use acp::{
     AcpAuthMethod, AgentClientProtocolConfig, AgentClientProtocolTransport, AgentClientProtocolZedConfig,
     AgentClientProtocolZedToolsConfig, AgentClientProtocolZedWorkspaceTrustMode, WorkspaceTrustLevel,

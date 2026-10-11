@@ -298,6 +298,18 @@ async fn handle_success<'a>(
     let is_loop_detected_stub = output.get("loop_detected").and_then(|v| v.as_bool()).unwrap_or(false);
     let is_mutating = vtcode_core::tools::tool_intent::classify_tool_intent(tool_name, args_val).mutating;
     if command_success && !is_loop_detected_stub {
+        if crate::agent::runloop::unified::stop_requests::stop_outcome(t_ctx.ctx.ctrl_c_state).is_none() {
+            let canonical_tool_name = t_ctx.ctx.tool_registry.resolve_tool_name_with_display(tool_name).canonical;
+            let planning_active = t_ctx.ctx.is_planning_active();
+            t_ctx
+                .ctx
+                .session_stats
+                .preflight_recovery
+                .succeeded(&canonical_tool_name, args_val, planning_active);
+            if t_ctx.ctx.session_stats.preflight_recovery.is_clear() {
+                t_ctx.ctx.reset_preflight_failure_streak();
+            }
+        }
         if !is_mutating {
             let signature = signature_key_for(tool_name, args_val);
             t_ctx.ctx.harness_state.record_successful_readonly_signature(signature);

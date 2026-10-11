@@ -1,3 +1,6 @@
+mod preflight_recovery;
+pub(crate) use preflight_recovery::{PREFLIGHT_CORRECTIVE_FOLLOW_UP_PREFIX, PreflightRecovery, ValidationCategory};
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -58,6 +61,7 @@ const FOLLOW_UP_DEFAULT_THRESHOLD: usize = 3;
 
 #[derive(Default)]
 pub(crate) struct SessionStats {
+    pub(crate) preflight_recovery: PreflightRecovery,
     tools: std::collections::BTreeSet<String>,
     pub task_panel_visible: bool,
     /// Auto permission classifier consecutive denial count.
@@ -581,6 +585,7 @@ impl SessionStats {
         // discard every lineage, fingerprint, request-envelope, and response
         // diagnostic that belongs to the cleared conversational context.
         self.tools.clear();
+        self.preflight_recovery = PreflightRecovery::default();
         self.reset_auto_permission_review_state();
         self.follow_up_prompt_streak = 0;
         self.suppress_next_follow_up_prompt = false;
@@ -620,6 +625,7 @@ impl SessionStats {
         if crate::agent::runloop::unified::turn::is_internal_harness_follow_up(input) {
             return FollowUpPromptAction::None;
         }
+        self.preflight_recovery = PreflightRecovery::default();
         let suppression_active = self.consume_follow_up_prompt_suppression();
         let is_follow_up = is_follow_up_prompt_like(input);
 
@@ -1457,8 +1463,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        AutoPermissionDenial, CtrlCSignal, CtrlCState, FollowUpPromptAction, PromptCacheDiagnostics, SessionStats,
-        is_follow_up_prompt_like, should_enforce_safe_mode_prompts,
+        AutoPermissionDenial, CtrlCSignal, CtrlCState, FollowUpPromptAction, PREFLIGHT_CORRECTIVE_FOLLOW_UP_PREFIX,
+        PromptCacheDiagnostics, SessionStats, ValidationCategory, is_follow_up_prompt_like,
+        should_enforce_safe_mode_prompts,
     };
     use vtcode_core::config::WorkspaceTrustLevel;
     use vtcode_core::config::constants::tools;
@@ -1467,6 +1474,34 @@ mod tests {
 
     fn function_tool(name: &str) -> ToolDefinition {
         ToolDefinition::function(name.to_string(), name.to_string(), serde_json::json!({"type": "object"}))
+    }
+
+    #[test]
+    fn preflight_internal_followups_preserve_episode_and_user_input_resets_it() {
+        let mut stats = SessionStats::default();
+        stats.record_tracker_continuation_turn_with_limit(3);
+        stats.preflight_recovery.reject(
+            "task_tracker",
+            ValidationCategory::Arguments,
+            Some(&serde_json::json!({"action":"list","index":1})),
+            6,
+        );
+        stats.preflight_recovery.synthesis();
+        stats.preflight_recovery.begin_corrective_turn();
+        stats.register_follow_up_prompt(&format!("{PREFLIGHT_CORRECTIVE_FOLLOW_UP_PREFIX} repair arguments"));
+        stats.preflight_recovery.finish_corrective_turn();
+        assert!(stats.preflight_recovery.exhausted());
+        stats.register_follow_up_prompt("The task tracker still has incomplete steps: verify");
+        assert!(stats.preflight_recovery.exhausted());
+        assert_eq!(stats.tracker_continuation_turns(), 1);
+        stats.register_follow_up_prompt("continue");
+        assert!(!stats.preflight_recovery.exhausted());
+        assert!(stats.preflight_recovery.is_clear());
+        assert_eq!(
+            stats.tracker_continuation_turns(),
+            1,
+            "user resume retains existing tracker no-progress accounting"
+        );
     }
 
     #[test]
@@ -1831,6 +1866,27 @@ mod tests {
             stats.tool_loop_grant_preauthorized(),
             "the one-time HITL latch is process-session scoped, not conversation-context scoped"
         );
+    }
+
+    #[test]
+    fn preflight_fresh_execution_clears_validation_without_restoring_continuations() {
+        let mut stats = SessionStats::default();
+        stats.record_tracker_continuation_turn_with_limit(3);
+        stats.record_plan_continuation_turn_with_limit(3);
+        stats
+            .preflight_recovery
+            .reject("task_tracker", ValidationCategory::Arguments, None, 6);
+        stats.preflight_recovery.synthesis();
+        stats.preflight_recovery.begin_corrective_turn();
+        stats.preflight_recovery.finish_corrective_turn();
+        assert!(stats.preflight_recovery.exhausted());
+
+        stats.reset_for_fresh_execution();
+
+        assert!(stats.preflight_recovery.is_clear());
+        assert!(!stats.preflight_recovery.exhausted());
+        assert_eq!(stats.tracker_continuation_turns(), 1);
+        assert_eq!(stats.plan_continuation_turns(), 1);
     }
 
     #[test]

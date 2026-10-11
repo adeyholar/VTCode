@@ -603,7 +603,8 @@ pub(crate) fn is_internal_harness_follow_up(input: &str) -> bool {
         TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
     };
 
-    input.starts_with(TRACKER_CONTINUE_FOLLOW_UP_PREFIX)
+    input.starts_with(crate::agent::runloop::unified::state::PREFLIGHT_CORRECTIVE_FOLLOW_UP_PREFIX)
+        || input.starts_with(TRACKER_CONTINUE_FOLLOW_UP_PREFIX)
         || input.starts_with(PLAN_MODE_AUTO_CONTINUE_MARKER)
         || input.starts_with(RECOVERABLE_BLOCKED_CONTINUE_FOLLOW_UP_PREFIX)
         || input.starts_with(BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX)

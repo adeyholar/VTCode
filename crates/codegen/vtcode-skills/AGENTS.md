@@ -18,7 +18,7 @@
 
 ## Coding Conventions
 
-`anyhow::Result`, `serde`, `tracing`. Manifest parsing uses `serde-saphyr` for YAML frontmatter. Reference extraction excludes Markdown delimiters and external URLs, deduplicates normalized paths, and sorts diagnostics. Template paths relative to `templates/`.
+`anyhow::Result`, `serde`, `tracing`. Manifest parsing uses `serde-saphyr` for YAML frontmatter. Reference extraction excludes Markdown delimiters and external URLs, deduplicates normalized paths, and sorts diagnostics. Template paths relative to `templates/`. Static regex literals live in `LazyLock`/`OnceLock` statics (CI-enforced by the `no-per-call-regex-literal` ast-grep rule); `clippy::expect_used` is crate-allowed for those infallible compile-time-constant initializers, and runtime patterns must be memoized, not recompiled per call.
 
 ## Gotchas
 

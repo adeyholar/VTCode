@@ -25,6 +25,21 @@ both `#` and `##` headings, so updating Active Tools preserves the planning cont
 
 Plan markup, validation, persistence, and approval controls continue to use the existing runtime contract.
 
+Tracker descriptions and compiled tool guidance include minimal JSON examples: list uses only `action`, individual
+updates use either `index` or `index_path`, and bulk replacement uses `items`. Unused fields should be omitted;
+conflicting fields remain validation errors. Responses function definitions explicitly serialize `strict: false` to
+preserve these optional, action-specific arguments; Chat, hosted tools, and custom tools retain their wire contracts.
+
+Preflight synthesis guidance is appended to the current request only. Fresh projections omit exact legacy preflight
+system directives; a shared planning-synthesis directive is omitted only when its preceding tool batch identifies a
+preflight circuit trip. Canonical archives and user/policy messages remain intact. Current tool-free recovery still
+adds its active request-only directive.
+
+`start_planning` treats blank optional paths as absent and initializes a validated regular-file destination before
+publishing its active state. Initialization failures retain the prior active flag, plan path, and baseline.
+An explicit replacement validates the selected destination without inspecting an unusable preceding path. Omitting
+the path or supplying a blank path still validates the preceding destination when it will be reused.
+
 ## User-facing progress contract
 
 The compiled guidance tells the model that its text between tool calls is what the user reads. It says in one sentence

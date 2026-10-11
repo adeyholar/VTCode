@@ -450,6 +450,12 @@ pub(crate) async fn run_turn_loop(
         process_llm_response, resolve_effective_request_model,
     };
 
+    // Approval starts implementation with usable validation state, including
+    // current-context handoffs. Keep the consumed continuation budgets intact.
+    if ctx.harness_state.is_approved_plan_execution() {
+        ctx.session_stats.preflight_recovery = Default::default();
+    }
+
     // Initialize the outcome result
     let mut result = TurnLoopResult::Completed { plan_approved_execution_pending: false };
     let mut turn_modified_files = BTreeSet::new();
@@ -1610,6 +1616,17 @@ pub(crate) async fn run_turn_loop(
         result = stop;
         pending_primary_agent = None;
         pending_plan_execution_target = None;
+    }
+    ctx.session_stats.preflight_recovery.finish_corrective_turn();
+    if ctx.session_stats.preflight_recovery.exhausted()
+        && !ctx.harness_state.turn_refused()
+        && matches!(result, TurnLoopResult::Completed { plan_approved_execution_pending: false })
+        && pending_primary_agent.is_none()
+        && pending_plan_execution_target.is_none()
+    {
+        result = TurnLoopResult::Blocked {
+            reason: Some("Automatic preflight validation recovery stopped after one corrective turn without a successful correction. Type continue to resume with corrected arguments.".to_string()),
+        };
     }
     if let TurnLoopResult::Blocked { reason } = &result {
         ensure_blocked_turn_response(

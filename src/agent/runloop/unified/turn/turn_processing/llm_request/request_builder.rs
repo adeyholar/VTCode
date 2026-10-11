@@ -349,6 +349,7 @@ pub(super) async fn build_turn_request(
         .context_manager
         .normalize_history_for_request(ctx.working_history)
         .into_owned();
+    omit_expired_preflight_directives(&mut normalized_history);
     // Local stand-in for Anthropic `clear_tool_uses` when the wire will not
     // carry native context edits. Request-only: durable history is untouched.
     if let Some(vt_cfg) = ctx.vt_cfg
@@ -548,6 +549,35 @@ pub(super) async fn build_turn_request(
         runtime_tools: prompt_output.tool_snapshot.snapshot,
         continuation_messages,
     })
+}
+
+/// These exact legacy system directives were persisted by the preflight fuse.
+/// Synthesis now has a request-only directive. Do not filter user/tool content
+/// or broader policy/recovery instruction families.
+fn omit_expired_preflight_directives(messages: &mut Vec<uni::Message>) {
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::{
+        PLANNING_TOOL_FREE_RECOVERY_DIRECTIVE, PREFLIGHT_CIRCUIT_RECOVERY_DIRECTIVE,
+    };
+    let mut batch_preflight_tripped = false;
+    messages.retain(|message| {
+        match message.role {
+            uni::MessageRole::User | uni::MessageRole::Assistant => batch_preflight_tripped = false,
+            uni::MessageRole::Tool => {
+                batch_preflight_tripped |= serde_json::from_str::<serde_json::Value>(&message.content.as_text())
+                    .ok()
+                    .is_some_and(|payload| payload["failure_kind"] == "preflight_circuit_breaker");
+            }
+            uni::MessageRole::System => {
+                let text = message.content.as_text();
+                if text == PREFLIGHT_CIRCUIT_RECOVERY_DIRECTIVE
+                    || (batch_preflight_tripped && text == PLANNING_TOOL_FREE_RECOVERY_DIRECTIVE)
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    });
 }
 
 #[cfg(test)]
@@ -1716,6 +1746,74 @@ mod tests {
                 "compact_threshold": 512,
             }]))
         );
+    }
+
+    #[test]
+    fn preflight_projection_preserves_other_planning_synthesis_directives() {
+        let planning =
+            crate::agent::runloop::unified::turn::tool_outcomes::handlers::PLANNING_TOOL_FREE_RECOVERY_DIRECTIVE;
+        let mut history = vec![
+            uni::Message::tool_response("policy".into(), r#"{"failure_kind":"policy"}"#.into()),
+            uni::Message::system(planning.into()),
+            uni::Message::assistant("new batch".into()),
+            uni::Message::tool_response("preflight".into(), r#"{"failure_kind":"preflight_circuit_breaker"}"#.into()),
+            uni::Message::system(planning.into()),
+        ];
+        let canonical = history.clone();
+        super::omit_expired_preflight_directives(&mut history);
+        assert_eq!(history, canonical[..4]);
+        assert_eq!(canonical.len(), 5);
+    }
+
+    #[test]
+    fn preflight_fixture_projection_removes_expired_bytes_without_changing_archive() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tool_outcomes/handlers/tests/fixtures/tracker_preflight_session.json"
+        ))
+        .unwrap();
+        let canonical: Vec<_> = fixture["legacy_preflight_directives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| uni::Message::system(value.as_str().unwrap().to_string()))
+            .collect();
+        assert_eq!(canonical.len(), 6);
+        let bytes_before: usize = canonical.iter().map(|message| message.content.as_text().len()).sum();
+        let mut projected = canonical.clone();
+        super::omit_expired_preflight_directives(&mut projected);
+        assert!(projected.is_empty());
+        assert_eq!(canonical.len(), 6);
+        assert_eq!(bytes_before, 2298);
+    }
+
+    #[test]
+    fn preflight_projection_omits_only_identifiable_legacy_system_directives() {
+        let legacy =
+            crate::agent::runloop::unified::turn::tool_outcomes::handlers::PREFLIGHT_CIRCUIT_RECOVERY_DIRECTIVE;
+        let canonical = vec![
+            uni::Message::system(legacy.to_string()),
+            uni::Message::user(legacy.to_string()),
+            uni::Message::system("Policy: tools are disabled until approval".to_string()),
+        ];
+        let archive = canonical.clone();
+        let mut projected = canonical.clone();
+        super::omit_expired_preflight_directives(&mut projected);
+        assert_eq!(projected, canonical[1..]);
+        assert_eq!(canonical, archive);
+        projected.push(uni::Message::turn_scoped_system(super::recovery_mode_directive(
+            false,
+            Some("preflight validation circuit breaker"),
+        )));
+        assert!(
+            projected
+                .last()
+                .unwrap()
+                .content
+                .as_text()
+                .contains("do_not_emit_tool_calls: true")
+        );
+        super::omit_expired_preflight_directives(&mut projected);
+        assert_eq!(projected.len(), 3, "active request-only synthesis must survive");
     }
 
     #[test]

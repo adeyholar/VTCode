@@ -135,7 +135,7 @@ async fn assert_parallel_read_lifecycle(cancelled: bool) {
             .collect::<Vec<_>>();
         let starts = matching
             .iter()
-            .filter(|event| event["type"] == "item.started")
+            .filter(|event| event["type"] == "item.started" && event["item"]["type"] == "tool_invocation")
             .collect::<Vec<_>>();
         assert_eq!(starts.len(), 1, "one invocation start for {call_id}");
         let completions = matching
@@ -160,12 +160,19 @@ async fn assert_parallel_read_lifecycle(cancelled: bool) {
         }
         let output_text = output["item"]["output"].as_str().expect("output text");
         if cancelled {
-            assert!(output_text.contains("Tool execution cancelled"));
+            let payload: serde_json::Value = serde_json::from_str(output_text).expect("cancelled response JSON");
+            assert_eq!(payload["interrupted"], true);
+            assert_eq!(payload["not_executed"], true);
+            assert!(payload["error"].as_str().unwrap().contains("cancelled before execution"));
         } else if call_id == "parallel_read" {
             assert!(output_text.contains("hello"));
         }
     }
-    assert_eq!(persisted.matches("tool_latency_recorded").count(), 2, "one terminal observation per call");
+    assert_eq!(
+        persisted.matches("tool_latency_recorded").count(),
+        if cancelled { 0 } else { 2 },
+        "pre-cancelled calls never enter the execution pipeline; executed calls record latency once"
+    );
 }
 
 #[tokio::test]
@@ -539,15 +546,18 @@ async fn malformed_tool_calls_trip_preflight_circuit_at_configured_cap() {
     // tool-free recovery and push the synthesis directive.
     assert!(ctx.harness_state.recovery_is_tool_free(), "preflight circuit trip must arm tool-free recovery mode");
     assert!(ctx.harness_state.consume_recovery_pass(), "recovery pass must be pending after the circuit flush");
-    assert!(ctx.working_history.iter().any(|message| {
-        message.role == uni::MessageRole::System
-            && message.content.as_text().contains("circuit breaker")
-            && message.content.as_text().contains("tools are disabled for this pass")
-    }));
+    assert!(
+        !ctx.working_history.iter().any(|message| {
+            message.role == uni::MessageRole::System
+                && message.content.as_text().contains("circuit breaker")
+                && message.content.as_text().contains("tools are disabled for this pass")
+        }),
+        "preflight synthesis must be request-only"
+    );
 }
 
 #[tokio::test]
-async fn valid_admitted_tool_call_resets_preflight_circuit_streak() {
+async fn unrelated_admitted_tool_call_preserves_preflight_circuit_streak() {
     let mut backing = TestContextBacking::new(4).await;
     let mut repeated_tool_attempts = LoopTracker::new();
     let mut turn_modified_files = BTreeSet::new();
@@ -594,7 +604,8 @@ async fn valid_admitted_tool_call_resets_preflight_circuit_streak() {
         let ctx = backing.turn_processing_context();
         max_consecutive_blocked_tool_calls_per_turn(&ctx)
     };
-    for failure in 1..max_failures {
+    assert_eq!(backing.harness_state.consecutive_preflight_failures, 2);
+    for failure in 3..max_failures {
         let mut ctx = backing.turn_processing_context();
         let mut outcome_ctx = ToolOutcomeContext {
             ctx: &mut ctx,
@@ -770,9 +781,18 @@ async fn prose_blob_tool_names_do_not_trip_circuit_or_skip_valid_siblings() {
 
     assert!(outcome.is_none(), "name mistakes must not trip the preflight circuit or arm recovery");
     assert_eq!(
-        ctx.harness_state.consecutive_preflight_failures, 0,
-        "name mistakes must not advance the preflight failure streak"
+        ctx.harness_state.consecutive_preflight_failures, 1,
+        "the empty exec_command arguments are invalid; unrelated sibling success must retain that failure"
     );
+    for id in ["blob_0", "blob_1"] {
+        let response = ctx
+            .working_history
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some(id))
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&response.content.as_text()).unwrap();
+        assert_eq!(payload["failure_count"], 0, "name mistakes must not advance the failure streak");
+    }
     // Every call still gets a tool response (providers require one per call).
     for tool_call_id in expected_ids {
         assert!(
@@ -872,8 +892,7 @@ async fn preflight_circuit_does_not_block_approved_plan_execution() {
 #[tokio::test]
 async fn flush_preflight_circuit_recovery_is_idempotent_and_arms_tool_free_mode() {
     // The flush must be safe to call multiple times (dispatch calls it at
-    // several exit points) and must push the directive exactly once while
-    // arming tool-free recovery — mirroring the budget-exhaustion flush.
+    // several exit points) and must arm request-only tool-free recovery once.
     let mut backing = TestContextBacking::new(4).await;
     let mut ctx = backing.turn_processing_context();
 
@@ -890,7 +909,7 @@ async fn flush_preflight_circuit_recovery_is_idempotent_and_arms_tool_free_mode(
         .count();
     assert_eq!(directive_count_before, 0, "directive must not be pushed before flush");
 
-    // First flush pushes the directive and arms recovery.
+    // First flush arms recovery without persisting the directive.
     flush_preflight_circuit_recovery(&mut ctx);
     let directive_count_after = ctx
         .working_history
@@ -901,7 +920,7 @@ async fn flush_preflight_circuit_recovery_is_idempotent_and_arms_tool_free_mode(
                 && message.content.as_text().contains("tools are disabled for this pass")
         })
         .count();
-    assert_eq!(directive_count_after, 1, "directive must be pushed exactly once");
+    assert_eq!(directive_count_after, 0, "directive must stay request-only");
     assert!(ctx.harness_state.recovery_is_tool_free(), "flush must arm tool-free recovery mode");
     assert!(ctx.harness_state.consume_recovery_pass(), "recovery pass must be pending after flush");
 
@@ -916,7 +935,7 @@ async fn flush_preflight_circuit_recovery_is_idempotent_and_arms_tool_free_mode(
                 && message.content.as_text().contains("tools are disabled for this pass")
         })
         .count();
-    assert_eq!(directive_count_final, 1, "directive must not be duplicated");
+    assert_eq!(directive_count_final, 0, "canonical history must stay free of synthesis directives");
 }
 
 #[test]
@@ -957,11 +976,10 @@ async fn planning_preflight_recovery_requires_plan_artifact() {
 
     flush_preflight_circuit_recovery(&mut ctx);
 
-    assert!(ctx.working_history.iter().any(|message| {
-        let content = message.content.as_text();
-        message.role == uni::MessageRole::System
-            && content.contains("exactly one complete `<proposed_plan>`")
-            && content.contains("## Test Cases and Validation")
+    assert!(ctx.harness_state.recovery_is_tool_free());
+    assert_eq!(ctx.harness_state.recovery_reason.as_deref(), Some("preflight validation circuit breaker"));
+    assert!(!ctx.working_history.iter().any(|message| {
+        message.role == uni::MessageRole::System && message.content.as_text().contains("tools are disabled")
     }));
 }
 
@@ -3095,4 +3113,402 @@ async fn patch_recovery_rejects_ignored_limit_alias_at_the_path_cap() {
     assert!(output.contains("fixture-1"), "{output}");
     assert!(!output.contains("fixture-201"), "{output}");
     assert!(!output.contains("fixture-400"), "{output}");
+}
+
+#[tokio::test]
+async fn preflight_archived_tracker_fixture_stops_after_one_corrective_turn() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/tracker_preflight_session.json")).unwrap();
+    let sequence = fixture["sequence"].as_array().unwrap();
+    let arguments = fixture["rejected_arguments"].as_array().unwrap();
+    assert_eq!(sequence.len(), 39);
+    assert_eq!(arguments.len(), 6);
+    assert_eq!(fixture["baseline_internal_continuations"], 17);
+    let mut config = vtcode_core::config::VTCodeConfig::default();
+    config.tools.max_consecutive_blocked_tool_calls_per_turn = 6;
+    let mut backing = TestContextBacking::new(32).await;
+    backing.select_build_primary_agent();
+    assert!(backing.session_stats.record_tracker_continuation_turn_with_limit(3));
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut calls = 0;
+    let mut continuations = 0;
+    let mut distinct = BTreeSet::new();
+    for index in sequence {
+        let args = arguments[index.as_u64().unwrap() as usize].clone();
+        distinct.insert(args.to_string());
+        let call = PreparedAssistantToolCall::new(uni::ToolCall::function(
+            format!("fixture-{calls}"),
+            tool_names::TASK_TRACKER.to_string(),
+            args.to_string(),
+        ));
+        let mut ctx = backing.turn_processing_context();
+        ctx.vt_cfg = Some(&config);
+        let mut outcome_ctx = ToolOutcomeContext {
+            ctx: &mut ctx,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+        };
+        let outcome = handle_tool_calls(&mut outcome_ctx, &[call]).await.unwrap();
+        calls += 1;
+        if ctx.session_stats.preflight_recovery.exhausted() {
+            break;
+        }
+        if matches!(outcome, Some(TurnHandlerOutcome::Continue)) {
+            assert!(ctx.session_stats.preflight_recovery.corrective_pending());
+            assert_eq!(continuations, 0);
+            continuations += 1;
+            ctx.session_stats.preflight_recovery.begin_corrective_turn();
+            let prompt = format!(
+                "{} Correct rejected tracker arguments.",
+                crate::agent::runloop::unified::state::PREFLIGHT_CORRECTIVE_FOLLOW_UP_PREFIX
+            );
+            assert_eq!(
+                ctx.session_stats.register_follow_up_prompt(&prompt),
+                crate::agent::runloop::unified::state::FollowUpPromptAction::None
+            );
+            *ctx.harness_state =
+                HarnessTurnState::new(TurnRunId("corrective".into()), TurnId("corrective".into()), 32, 60, 0);
+        }
+    }
+    assert_eq!(
+        calls, 8,
+        "six initial failures, one changed corrective call, then its unchanged rejection stops recovery"
+    );
+    assert_eq!(calls - distinct.len(), 3, "independently counted duplicate calls");
+    assert_eq!(continuations, 1);
+    assert!(backing.session_stats.preflight_recovery.exhausted());
+    assert_eq!(
+        backing.session_stats.tracker_continuation_turns(),
+        1,
+        "validation must not replenish tracker budgets"
+    );
+    assert_eq!(
+        backing
+            .working_history
+            .iter()
+            .filter(|message| message.role == uni::MessageRole::Tool)
+            .count(),
+        calls
+    );
+    assert!(
+        !backing
+            .working_history
+            .iter()
+            .any(|message| message.role == uni::MessageRole::System
+                && message.content.as_text().contains("tools are disabled"))
+    );
+}
+
+#[tokio::test]
+async fn preflight_corrective_turn_revalidates_live_schema_and_stops_unchanged_calls() {
+    for correct in [true, false] {
+        let mut backing = TestContextBacking::new(32).await;
+        backing.select_build_primary_agent();
+        let args = json!({"action":"list","index":2});
+        let mut ctx = backing.turn_processing_context();
+        assert!(
+            ctx.tool_registry
+                .admit_public_tool_call(tool_names::TASK_TRACKER, &args)
+                .is_err()
+        );
+        ctx.session_stats.preflight_recovery.reject(
+            tool_names::TASK_TRACKER,
+            crate::agent::runloop::unified::state::ValidationCategory::Arguments,
+            Some(&args),
+            6,
+        );
+        ctx.session_stats.preflight_recovery.synthesis();
+        ctx.session_stats.preflight_recovery.begin_corrective_turn();
+        assert!(ctx.session_stats.record_tracker_continuation_turn_with_limit(3));
+        let retry = if correct {
+            json!({"action":"list"})
+        } else {
+            json!({"index":2,"action":"list","max_output_tokens":20})
+        };
+        let result = validate_tool_call(&mut ctx, "corrective", tool_names::TASK_TRACKER, &retry)
+            .await
+            .unwrap();
+        if correct {
+            assert!(matches!(result, ValidationResult::Proceed(_)));
+            assert!(!ctx.session_stats.preflight_recovery.is_clear(), "admission alone must not clear recovery");
+            let mut repeated_tool_attempts = LoopTracker::new();
+            let mut turn_modified_files = BTreeSet::new();
+            let mut outcome_ctx = ToolOutcomeContext {
+                ctx: &mut ctx,
+                repeated_tool_attempts: &mut repeated_tool_attempts,
+                turn_modified_files: &mut turn_modified_files,
+            };
+            handle_single_tool_call(&mut outcome_ctx, "corrected-execution", tool_names::TASK_TRACKER, retry)
+                .await
+                .unwrap();
+            assert!(ctx.session_stats.preflight_recovery.is_clear());
+            assert_eq!(ctx.session_stats.tracker_continuation_turns(), 1);
+        } else {
+            assert!(matches!(result, ValidationResult::Outcome(TurnHandlerOutcome::Break(_))));
+            assert!(ctx.session_stats.preflight_recovery.exhausted());
+            let response = ctx.working_history.last().unwrap().content.as_text();
+            assert!(response.contains("Repeated preflight rejection"));
+            assert!(!response.contains("Expected schema"), "repeat feedback must remain compact");
+        }
+    }
+}
+
+#[tokio::test]
+async fn preflight_batch_closes_every_invocation_and_retains_parsed_arguments() {
+    use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
+    for cancelled in [false, true] {
+        let mut backing = TestContextBacking::new(32).await;
+        backing.select_build_primary_agent();
+        let workspace = backing.sample_file.parent().unwrap().to_path_buf();
+        let emitter = HarnessEventEmitter::new_async(&workspace, "preflight-batch", None)
+            .await
+            .unwrap();
+        let valid = json!({"path":backing.sample_file});
+        cache_tool_permission(&mut backing, tool_names::READ_FILE, &valid, PermissionGrant::Permanent).await;
+        let invalid = json!({"action":"list","index":3});
+        let calls = [
+            PreparedAssistantToolCall::new(uni::ToolCall::function(
+                "admitted-first".into(),
+                tool_names::READ_FILE.into(),
+                valid.to_string(),
+            )),
+            PreparedAssistantToolCall::new(uni::ToolCall::function(
+                "invalid".into(),
+                tool_names::TASK_TRACKER.into(),
+                invalid.to_string(),
+            )),
+            PreparedAssistantToolCall::new(uni::ToolCall::function(
+                "malformed".into(),
+                tool_names::TASK_TRACKER.into(),
+                "{not-json".into(),
+            )),
+        ];
+        let mut config = vtcode_core::config::VTCodeConfig::default();
+        config.tools.max_consecutive_blocked_tool_calls_per_turn = 1;
+        let mut repeated_tool_attempts = LoopTracker::new();
+        let mut turn_modified_files = BTreeSet::new();
+        {
+            let mut ctx = backing.turn_processing_context();
+            ctx.vt_cfg = Some(&config);
+            ctx.harness_emitter = Some(&emitter);
+            if cancelled {
+                ctx.ctrl_c_state.request_local_cancel();
+            }
+            let mut outcome_ctx = ToolOutcomeContext {
+                ctx: &mut ctx,
+                repeated_tool_attempts: &mut repeated_tool_attempts,
+                turn_modified_files: &mut turn_modified_files,
+            };
+            let outcome = handle_tool_calls(&mut outcome_ctx, &calls).await.unwrap();
+            assert!(outcome.is_some());
+            if cancelled {
+                assert!(matches!(
+                    outcome,
+                    Some(TurnHandlerOutcome::Break(
+                        crate::agent::runloop::unified::turn::context::TurnLoopResult::Cancelled
+                    ))
+                ));
+                assert!(!ctx.session_stats.preflight_recovery.corrective_pending());
+                assert!(!ctx.harness_state.recovery_is_tool_free());
+            }
+            for call in &calls {
+                assert_eq!(
+                    ctx.working_history
+                        .iter()
+                        .filter(|message| message.tool_call_id.as_deref() == Some(call.call_id()))
+                        .count(),
+                    1
+                );
+            }
+        }
+        emitter.finish().await.unwrap();
+        let persisted =
+            std::fs::read_to_string(workspace.join(".vtcode/sessions/preflight-batch/events.jsonl")).unwrap();
+        let events: Vec<serde_json::Value> =
+            persisted.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        for (id, expected_args) in [
+            ("admitted-first", Some(&valid)),
+            ("invalid", Some(&invalid)),
+            ("malformed", None),
+        ] {
+            let completed: Vec<_> = events
+                .iter()
+                .filter(|record| {
+                    record["event"]["type"] == "item.completed" && record["event"]["item"]["tool_call_id"] == id
+                })
+                .collect();
+            assert_eq!(completed.len(), 2, "invocation and output close exactly once: {id}");
+            let invocation = completed
+                .iter()
+                .find(|record| record["event"]["item"]["type"] == "tool_invocation")
+                .unwrap();
+            assert_eq!(invocation["event"]["item"].get("arguments"), expected_args);
+        }
+    }
+}
+
+#[tokio::test]
+async fn preflight_corrective_turn_uses_current_schema_before_identity_check() {
+    let mut backing = TestContextBacking::new(32).await;
+    backing.select_build_primary_agent();
+    let mut ctx = backing.turn_processing_context();
+    let args = json!({"action":"update","index":0,"status":"completed"});
+    ctx.tool_registry.enable_planning();
+    assert!(
+        ctx.tool_registry
+            .admit_public_tool_call(tool_names::TASK_TRACKER, &args)
+            .is_err()
+    );
+    ctx.session_stats.preflight_recovery.reject(
+        tool_names::TASK_TRACKER,
+        crate::agent::runloop::unified::state::ValidationCategory::Arguments,
+        Some(&args),
+        6,
+    );
+    ctx.session_stats.preflight_recovery.synthesis();
+    ctx.session_stats.preflight_recovery.begin_corrective_turn();
+    ctx.tool_registry.disable_planning();
+    let result = validate_tool_call(&mut ctx, "live-schema", tool_names::TASK_TRACKER, &args)
+        .await
+        .unwrap();
+    assert!(
+        matches!(result, ValidationResult::Proceed(_)),
+        "index zero checklist completion is valid outside planning"
+    );
+    assert!(!ctx.session_stats.preflight_recovery.exhausted());
+}
+
+#[tokio::test]
+async fn preflight_failed_corrective_execution_does_not_clear_episode() {
+    let mut backing = TestContextBacking::new(32).await;
+    backing.select_build_primary_agent();
+    std::fs::create_dir_all(backing.config.workspace.join(".vtcode/tasks/current_task.md")).unwrap();
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut ctx = backing.turn_processing_context();
+    ctx.session_stats.preflight_recovery.reject(
+        tool_names::TASK_TRACKER,
+        crate::agent::runloop::unified::state::ValidationCategory::Arguments,
+        Some(&json!({"action":"list","index":1})),
+        6,
+    );
+    ctx.session_stats.preflight_recovery.synthesis();
+    ctx.session_stats.preflight_recovery.begin_corrective_turn();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+    handle_single_tool_call(&mut outcome_ctx, "failed-correction", tool_names::TASK_TRACKER, json!({"action":"list"}))
+        .await
+        .unwrap();
+    assert!(!ctx.session_stats.preflight_recovery.is_clear());
+    ctx.session_stats.preflight_recovery.finish_corrective_turn();
+    assert!(ctx.session_stats.preflight_recovery.exhausted());
+}
+
+#[tokio::test]
+async fn preflight_tracker_corrections_match_live_operations_and_canonical_aliases() {
+    struct CorrectionCase {
+        rejected_name: &'static str,
+        rejected_args: serde_json::Value,
+        correction: serde_json::Value,
+        clears: bool,
+    }
+    for case in [
+        CorrectionCase {
+            rejected_name: tool_names::TASK_TRACKER,
+            rejected_args: json!({"action":"lst"}),
+            correction: json!({"action":"list"}),
+            clears: true,
+        },
+        CorrectionCase {
+            rejected_name: tool_names::TASK_TRACKER,
+            rejected_args: json!({"action":"update","index":1}),
+            correction: json!({"action":"update","index":2,"status":"in_progress"}),
+            clears: false,
+        },
+        CorrectionCase {
+            rejected_name: "track_tasks",
+            rejected_args: json!({"action":"update","index":1}),
+            correction: json!({"action":"update","index":1,"status":"completed"}),
+            clears: true,
+        },
+        CorrectionCase {
+            rejected_name: tool_names::TASK_TRACKER,
+            rejected_args: json!({"action":"update","index_path":"01"}),
+            correction: json!({"action":"update","index":1,"status":"completed"}),
+            clears: true,
+        },
+    ] {
+        let mut backing = TestContextBacking::new(32).await;
+        backing.select_build_primary_agent();
+        let mut repeated_tool_attempts = LoopTracker::new();
+        let mut turn_modified_files = BTreeSet::new();
+        let mut ctx = backing.turn_processing_context();
+        let mut outcome_ctx = ToolOutcomeContext {
+            ctx: &mut ctx,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+        };
+        handle_single_tool_call(&mut outcome_ctx, "seed", tool_names::TASK_TRACKER,
+            json!({"action":"create","title":"Correction regression","items":["First operation","Different operation"]}))
+            .await.unwrap();
+        assert!(
+            outcome_ctx
+                .ctx
+                .tool_registry
+                .admit_public_tool_call(case.rejected_name, &case.rejected_args)
+                .is_err()
+        );
+        validate_tool_call(outcome_ctx.ctx, "rejected", case.rejected_name, &case.rejected_args)
+            .await
+            .unwrap();
+        assert!(!outcome_ctx.ctx.session_stats.preflight_recovery.is_clear());
+        outcome_ctx.ctx.session_stats.preflight_recovery.synthesis();
+        outcome_ctx.ctx.session_stats.preflight_recovery.begin_corrective_turn();
+        handle_single_tool_call(&mut outcome_ctx, "correction", tool_names::TASK_TRACKER, case.correction)
+            .await
+            .unwrap();
+        assert_eq!(outcome_ctx.ctx.session_stats.preflight_recovery.is_clear(), case.clears);
+        if !case.clears {
+            let persisted =
+                std::fs::read_to_string(outcome_ctx.ctx.config.workspace.join(".vtcode/tasks/current_task.md"))
+                    .unwrap();
+            assert!(persisted.contains("- [ ] First operation"));
+            assert!(persisted.contains("- [/] Different operation"), "the unrelated update must actually execute");
+            assert_eq!(outcome_ctx.ctx.harness_state.consecutive_preflight_failures, 1);
+            handle_single_tool_call(
+                &mut outcome_ctx,
+                "same-target",
+                tool_names::TASK_TRACKER,
+                json!({"action":"update","index":1,"status":"completed"}),
+            )
+            .await
+            .unwrap();
+            assert!(outcome_ctx.ctx.session_stats.preflight_recovery.is_clear());
+        }
+        assert_eq!(outcome_ctx.ctx.harness_state.consecutive_preflight_failures, 0);
+        outcome_ctx.ctx.session_stats.preflight_recovery.finish_corrective_turn();
+        assert!(!outcome_ctx.ctx.session_stats.preflight_recovery.exhausted());
+    }
+}
+
+#[tokio::test]
+async fn preflight_alias_spelling_cannot_bypass_unchanged_call_detection() {
+    let mut backing = TestContextBacking::new(32).await;
+    backing.select_build_primary_agent();
+    let mut ctx = backing.turn_processing_context();
+    let arguments = json!({"action":"list","index":1});
+    validate_tool_call(&mut ctx, "alias-rejected", "track_tasks", &arguments)
+        .await
+        .unwrap();
+    ctx.session_stats.preflight_recovery.synthesis();
+    ctx.session_stats.preflight_recovery.begin_corrective_turn();
+    let repeated = validate_tool_call(&mut ctx, "canonical-repeat", tool_names::TASK_TRACKER, &arguments)
+        .await
+        .unwrap();
+    assert!(matches!(repeated, ValidationResult::Outcome(TurnHandlerOutcome::Break(_))));
+    assert!(ctx.session_stats.preflight_recovery.exhausted());
 }

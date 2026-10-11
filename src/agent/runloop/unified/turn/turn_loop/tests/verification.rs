@@ -455,9 +455,25 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
     let mut history = vec![uni::Message::user("apply the change and verify it".to_string())];
     let turn_context = backing.turn_loop_context();
     turn_context.harness_state.set_approved_plan_execution(true);
+    turn_context.session_stats.preflight_recovery.reject(
+        tool_names::TASK_TRACKER,
+        crate::agent::runloop::unified::state::ValidationCategory::Arguments,
+        Some(&json!({"action":"list","index":1})),
+        6,
+    );
+    turn_context.session_stats.preflight_recovery.synthesis();
+    turn_context.session_stats.preflight_recovery.begin_corrective_turn();
+    turn_context.session_stats.preflight_recovery.finish_corrective_turn();
+    assert!(turn_context.session_stats.preflight_recovery.exhausted());
+    turn_context.session_stats.record_tracker_continuation_turn_with_limit(3);
+    turn_context.session_stats.record_plan_continuation_turn_with_limit(3);
     let outcome = run_turn_loop(&mut history, turn_context)
         .await
         .expect("anti-blind recovery should return a blocked outcome");
+    let execution_state = backing.turn_loop_context();
+    assert!(execution_state.session_stats.preflight_recovery.is_clear());
+    assert_eq!(execution_state.session_stats.tracker_continuation_turns(), 1);
+    assert_eq!(execution_state.session_stats.plan_continuation_turns(), 1);
 
     assert!(
         matches!(

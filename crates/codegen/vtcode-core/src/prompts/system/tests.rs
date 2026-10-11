@@ -65,23 +65,22 @@ async fn planning_prompt_size_fixed_fixture() {
         )),
         false,
     );
-    // Fixed fixture caps are below the pre-deduplication byte counts (10,222
-    // Default and 10,244 Minimal); retain the canonical output contract.
-    // Raised Default bytes 9800->9900 for the hypothesis-loop runtime bullet
-    // (measured 9847); Minimal bytes 10100->10250 (measured 10180).
-    // Named HOVER guidance stays within byte caps; Default/Minimal measure 2107/2205 tokens.
+    // Retain the canonical output contract and HOVER guidance. Before the tracker
+    // examples, Default/Minimal measured 9847/10180 bytes and 2107/2205 tokens.
+    // Action-specific tracker examples measure 9997 bytes/2146 tokens for Default
+    // and 10269 bytes/2216 tokens for Minimal; keep tight caps and presence checks.
     for case in [
         PlanningPromptSizeCase {
             density: "Default",
             prompt_budget_tokens: 100_000,
-            max_prompt_bytes: 9_900,
-            max_estimated_tokens: 2_110,
+            max_prompt_bytes: 10_000,
+            max_estimated_tokens: 2_150,
         },
         PlanningPromptSizeCase {
             density: "Minimal",
             prompt_budget_tokens: 1,
-            max_prompt_bytes: 10_250,
-            max_estimated_tokens: 2_210,
+            max_prompt_bytes: 10_280,
+            max_estimated_tokens: 2_220,
         },
     ] {
         let mut config = VTCodeConfig::default();

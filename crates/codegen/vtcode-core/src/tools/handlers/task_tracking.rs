@@ -1048,4 +1048,62 @@ mod tests {
         }
         assert!(TaskTrackingStatus::from_str("done").is_err());
     }
+
+    /// Drift guard: `TaskTrackingStatus` reaches the wire through three
+    /// independent paths — the derived serde `snake_case` form, `as_str()`, and
+    /// the hand-written `FromStr`. Nothing in the type system ties them
+    /// together, so this locks the as_str <-> serde <-> FromStr triangle for
+    /// every variant and pins the schema enum list to the same source. A
+    /// one-sided edit to any path fails here instead of silently producing a
+    /// value the runtime cannot parse back.
+    #[test]
+    fn task_status_as_str_serde_and_from_str_stay_in_lockstep() {
+        use std::str::FromStr;
+        let variants = [
+            TaskTrackingStatus::Pending,
+            TaskTrackingStatus::InProgress,
+            TaskTrackingStatus::Completed,
+            TaskTrackingStatus::Blocked,
+        ];
+        let strings: Vec<&str> = variants.iter().map(TaskTrackingStatus::as_str).collect();
+        assert_eq!(strings, TASK_STATUS_VALUES);
+
+        for variant in variants {
+            let expected = variant.as_str();
+            assert_eq!(
+                serde_json::to_value(variant).expect("serializes"),
+                json!(expected),
+                "serde form drifted for {variant:?}"
+            );
+            assert_eq!(
+                TaskTrackingStatus::from_str(expected).expect("as_str output must parse back"),
+                variant,
+                "FromStr drift for {variant:?}"
+            );
+        }
+    }
+
+    /// Cross-crate drift guard. `vtcode-commons::ui_protocol::TaskItemStatus`
+    /// (the TUI-facing row status) is a distinct type from
+    /// `TaskTrackingStatus` but must carry the *same* canonical strings — its
+    /// doc comment promises they match, and the TUI parses runtime strings
+    /// through it (`raw.parse::<TaskItemStatus>()`). The type system does not
+    /// connect the two enums, so pin them token-for-token here.
+    #[test]
+    fn task_item_status_matches_tracking_status_strings() {
+        use std::str::FromStr;
+        use vtcode_commons::ui_protocol::TaskItemStatus;
+
+        for variant in [
+            TaskTrackingStatus::Pending,
+            TaskTrackingStatus::InProgress,
+            TaskTrackingStatus::Completed,
+            TaskTrackingStatus::Blocked,
+        ] {
+            let canonical = variant.as_str();
+            let display = TaskItemStatus::from_str(canonical)
+                .unwrap_or_else(|_| panic!("TaskItemStatus must parse runtime status {canonical:?}"));
+            assert_eq!(display.as_str(), canonical, "TaskItemStatus/TaskTrackingStatus string drift for {variant:?}");
+        }
+    }
 }

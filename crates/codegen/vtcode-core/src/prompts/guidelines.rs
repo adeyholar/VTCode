@@ -40,8 +40,8 @@ const START_PLANNING_GUIDANCE_LINE: &str = "- For demanding, ambiguous, or multi
 /// routes to the plan sidecar, which rejects index 0 (`index_path components
 /// must be >= 1`); checklist-level `index: 0` completion exists only outside
 /// planning, so neither line advertises it.
-const PLANNING_TASK_TRACKER_COMPACT_LINE: &str = "- Keep blockers and verification open in `task_tracker`; updates use positive indices or index_path, and index 0 is invalid while planning.";
-const PLANNING_TASK_TRACKER_INDEX_LINE: &str = "- Use `task_tracker` action=update with positive flat indices or positive hierarchical index_path values (index 0 is invalid while planning), and use items only for full checklist replacement with descriptions and statuses, never JSON-encoded updates.";
+const PLANNING_TASK_TRACKER_COMPACT_LINE: &str = "- `task_tracker`: list {\"action\":\"list\"}; updates use positive index/index_path or items, never conflicting fields; index 0 is invalid while planning. Keep blockers and verification open.";
+const PLANNING_TASK_TRACKER_INDEX_LINE: &str = "- `task_tracker`: list {\"action\":\"list\"}; update {\"action\":\"update\",\"index\":1,\"status\":\"in_progress\"}; bulk {\"action\":\"update\",\"items\":[\"[x] Done\",\"[ ] Remaining\"]}. Use positive flat indices or hierarchical index_path (index 0 is invalid while planning), or items for full checklist replacement. Omit unused fields; never combine index, index_path, and items.";
 
 /// Context-token ceiling at or below which Active Tools documentation
 /// resolves to the Minimal density.
@@ -1172,6 +1172,12 @@ mod tests {
         assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains("positive flat indices"));
         assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains("(index 0 is invalid while planning)"));
         assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains("full checklist replacement"));
+        assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains(r#"{"action":"list"}"#));
+        assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains(r#"{"action":"update","index":1,"status":"in_progress"}"#));
+        assert!(
+            PLANNING_TASK_TRACKER_INDEX_LINE.contains(r#"{"action":"update","items":["[x] Done","[ ] Remaining"]}"#)
+        );
+        assert!(PLANNING_TASK_TRACKER_COMPACT_LINE.contains("never conflicting fields"));
         // The planning sidecar rejects index 0, so no planning line may present
         // it as a valid checklist-completion index.
         for line in [PLANNING_TASK_TRACKER_INDEX_LINE, PLANNING_TASK_TRACKER_COMPACT_LINE] {

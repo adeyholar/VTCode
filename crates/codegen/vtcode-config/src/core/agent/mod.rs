@@ -770,6 +770,38 @@ mod tests {
         assert_eq!(fallback.orchestration_mode, HarnessOrchestrationMode::PlanBuildEvaluate);
     }
 
+    /// Drift guard for hand-written enum string mappings. Each of these enums
+    /// exposes the same value through serde, `as_str()`, and `parse()`; see
+    /// [`crate::test_support::assert_string_enum_lockstep`].
+    #[test]
+    fn string_config_enums_keep_as_str_and_serde_in_lockstep() {
+        use crate::test_support::assert_string_enum_lockstep;
+
+        assert_string_enum_lockstep!(
+            ContinuationPolicy,
+            [
+                ContinuationPolicy::Off,
+                ContinuationPolicy::ExecOnly,
+                ContinuationPolicy::All
+            ]
+        );
+        assert_string_enum_lockstep!(
+            ContextResetMode,
+            [
+                ContextResetMode::Off,
+                ContextResetMode::OnStall,
+                ContextResetMode::OnCompaction
+            ]
+        );
+        assert_string_enum_lockstep!(
+            HarnessOrchestrationMode,
+            [
+                HarnessOrchestrationMode::Single,
+                HarnessOrchestrationMode::PlanBuildEvaluate
+            ]
+        );
+    }
+
     #[test]
     fn test_verification_auto_recovery_defaults_to_bounded_auto_execute() {
         let config = VerificationAutoRecoveryConfig::default();

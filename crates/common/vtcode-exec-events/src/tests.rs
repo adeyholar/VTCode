@@ -366,6 +366,33 @@ fn compaction_trigger_serializes_snake_case_and_round_trips() {
     }
 }
 
+/// `ThreadCompletionSubtype` and `CompactionMode` expose the same value through
+/// the derived serde `snake_case` form and the hand-written `as_str()`. The
+/// `as_str()` values feed `turn.completed.subtype` consumers and ATIF export, so
+/// a one-sided edit would silently desync the wire contract. Lock both.
+#[test]
+fn completion_subtype_and_compaction_mode_stay_in_lockstep() {
+    for subtype in [
+        ThreadCompletionSubtype::Success,
+        ThreadCompletionSubtype::ErrorMaxTurns,
+        ThreadCompletionSubtype::ErrorMaxBudgetUsd,
+        ThreadCompletionSubtype::ErrorDuringExecution,
+        ThreadCompletionSubtype::Cancelled,
+        ThreadCompletionSubtype::Unknown,
+    ] {
+        let json = serde_json::to_string(&subtype).unwrap();
+        assert_eq!(json, format!("\"{}\"", subtype.as_str()), "subtype wire form drifted");
+        let restored: ThreadCompletionSubtype = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, subtype);
+    }
+    for mode in [CompactionMode::Provider, CompactionMode::Local, CompactionMode::Unknown] {
+        let json = serde_json::to_string(&mode).unwrap();
+        assert_eq!(json, format!("\"{}\"", mode.as_str()), "compaction mode wire form drifted");
+        let restored: CompactionMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, mode);
+    }
+}
+
 #[test]
 fn tool_invocation_round_trip() -> Result<(), Box<dyn Error>> {
     let event = ThreadEvent::ItemCompleted(ItemCompletedEvent {

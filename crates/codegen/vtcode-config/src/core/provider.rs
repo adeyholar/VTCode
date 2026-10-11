@@ -791,6 +791,22 @@ mod tests {
         assert_eq!(parsed.effort, Some(super::ReasoningEffortLevel::High));
     }
 
+    /// `OpenAIServiceTier` keeps its `as_str()`/`parse()`/serde paths in
+    /// lockstep; see [`crate::test_support::assert_string_enum_lockstep`].
+    #[test]
+    fn openai_service_tier_string_paths_stay_in_lockstep() {
+        use crate::test_support::assert_string_enum_lockstep;
+
+        assert_string_enum_lockstep!(
+            OpenAIServiceTier,
+            [
+                OpenAIServiceTier::Flex,
+                OpenAIServiceTier::Priority,
+                OpenAIServiceTier::Ultrafast,
+            ]
+        );
+    }
+
     #[test]
     fn anthropic_fallbacks_default_to_default_mode() {
         let config = AnthropicConfig::default();

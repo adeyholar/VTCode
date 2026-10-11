@@ -39,6 +39,7 @@ fn serialize_responses_hosted_tool(tool_type: &str, config: Option<&Value>) -> O
 fn serialize_responses_function_tool(func: &provider::FunctionDefinition, defer_loading: bool) -> Value {
     let mut value = json!({
         "type": "function",
+        "strict": false,
         "name": &func.name,
         "description": &func.description,
         "parameters": sanitize_openai_function_parameters(
@@ -445,29 +446,27 @@ pub(crate) fn serialize_tools_for_responses(
                     if func.name == tools::SHELL {
                         hosted_shell
                             .and_then(serialize_openai_hosted_shell)
-                            .or_else(|| {
-                                Some(serialize_responses_function_tool(
-                                    func,
-                                    tool.defer_loading == Some(true),
-                                ))
-                            })
+                            .or_else(|| Some(serialize_responses_function_tool(func, tool.defer_loading == Some(true))))
                     } else {
-                        Some(serialize_responses_function_tool(
-                            func,
-                            tool.defer_loading == Some(true),
-                        ))
+                        Some(serialize_responses_function_tool(func, tool.defer_loading == Some(true)))
                     }
                 }
                 tools::APPLY_PATCH => {
                     if let Some(func) = tool.function.as_ref() {
                         Some(serialize_responses_function_tool(func, false))
                     } else {
-                        Some(json!({
-                            "type": "function",
-                            "name": tools::APPLY_PATCH,
-                            "description": vtcode_utility_tool_specs::with_semantic_anchor_guidance(vtcode_utility_tool_specs::DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION),
-                            "parameters": vtcode_utility_tool_specs::apply_patch_parameter_schema(vtcode_utility_tool_specs::DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION)
-                        }))
+                        Some(serialize_responses_function_tool(
+                            &provider::FunctionDefinition {
+                                name: tools::APPLY_PATCH.to_string(),
+                                description: vtcode_utility_tool_specs::with_semantic_anchor_guidance(
+                                    vtcode_utility_tool_specs::DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION,
+                                ),
+                                parameters: vtcode_utility_tool_specs::apply_patch_parameter_schema(
+                                    vtcode_utility_tool_specs::DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION,
+                                ),
+                            },
+                            false,
+                        ))
                     }
                 }
                 tools::SHELL => hosted_shell.and_then(serialize_openai_hosted_shell),
@@ -498,10 +497,9 @@ pub(crate) fn serialize_tools_for_responses(
                 }),
                 "tool_search" => Some(json!({ "type": "tool_search" })),
                 "web_search" => serialize_responses_hosted_tool("web_search", tool.web_search.as_ref()),
-                "file_search" | "mcp" => serialize_responses_hosted_tool(
-                    tool.tool_type.as_str(),
-                    tool.hosted_tool_config.as_ref(),
-                ),
+                "file_search" | "mcp" => {
+                    serialize_responses_hosted_tool(tool.tool_type.as_str(), tool.hosted_tool_config.as_ref())
+                }
                 _ => tool
                     .function
                     .as_ref()
@@ -553,6 +551,55 @@ mod tests {
     use crate::provider::ToolDefinition;
     use serde_json::{Value, json};
     use vtcode_config::constants::tools;
+
+    #[test]
+    fn responses_functions_explicitly_opt_out_of_strict_normalization() {
+        let function = ToolDefinition::function(
+            "task_tracker".into(),
+            "Tracker".into(),
+            json!({"type":"object","properties":{"action":{"type":"string"},"index":{"type":"integer"}},"required":["action"]}),
+        );
+        let mut shell = function.clone();
+        shell.function.as_mut().unwrap().name = tools::SHELL.into();
+        let mut fallback = function.clone();
+        fallback.tool_type = "legacy_tool".into();
+        fallback.function.as_mut().unwrap().name = "legacy".into();
+        let patch: ToolDefinition = serde_json::from_value(json!({"type":tools::APPLY_PATCH})).unwrap();
+        let payload = serialize_tools_for_responses(&[function.clone(), shell, fallback, patch], None).unwrap();
+        assert_eq!(payload.as_array().unwrap().len(), 4);
+        for tool in payload.as_array().unwrap() {
+            assert_eq!(tool["type"], "function");
+            assert_eq!(tool["strict"], false);
+        }
+        assert_eq!(payload[0]["parameters"]["required"], json!(["action"]));
+        let chat = super::serialize_tools(&[function], "gpt-6").unwrap();
+        assert!(chat[0].get("strict").is_none());
+        assert!(chat[0]["function"].get("strict").is_none());
+    }
+
+    #[test]
+    fn responses_strictness_does_not_change_custom_or_hosted_contracts() {
+        let mut custom =
+            ToolDefinition::function("custom_input".into(), "Custom".into(), json!({"format":{"type":"text"}}));
+        custom.tool_type = "custom".into();
+        let hosted: ToolDefinition = serde_json::from_value(json!({"type":"web_search","web_search":{}})).unwrap();
+        let payload = serialize_tools_for_responses(
+            &[
+                custom,
+                hosted,
+                ToolDefinition::grammar("lark".into(), "start: \"patch\"".into()),
+            ],
+            None,
+        )
+        .unwrap();
+        assert_eq!(payload.as_array().unwrap().len(), 3);
+        for tool in payload.as_array().unwrap() {
+            assert!(tool.get("strict").is_none());
+        }
+        assert_eq!(payload[0]["type"], "custom");
+        assert_eq!(payload[1]["type"], "web_search");
+        assert_eq!(payload[2]["type"], "custom");
+    }
 
     #[test]
     fn apply_patch_fallback_schema_requires_workspace_relative_paths() {

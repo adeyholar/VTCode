@@ -578,7 +578,7 @@ traversals/s that is ~500M atomics/s — the lock bookkeeping, not the data, bec
 
 ## Per-Unit Cost of Expensive Work
 
-The worst performance shape is not slow code — it is *cheap* code called
+The worst performance shape is not slow code — it is _cheap_ code called
 per-unit. Clippy's `nonstandard_macro_braces` lint ran a post-expansion check
 that, for every expression, statement, and item in a compiled crate, locked the
 compiler's session globals, locked the symbol interner, and re-derived source
