@@ -2,7 +2,9 @@ use super::*;
 use crate::config::constants::tools as tool_names;
 use crate::config::{HistoryPersistence, VTCodeConfig};
 use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
-use crate::llm::provider::{ContentPart, MessageClearAt, ToolCall};
+use crate::llm::provider::{
+    AssistantPhase, ContentPart, Message, MessageClearAt, MessageContent, MessageRole, ToolCall,
+};
 use anyhow::anyhow;
 use chrono::{TimeZone, Timelike};
 use std::mem::size_of;
