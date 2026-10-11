@@ -5,10 +5,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
+use super::query::is_session_file;
 use super::settings::{SESSION_MAX_AGE_DAYS_ENV, SESSION_MAX_FILES_ENV, SESSION_MAX_SIZE_MB_ENV, read_env_var};
-use super::{
-    BYTES_PER_MB, DEFAULT_SESSION_MAX_AGE_DAYS, DEFAULT_SESSION_MAX_FILES, DEFAULT_SESSION_MAX_SIZE_MB, is_session_file,
-};
+use super::{BYTES_PER_MB, DEFAULT_SESSION_MAX_AGE_DAYS, DEFAULT_SESSION_MAX_FILES, DEFAULT_SESSION_MAX_SIZE_MB};
 use crate::core::SECONDS_PER_DAY;
 
 #[derive(Debug, Clone)]

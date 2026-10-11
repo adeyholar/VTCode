@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use super::identifier::{generate_unique_archive_path, reserve_new_session_archive_path};
 use super::message::SessionMessage;
 use super::metadata::{SessionArchiveMetadata, SessionContinuationMetadata};
+use super::query::{find_session_by_identifier, resolve_sessions_dir_for_archive_writes, write_private_json_file_sync};
 use super::retention::apply_session_retention_best_effort;
 use super::settings::history_persistence_enabled;
 use super::shrink::prepare_snapshot_for_write;
@@ -16,7 +17,6 @@ use super::snapshot::{
     VerifiedSessionArchiveIdentifier,
 };
 use super::transcript::{clean_transcript_lines, progress_transcript_from_recent_messages};
-use super::{find_session_by_identifier, resolve_sessions_dir_for_archive_writes, write_private_json_file_sync};
 use crate::config::constants::defaults;
 use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
 use crate::telemetry::perf::PerfSpan;
