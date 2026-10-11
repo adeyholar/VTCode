@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use std::path::Path;
 use vtcode_commons::VtCodePaths;
+use vtcode_commons::utils::parse_bool_env_value;
 
 pub const MAX_SCHEDULED_TASKS: usize = 50;
 pub const SESSION_TASK_EXPIRY_HOURS: i64 = 72;
@@ -58,15 +59,13 @@ pub use self::store::{DurableTaskStore, SchedulerPaths};
 pub fn scheduled_tasks_enabled(enabled_in_config: bool) -> bool {
     #[cfg(test)]
     if let Some(value) = test_env_overrides::get() {
-        let normalized = value.trim().to_ascii_lowercase();
-        if matches!(normalized.as_str(), "1" | "true" | "yes" | "on") {
+        if parse_bool_env_value(&value) == Some(true) {
             return false;
         }
     }
 
     if let Ok(value) = std::env::var(DISABLE_CRON_ENV) {
-        let normalized = value.trim().to_ascii_lowercase();
-        if matches!(normalized.as_str(), "1" | "true" | "yes" | "on") {
+        if parse_bool_env_value(&value) == Some(true) {
             return false;
         }
     }

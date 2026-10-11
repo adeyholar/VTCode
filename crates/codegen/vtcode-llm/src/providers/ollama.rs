@@ -281,7 +281,7 @@ impl OllamaProvider {
     async fn ensure_ready(&self, requested: &str) -> Result<String, LLMError> {
         let autopull = std::env::var("VTCODE_LOCAL_AUTOPULL")
             .ok()
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .and_then(|v| vtcode_commons::utils::parse_bool_env_value(&v))
             .unwrap_or(false);
 
         match resolve_local_model(LocalProvider::Ollama, requested, Some(&self.base_url)).await {

@@ -576,14 +576,7 @@ fn default_notifications_max_identical_in_window() -> u32 {
 }
 
 fn env_bool_var(name: &str) -> Option<bool> {
-    crate::env_helpers::read_env_var(name).and_then(|v| {
-        let normalized = v.trim().to_ascii_lowercase();
-        match normalized.as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            _ => None,
-        }
-    })
+    crate::env_helpers::read_env_var(name).and_then(|v| vtcode_commons::utils::parse_bool_env_value(&v))
 }
 
 fn env_u8_var(name: &str) -> Option<u8> {
