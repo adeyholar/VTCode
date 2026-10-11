@@ -1,5 +1,4 @@
 use crate::config::constants::defaults;
-use crate::config::{HistoryPersistence, VTCodeConfig};
 use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
 use crate::llm::provider::{AssistantPhase, Message, MessageClearAt, MessageContent, MessageRole, ToolCall};
 use crate::telemetry::perf::PerfSpan;
@@ -18,125 +17,32 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 use vtcode_commons::VtCodePaths;
 use vtcode_commons::fs::{read_private_json_file, write_private_json_file};
 
+mod settings;
+
+pub use self::settings::{
+    SESSION_DIR_ENV, SESSION_MAX_AGE_DAYS_ENV, SESSION_MAX_FILES_ENV, SESSION_MAX_SIZE_MB_ENV,
+    apply_session_history_config_from_vtcode, history_persistence_enabled,
+};
+#[cfg(test)]
+pub(crate) use self::settings::{
+    SessionHistorySettings, clear_sessions_dir_override_for_tests, clear_test_env_override,
+    override_sessions_dir_for_tests, set_test_env_override_path,
+};
+use self::settings::{read_env_var, read_env_var_os, session_history_settings};
+
 const SESSION_FILE_PREFIX: &str = "session";
 const SESSION_FILE_EXTENSION: &str = "json";
-pub const SESSION_DIR_ENV: &str = "VT_SESSION_DIR";
-pub const SESSION_MAX_FILES_ENV: &str = "VT_SESSION_MAX_FILES";
-pub const SESSION_MAX_AGE_DAYS_ENV: &str = "VT_SESSION_MAX_AGE_DAYS";
-pub const SESSION_MAX_SIZE_MB_ENV: &str = "VT_SESSION_MAX_SIZE_MB";
 const DEFAULT_SESSION_MAX_FILES: usize = 100;
 const DEFAULT_SESSION_MAX_AGE_DAYS: u64 = 14;
 const DEFAULT_SESSION_MAX_SIZE_MB: u64 = 100;
 const BYTES_PER_MB: u64 = 1024 * 1024;
 use crate::core::SECONDS_PER_DAY;
-
-#[derive(Debug, Clone, Copy)]
-struct SessionHistorySettings {
-    persistence: HistoryPersistence,
-    max_bytes: Option<usize>,
-}
-
-impl Default for SessionHistorySettings {
-    fn default() -> Self {
-        Self {
-            persistence: HistoryPersistence::File,
-            max_bytes: None,
-        }
-    }
-}
-
-static SESSION_HISTORY_SETTINGS: OnceLock<Mutex<SessionHistorySettings>> = OnceLock::new();
-
-fn session_history_settings() -> SessionHistorySettings {
-    SESSION_HISTORY_SETTINGS
-        .get()
-        .map(|settings| *settings.lock().unwrap_or_else(|e| e.into_inner()))
-        .unwrap_or_default()
-}
-
-pub fn apply_session_history_config_from_vtcode(config: &VTCodeConfig) {
-    let settings = SessionHistorySettings {
-        persistence: config.history.persistence,
-        max_bytes: config.history.max_bytes,
-    };
-    let cell = SESSION_HISTORY_SETTINGS.get_or_init(|| Mutex::new(SessionHistorySettings::default()));
-    if let Ok(mut guard) = cell.lock() {
-        *guard = settings;
-    }
-}
-
-pub fn history_persistence_enabled() -> bool {
-    matches!(session_history_settings().persistence, HistoryPersistence::File)
-}
-
-#[cfg(test)]
-mod test_env_overrides {
-    use hashbrown::HashMap;
-    use std::ffi::OsString;
-    use std::sync::{LazyLock, Mutex};
-
-    static OVERRIDES: LazyLock<Mutex<HashMap<String, Option<OsString>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-    pub(super) fn get(key: &str) -> Option<Option<OsString>> {
-        OVERRIDES.lock().ok().and_then(|map| map.get(key).cloned())
-    }
-
-    pub(super) fn set(key: &str, value: Option<OsString>) {
-        if let Ok(mut map) = OVERRIDES.lock() {
-            map.insert(key.to_owned(), value);
-        }
-    }
-
-    pub(super) fn clear(key: &str) {
-        if let Ok(mut map) = OVERRIDES.lock() {
-            map.remove(key);
-        }
-    }
-}
-
-fn read_env_var_os(key: &str) -> Option<std::ffi::OsString> {
-    #[cfg(test)]
-    if let Some(override_value) = test_env_overrides::get(key) {
-        return override_value;
-    }
-
-    env::var_os(key)
-}
-
-fn read_env_var(key: &str) -> Option<String> {
-    #[cfg(test)]
-    if let Some(override_value) = test_env_overrides::get(key) {
-        return override_value.map(|value| value.to_string_lossy().to_string());
-    }
-
-    env::var(key).ok()
-}
-
-#[cfg(test)]
-fn set_test_env_override_path(key: &str, value: &Path) {
-    test_env_overrides::set(key, Some(value.as_os_str().to_os_string()));
-}
-
-#[cfg(test)]
-fn clear_test_env_override(key: &str) {
-    test_env_overrides::clear(key);
-}
-
-#[cfg(test)]
-pub(crate) fn override_sessions_dir_for_tests(path: &Path) {
-    set_test_env_override_path(SESSION_DIR_ENV, path);
-}
-
-#[cfg(test)]
-pub(crate) fn clear_sessions_dir_override_for_tests() {
-    clear_test_env_override(SESSION_DIR_ENV);
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionArchiveMetadata {

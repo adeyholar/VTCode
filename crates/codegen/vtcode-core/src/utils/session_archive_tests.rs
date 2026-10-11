@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::constants::tools as tool_names;
+use crate::config::{HistoryPersistence, VTCodeConfig};
 use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
 use crate::llm::provider::{ContentPart, MessageClearAt, ToolCall};
 use anyhow::anyhow;
