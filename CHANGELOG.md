@@ -2,6 +2,28 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.175.6 - 2026-10-11
+
+### Highlights
+#### Bug Fixes
+
+- Qualify macro transcriber path with absolute crate:: route (dd2a8a3d) 
+- Use byte offsets when extracting streamed JSON objects (793e1af5) 
+- Keep VTCODE_LOCAL_AUTOPULL strict on its side-effecting path (219b19ec) 
+- Ensure rejected plans remain blocked and provide clear feedback (4f31d405) 
+#### Documentation
+
+- Correct file_err! usage example (85b6787f) 
+- Update README for clarity and consistency in descriptions (0b08e19c) 
+#### Features
+
+- Enhance rejection handling to ignore cosmetic changes in operations (952b638b) 
+### Other Changes
+#### Refactors
+
+- Route tri-state env bools through canonical parser (09e4f065) 
+- Classify errors by type and add LLMError::metadata accessor (3c9bb642) 
+- Update operating task tracker descriptions for clarity and consistency (d4bc962e) 
 ## 0.175.5 - 2026-10-11
 
 ### Highlights
