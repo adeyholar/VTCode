@@ -25,8 +25,13 @@ use crate::utils::tool_name_parsing::canonical_tool_name;
 use vtcode_commons::VtCodePaths;
 use vtcode_commons::fs::{read_private_file_no_follow, write_private_file_atomic};
 
+mod alternative;
 mod mcp;
 mod shell_approval;
+
+pub use self::alternative::{
+    AlternativeArgsPolicy, AlternativeDefaultPolicy, AlternativeToolPolicy, AlternativeToolPolicyConfig,
+};
 
 pub use self::mcp::{McpPolicyStore, McpProviderPolicy};
 pub(crate) use self::mcp::{mcp_standard_logging, parse_mcp_policy_key};
@@ -166,59 +171,6 @@ impl ApprovalCacheConfig {
         }
         trimmed
     }
-}
-
-/// Stored MCP policy state, persisted alongside standard tool policies
-/// Alternative tool policy configuration format (user's format)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AlternativeToolPolicyConfig {
-    /// Configuration version for future compatibility
-    pub version: u32,
-    /// Default policy settings
-    pub default: AlternativeDefaultPolicy,
-    /// Tool-specific policies
-    pub tools: IndexMap<String, AlternativeToolPolicy>,
-    /// Optional per-tool constraints (ignored if absent)
-    #[serde(default)]
-    pub constraints: IndexMap<String, ToolConstraints>,
-}
-
-/// Default policy in alternative format
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AlternativeDefaultPolicy {
-    /// Whether to allow by default
-    pub allow: bool,
-    /// Rate limit per run
-    pub rate_limit_per_run: u32,
-    /// Max concurrent executions
-    pub max_concurrent: u32,
-    /// Allow filesystem writes
-    pub fs_write: bool,
-    /// Allow network access
-    pub network: bool,
-}
-
-/// Tool policy in alternative format
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AlternativeToolPolicy {
-    /// Whether to allow this tool
-    pub allow: bool,
-    /// Allow filesystem writes (optional)
-    #[serde(default)]
-    pub fs_write: bool,
-    /// Allow network access (optional)
-    #[serde(default)]
-    pub network: bool,
-    /// Arguments policy (optional)
-    #[serde(default)]
-    pub args_policy: Option<AlternativeArgsPolicy>,
-}
-
-/// Arguments policy in alternative format
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AlternativeArgsPolicy {
-    /// Substrings to deny
-    pub deny_substrings: Vec<String>,
 }
 
 /// Handler for tool permission prompts
