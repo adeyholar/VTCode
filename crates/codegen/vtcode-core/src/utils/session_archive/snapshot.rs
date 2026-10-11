@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::identifier::validate_session_identifier;
 use super::message::SessionMessage;
 use super::metadata::SessionArchiveMetadata;
-use super::truncate_preview;
+use super::shrink::truncate_preview;
 use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
 use crate::llm::provider::MessageRole;
 use crate::utils::error_log_collector::ErrorLogEntry;
