@@ -5,12 +5,16 @@ use vtcode_commons::ErrorCategory;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
-use super::{
-    MAX_POST_TOOL_RECOVERY_CYCLES, PLANNING_RECOVERY_SYNTHESIS_FALLBACK,
+use super::responses::{
+    MAX_POST_TOOL_RECOVERY_CYCLES, PLANNING_BUDGET_EXHAUSTED_NO_DRAFT_NOTICE, PLANNING_BUDGET_EXHAUSTED_USER_NOTICE,
+    PLANNING_INTERVIEW_DENIED_NO_DRAFT_NOTICE, PLANNING_RECOVERY_EXHAUSTED_NO_DRAFT_NOTICE,
+    PLANNING_RECOVERY_EXHAUSTED_USER_NOTICE, PLANNING_RECOVERY_SYNTHESIS_FALLBACK,
     PLANNING_RECOVERY_SYNTHESIS_FALLBACK_NO_INTERVIEW, PLANNING_RECOVERY_SYNTHESIS_FALLBACK_NO_RETRY,
+    RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER,
+};
+use super::{
     POST_TOOL_RECOVERY_REASON, POST_TOOL_RECOVERY_REASON_PLAN_MODE, POST_TOOL_RESUME_DIRECTIVE,
     POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE, RECOVERY_CONTRACT_VIOLATION_REASON,
-    RECOVERY_SYNTHESIS_FALLBACK_FINAL_ANSWER,
 };
 use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
 use crate::agent::runloop::unified::plan_blocks::extract_any_plan;
@@ -430,22 +434,14 @@ impl PlanningRecoveryOutcome {
 /// `PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT`.
 fn planning_finalize_notice(outcome: PlanningRecoveryOutcome) -> &'static str {
     match outcome {
-        PlanningRecoveryOutcome::BudgetExhausted { plan_ready: true } => super::PLANNING_BUDGET_EXHAUSTED_USER_NOTICE,
-        PlanningRecoveryOutcome::BudgetExhausted { plan_ready: false } => {
-            super::PLANNING_BUDGET_EXHAUSTED_NO_DRAFT_NOTICE
-        }
-        PlanningRecoveryOutcome::RecoveryExhausted { plan_ready: true } => {
-            super::PLANNING_RECOVERY_EXHAUSTED_USER_NOTICE
-        }
-        PlanningRecoveryOutcome::RecoveryExhausted { plan_ready: false } => {
-            super::PLANNING_RECOVERY_EXHAUSTED_NO_DRAFT_NOTICE
-        }
+        PlanningRecoveryOutcome::BudgetExhausted { plan_ready: true } => PLANNING_BUDGET_EXHAUSTED_USER_NOTICE,
+        PlanningRecoveryOutcome::BudgetExhausted { plan_ready: false } => PLANNING_BUDGET_EXHAUSTED_NO_DRAFT_NOTICE,
+        PlanningRecoveryOutcome::RecoveryExhausted { plan_ready: true } => PLANNING_RECOVERY_EXHAUSTED_USER_NOTICE,
+        PlanningRecoveryOutcome::RecoveryExhausted { plan_ready: false } => PLANNING_RECOVERY_EXHAUSTED_NO_DRAFT_NOTICE,
         PlanningRecoveryOutcome::InterviewDenied { plan_ready: true } => {
             PLANNING_RECOVERY_SYNTHESIS_FALLBACK_NO_INTERVIEW
         }
-        PlanningRecoveryOutcome::InterviewDenied { plan_ready: false } => {
-            super::PLANNING_INTERVIEW_DENIED_NO_DRAFT_NOTICE
-        }
+        PlanningRecoveryOutcome::InterviewDenied { plan_ready: false } => PLANNING_INTERVIEW_DENIED_NO_DRAFT_NOTICE,
     }
 }
 

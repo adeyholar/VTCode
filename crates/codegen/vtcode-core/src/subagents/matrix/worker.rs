@@ -22,9 +22,15 @@ struct OwnedCommands(Option<ToolRegistry>);
 impl Drop for OwnedCommands {
     fn drop(&mut self) {
         if let Some(registry) = self.0.take() {
-            tokio::spawn(async move {
-                let _ = registry.terminate_all_exec_sessions_for_exit_async().await;
-            });
+            // Best-effort fallback: the explicit 12s termination above already
+            // ran when the worker completed. Guard the spawn so dropping
+            // outside a Tokio runtime (tests, shutdown) cannot panic; this
+            // mirrors `MatrixExecutionCleanup` in `core/agent/runner/execute.rs`.
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = registry.terminate_all_exec_sessions_for_exit_async().await;
+                });
+            }
         }
     }
 }
