@@ -151,14 +151,18 @@ bounded.
   prevents replaying the full parent bootstrap on every child turn.
 - **Tool-result clearing is on by default.** Old tool results are stripped from context once it grows past
   `trigger_tokens` (default 40k), protecting the most recent `keep_tool_uses` (default 2) results. Requests that will
-  not carry native context edits get the request-only local rewrite (`clear_old_tool_results`): non-Anthropic providers,
+  not carry native context edits get the request-only local rewrite (`clear_old_tool_results_with_recent_batches`):
+  non-Anthropic providers,
   Anthropic routes whose model capability profile lacks context edits, and headless (`vtcode exec`) Anthropic runs,
   which never attach native context management. The local rewrite stubs older tool-result bodies while preserving
   `tool_call_id` pairing. The local trigger is capped at 60% of the history budget: the resolved provider/session
   context limit minus reserved output tokens and system/tool-schema overhead. Lower configured triggers still win;
   unknown capacity preserves the configured trigger. Set `enabled = false` to opt out. Local retention extends
   to every result in each protected result's originating assistant tool-call batch, even with reordered completions
-  or intervening system directives. Small results remain unchanged when a placeholder would not save tokens.
+  or intervening system directives. It additionally protects the newest `keep_recent_tool_batches` assistant
+  tool-call messages (default 2), by originating message order. The union protects 7 results for rounds of 1/4/3.
+  Set `keep_recent_tool_batches = 0` to restore count-based batch retention; native Anthropic edits ignore this
+  local-only setting. Small results remain unchanged when a placeholder would not save tokens.
   Durable session history and `ThreadEvent`s keep the full payload. Headless automatic compaction checks the
   normalized, cleared request projection first; if pressure remains high, the existing compaction engine receives
   full history and the request projection is rebuilt afterward.

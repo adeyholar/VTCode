@@ -373,10 +373,11 @@ pub(super) async fn build_turn_request(
                 tokens as usize
             }),
         );
-        normalized_history = vtcode_core::core::agent::state::clear_old_tool_results(
+        normalized_history = vtcode_core::core::agent::state::clear_old_tool_results_with_recent_batches(
             &normalized_history,
             trigger_tokens,
             clearing.keep_tool_uses,
+            clearing.keep_recent_tool_batches,
             clearing.clear_at_least_tokens,
             clearing.clear_tool_inputs,
         );
@@ -1556,16 +1557,17 @@ mod tests {
 
     #[tokio::test]
     async fn local_clearing_uses_session_budget_and_preserves_recent_batch() {
-        for enabled in [true, false] {
+        for (enabled, recent_batches) in [(true, 0), (true, 1), (true, 2), (false, 2)] {
             let mut backing = TestTurnProcessingBacking::new(4).await;
             let mut cfg = VTCodeConfig::default();
             cfg.context.max_context_tokens = 16_000;
             cfg.agent.harness.tool_result_clearing.trigger_tokens = 40_000;
             cfg.agent.harness.tool_result_clearing.enabled = enabled;
+            cfg.agent.harness.tool_result_clearing.keep_recent_tool_batches = recent_batches;
             backing.set_vt_cfg_for_test(cfg);
             let mut ctx = backing.turn_processing_context();
             ctx.working_history.push(uni::Message::user("Inspect evidence".into()));
-            for (batch, count) in [1, 3].into_iter().enumerate() {
+            for (batch, count) in [1, 4, 3].into_iter().enumerate() {
                 let mut assistant = uni::Message::assistant("Inspect batch".into());
                 assistant.tool_calls = Some(
                     (0..count)
@@ -1582,7 +1584,7 @@ mod tests {
                 for call in (0..count).rev() {
                     ctx.working_history.push(uni::Message::tool_response(
                         format!("call_{batch}_{call}"),
-                        format!("evidence_{batch}_{call} ").repeat(1_000),
+                        format!("evidence_{batch}_{call} ").repeat(600),
                     ));
                 }
             }
@@ -1598,10 +1600,16 @@ mod tests {
                 .iter()
                 .filter(|message| message.role == uni::MessageRole::Tool)
                 .collect();
-            assert_eq!(results.len(), 4);
+            assert_eq!(results.len(), 8);
             assert_eq!(results[0].content.as_text().contains("\"cleared\":\"tool_result\""), enabled);
-            for result in &results[1..] {
-                assert!(result.content.as_text().contains("evidence_1_"));
+            for result in &results[1..5] {
+                assert_eq!(
+                    result.content.as_text().contains("\"cleared\":\"tool_result\""),
+                    enabled && recent_batches < 2
+                );
+            }
+            for result in &results[5..] {
+                assert!(result.content.as_text().contains("evidence_2_"));
             }
             assert!(vtcode_core::core::agent::state::validate_history_invariants(&built.request.messages).is_valid());
             assert!(ctx.working_history.starts_with(&original), "durable history retains full evidence");

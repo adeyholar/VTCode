@@ -866,6 +866,7 @@ budget_warning_threshold = 0.5
         assert!(clearing.enabled);
         assert_eq!(clearing.trigger_tokens, 40_000);
         assert_eq!(clearing.keep_tool_uses, 2);
+        assert_eq!(clearing.keep_recent_tool_batches, 2);
         assert_eq!(clearing.clear_at_least_tokens, 30_000);
         assert!(clearing.clear_tool_inputs);
     }
@@ -884,6 +885,18 @@ budget_warning_threshold = 0.5
         .expect("valid harness config");
 
         assert!(parsed.tool_result_clearing.clear_tool_inputs);
+        assert_eq!(parsed.tool_result_clearing.keep_recent_tool_batches, 2);
+    }
+
+    #[test]
+    fn tool_result_clearing_recent_batches_round_trip_including_compatibility() {
+        for batches in [0, 1, 2, 9] {
+            let parsed: AgentHarnessConfig =
+                toml::from_str(&format!("[tool_result_clearing]\nkeep_recent_tool_batches = {batches}")).unwrap();
+            assert!(parsed.tool_result_clearing.validate().is_ok());
+            let restored: AgentHarnessConfig = toml::from_str(&toml::to_string(&parsed).unwrap()).unwrap();
+            assert_eq!(restored.tool_result_clearing.keep_recent_tool_batches, batches);
+        }
     }
 
     #[test]

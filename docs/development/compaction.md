@@ -7,12 +7,13 @@ implementation.
 
 Session history and provider request history have separate lifetimes. The shared
 `normalize_history_for_request_shared` helper repairs pairing and order on a request projection, retaining the shared
-fast path when history is already valid. `clear_old_tool_results` then replaces eligible old results in that projection.
+fast path when history is already valid. `clear_old_tool_results_with_recent_batches` then replaces eligible old results
+in that projection.
 Neither operation rewrites original outputs in session history or canonical `ThreadEvent` records. Actual compaction
 replaces live history and records a recoverable full-history artifact and `thread.compact_boundary`.
 
 The existing `agent.harness.tool_result_clearing` policy is enabled by default. Its configured trigger is 40,000 tokens
-and `keep_tool_uses` is 2. For local clearing, the runtime resolves:
+and both `keep_tool_uses` and `keep_recent_tool_batches` are 2. For local clearing, the runtime resolves:
 
 ```text
 history_budget = capacity - reserved_output - system_and_tool_schema_overhead
@@ -24,13 +25,24 @@ ceiling means automatic capacity resolution. If capacity remains unknown, the co
 32,000-token capacity with 4,000 tokens reserved for output and 2,000 for the prefix, the local cap is 15,600 tokens.
 Lower configured triggers still win. `enabled = false` opts out; native edit thresholds retain their configured values.
 
-Retention starts with the newest `keep_tool_uses` results and expands to all results from their originating assistant
-tool-call messages. For batches of 1, 4, and 3 results, keeping 2 protects the entire newest batch of 3; keeping 4 protects
-both newest batches, totaling 7 results. Call-ID matching handles reordered completions and intervening system messages.
-Unmatched results retain the count-based policy. Small results stay unchanged when a stub would not reduce estimated
-tokens. Paired arguments and signatures are retained for protected results; input clearing applies only to results
-actually replaced and cannot increase the total projected estimate. Reapplying clearing is idempotent.
+Retention protects the union of the newest `keep_tool_uses` results (expanded to their complete originating
+assistant tool-call batches) and the newest `keep_recent_tool_batches` assistant messages containing tool calls.
+Recent batches are selected by originating message order, independently of completion order. For batches of 1, 4,
+and 3 results, the default protects the newest two rounds: 7 results. Setting `keep_recent_tool_batches = 0`
+restores count-based batch retention: keeping 2 results protects the newest batch of 3.
+The `clear_old_tool_results` API remains a compatibility wrapper with zero additional recent batches.
 
+Call-ID matching handles reused IDs, reordered completions, and intervening system messages. Unmatched results retain
+the count-based policy. Small results stay unchanged when a stub would not reduce estimated tokens. Paired arguments
+and signatures are retained for protected results; input clearing applies only to results actually replaced and cannot
+increase the total projected estimate. Reapplying clearing is idempotent. The recent-batch setting applies only to local
+clearing; native Anthropic edits keep their existing count-based behavior. Oversized protected evidence proceeds through
+existing compaction.
+
+The [bounded retention pilot](../../scripts/evals/README.md#recent-tool-batch-retention-pilot) compares settings 0 and 2
+with fixed tools and planning. Numeric debug diagnostics report original/projected token estimates, cleared-result count,
+and protected-batch count; canonical events and external checks establish outcomes. Unengaged runs cannot demonstrate
+retention benefits.
 Interactive requests use local clearing when they will not carry Anthropic native context edits. Headless `vtcode exec`
 requests attach no native context management, so provider capability alone never suppresses their local fallback. This
 request policy is distinct from the native inline compaction edit ladder described below.

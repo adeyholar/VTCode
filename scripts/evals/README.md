@@ -90,3 +90,39 @@ Reports are saved in the `reports/` directory with a timestamp. They include:
 The `llm_grader` metric uses `vtcode ask` internally to perform evaluations. By default, it uses
 `gemini-3-flash-preview` for grading to keep costs low and ensure reliability. You can configure this in
 `evals/metrics.py`.
+
+## Recent tool-batch retention pilot
+
+`recent_tool_batches.py` compares the same binary with
+`agent.harness.tool_result_clearing.keep_recent_tool_batches=0` and `2`. It freezes OpenAI/gpt-6-luna,
+medium reasoning, planning, tool profile, source/binary hashes, prompts and fixture contents. Five paired fixtures cover
+cross-file repair, failed-verifier recovery, fresh reads after a contract change, oversized protected evidence, and a
+below-threshold control. Evidence instructions request assistant batches of 1/4/3 calls; model compliance and actual
+clearing engagement must be inspected in retained artifacts.
+
+```bash
+cargo build --locked -p vtcode --bin vtcode
+# Freeze fixtures/provenance without credential lookup or network dispatch:
+python3 scripts/evals/recent_tool_batches.py --binary target/debug/vtcode --output /tmp/retention-frozen
+# Run at most ten billable attempts with an existing OPENAI_API_KEY:
+python3 scripts/evals/recent_tool_batches.py --binary target/debug/vtcode --output /tmp/retention-live --live
+python3 -m unittest discover -s scripts/evals -p test_recent_tool_batches.py
+```
+
+Each attempt uses a fresh workspace, a 120-second deadline, configured 16-call/loop limits, a canonical-event watchdog,
+and a $0.25 budget threshold with automatic limit grants disabled. This threshold is checked after responses and is
+not a prepaid spending ceiling. The watchdog stops at 16 admitted invocations; inspect the recorded count because
+event delivery and batch admission can race. The runner terminates its owned process group, including descendants.
+Variant order alternates between fixtures. Direct API credentials stay in the child environment. Missing credentials,
+authentication errors, malformed canonical evidence, or infrastructure failures stop the pilot as inconclusive.
+
+Artifacts include canonical session events, stdout/export events, debug logs, independent verification, integrity checks,
+per-file and configuration hashes, elapsed time, token usage, priced cost and successful compaction boundaries.
+Canonical `thread.completed` events determine runtime outcomes; an immutable verifier held outside the workspace
+checks mixed-case, whitespace and empty inputs. Modified fixture observations or checks invalidate success. Missing
+usage, prices, or diagnostics remain unknown. Debug diagnostics contain numeric estimates/counts only; they establish
+whether clearing happened and do not replace canonical outcomes.
+
+Ten attempts provide diagnostic evidence, not statistical proof. A run that does not clear results cannot establish a
+retention benefit. Compare correctness, retained context, and measured efficiency separately. Successful task outcomes
+alone do not prove the requested 1/4/3 evidence protocol was followed, so inspect trajectories before drawing conclusions.

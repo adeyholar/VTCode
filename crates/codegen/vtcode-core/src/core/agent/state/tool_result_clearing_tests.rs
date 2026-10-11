@@ -185,3 +185,95 @@ fn clearing_reused_call_id_preserves_newest_origin_inputs() {
     );
     assert!(validate_history_invariants(&projected).is_valid());
 }
+
+#[test]
+fn recent_batch_retention_is_additive_and_preserves_evidence() {
+    let messages = batch_history();
+    for (batches, keep, cleared_ids) in [
+        (0, 2, vec!["batch_0_0", "batch_1_3", "batch_1_2", "batch_1_1", "batch_1_0"]),
+        (1, 2, vec!["batch_0_0", "batch_1_3", "batch_1_2", "batch_1_1", "batch_1_0"]),
+        (2, 2, vec!["batch_0_0"]),
+        (9, 2, vec![]),
+        (1, 4, vec!["batch_0_0"]),
+    ] {
+        let projected = clear_old_tool_results_with_recent_batches(&messages, 1, keep, batches, 1, true);
+        let actual: Vec<_> = projected
+            .iter()
+            .filter(|message| message.content.as_text().contains("\"cleared\":\"tool_result\""))
+            .map(|message| message.tool_call_id.as_deref().unwrap())
+            .collect();
+        assert_eq!(actual, cleared_ids, "batches={batches}, keep={keep}");
+        for (original, shaped) in messages.iter().zip(&projected) {
+            if original.role == MessageRole::Tool && !cleared_ids.contains(&original.tool_call_id.as_deref().unwrap()) {
+                assert_eq!(original, shaped);
+            }
+            if let Some(calls) = &original.tool_calls {
+                for (original_call, shaped_call) in calls.iter().zip(shaped.tool_calls.as_ref().unwrap()) {
+                    if !cleared_ids.contains(&original_call.id.as_str()) {
+                        assert_eq!(original_call, shaped_call, "retained inputs and signatures");
+                    }
+                }
+            }
+        }
+        assert!(validate_history_invariants(&projected).is_valid());
+        assert_eq!(clear_old_tool_results_with_recent_batches(&projected, 1, keep, batches, 1, true), projected);
+        if batches == 0 {
+            assert_eq!(projected, clear_old_tool_results(&messages, 1, keep, 1, true));
+        }
+    }
+    assert_eq!(messages, batch_history(), "durable history stays unchanged");
+}
+
+#[test]
+fn recent_batches_follow_origins_not_completion_order_or_orphans() {
+    let mut messages = batch_history();
+    // Complete the oldest batch last. Count retention protects it in addition
+    // to the two newest origins; it must not displace the middle origin.
+    let old_result_index = messages.iter().position(|message| message.role == MessageRole::Tool).unwrap();
+    let old_result = messages.remove(old_result_index);
+    messages.push(old_result);
+    let projected = clear_old_tool_results_with_recent_batches(&messages, 1, 1, 2, 1, true);
+    assert_eq!(projected, messages);
+
+    messages.push(Message::tool_response("orphan_old".into(), "orphan evidence ".repeat(400)));
+    messages.push(Message::tool_response("orphan_new".into(), "new evidence ".repeat(400)));
+    let projected = clear_old_tool_results_with_recent_batches(&messages, 1, 1, 2, 1, true);
+    assert!(
+        projected[projected.len() - 2]
+            .content
+            .as_text()
+            .contains("\"cleared\":\"tool_result\"")
+    );
+    assert_eq!(projected.last(), messages.last());
+    for message in projected.iter().filter(|message| message.role == MessageRole::Tool) {
+        let id = message.tool_call_id.as_deref().unwrap();
+        if id.starts_with("batch_1_") || id.starts_with("batch_2_") {
+            assert!(!message.content.as_text().contains("\"cleared\":\"tool_result\""));
+        }
+    }
+}
+
+#[test]
+fn recent_batches_preserve_reused_ids_and_small_old_outputs() {
+    let mut messages = batch_history();
+    messages[1].tool_calls.as_mut().unwrap()[0].id = "batch_2_0".into();
+    let old = messages.iter_mut().find(|message| message.role == MessageRole::Tool).unwrap();
+    old.tool_call_id = Some("batch_2_0".into());
+    let projected = clear_old_tool_results_with_recent_batches(&messages, 1, 2, 2, 1, true);
+    assert_eq!(
+        projected[1].tool_calls.as_ref().unwrap()[0]
+            .function
+            .as_ref()
+            .unwrap()
+            .arguments,
+        CLEARED_TOOL_INPUT_PLACEHOLDER
+    );
+    assert_eq!(projected.last(), messages.last());
+    assert!(validate_history_invariants(&projected).is_valid());
+    messages
+        .iter_mut()
+        .find(|message| message.role == MessageRole::Tool)
+        .unwrap()
+        .content = crate::llm::provider::MessageContent::Text("ok".into());
+    assert_eq!(clear_old_tool_results_with_recent_batches(&messages, 1, 2, 2, 1, true), messages);
+}

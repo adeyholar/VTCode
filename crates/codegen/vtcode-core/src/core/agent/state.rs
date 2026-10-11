@@ -428,6 +428,27 @@ pub fn clear_old_tool_results(
     clear_at_least_tokens: u64,
     clear_tool_inputs: bool,
 ) -> Vec<Message> {
+    clear_old_tool_results_with_recent_batches(
+        messages,
+        trigger_tokens,
+        keep_tool_uses,
+        0,
+        clear_at_least_tokens,
+        clear_tool_inputs,
+    )
+}
+
+/// Request-only clearing that also protects the newest assistant tool-call
+/// batches by originating message order. Count-based protection is additive;
+/// unmatched results retain the compatibility wrapper's count-based fallback.
+pub fn clear_old_tool_results_with_recent_batches(
+    messages: &[Message],
+    trigger_tokens: u64,
+    keep_tool_uses: u32,
+    keep_recent_tool_batches: u32,
+    clear_at_least_tokens: u64,
+    clear_tool_inputs: bool,
+) -> Vec<Message> {
     if trigger_tokens == 0 || messages.is_empty() {
         return messages.to_vec();
     }
@@ -453,12 +474,16 @@ pub fn clear_old_tool_results(
 
     let mut cleared_tokens = 0u64;
     let analysis = analyze_request_history(messages);
-    let retained_batches: HashSet<usize> = tool_indices
+    let mut retained_batches: HashSet<usize> = tool_indices
         .iter()
         .rev()
         .take(keep)
         .filter_map(|index| analysis.result_batch_by_index.get(index).copied())
         .collect();
+    // Analysis records assistant messages in source order, independently of
+    // completion order and reused call IDs.
+    retained_batches.extend((0..analysis.batches.len()).rev().take(keep_recent_tool_batches as usize));
+    let mut cleared_result_count = 0usize;
     let mut cleared_calls_by_assistant: HashMap<usize, HashSet<&str>> = HashMap::new();
     // Stub every eligible non-kept tool result (oldest-first). `clear_at_least_tokens`
     // is a floor on reclaimed tokens; stopping early would leave a permanently
@@ -485,6 +510,7 @@ pub fn clear_old_tool_results(
                 .insert(call_id);
         }
         out[tool_index] = stub;
+        cleared_result_count += 1;
         cleared_tokens = cleared_tokens.saturating_add(original_tokens.saturating_sub(stub_tokens));
     }
 
@@ -534,6 +560,16 @@ pub fn clear_old_tool_results(
         }
     }
 
+    tracing::debug!(
+        original_tokens = estimated_tokens,
+        projected_tokens = out
+            .iter()
+            .map(|message| message.estimate_tokens() as u64)
+            .fold(0u64, u64::saturating_add),
+        cleared_result_count,
+        protected_batch_count = retained_batches.len(),
+        "local tool-result clearing projection"
+    );
     out
 }
 

@@ -60,7 +60,7 @@ pub struct AgentHarnessConfig {
     pub compact_on_model_switch: bool,
     /// Provider-native tool-result clearing policy. When enabled, old tool
     /// results are stripped from the context once it grows past
-    /// `trigger_tokens`, keeping only the most recent `keep_tool_uses` results
+    /// `trigger_tokens`, protecting recent results and assistant tool-call batches
     /// and always retaining at least `clear_at_least_tokens`. This bounds
     /// per-turn context growth and is enabled by default.
     #[serde(default)]
@@ -273,6 +273,12 @@ pub struct ToolResultClearingConfig {
     /// reordered completions and intervening directives.
     #[serde(default = "default_tool_result_clearing_keep_tool_uses")]
     pub keep_tool_uses: u32,
+    /// Local clearing additionally protects the newest assistant messages with
+    /// tool calls, selected by originating message order (default 2). Protection
+    /// is the union with keep_tool_uses; 0 restores count-based batch retention.
+    /// Native Anthropic context edits continue to use keep_tool_uses only.
+    #[serde(default = "default_tool_result_clearing_keep_recent_tool_batches")]
+    pub keep_recent_tool_batches: u32,
     #[serde(default = "default_tool_result_clearing_clear_at_least_tokens")]
     pub clear_at_least_tokens: u64,
     /// Replace paired `tool_calls[].function.arguments` for stubbed results.
@@ -290,6 +296,7 @@ impl Default for ToolResultClearingConfig {
             enabled: default_tool_result_clearing_enabled(),
             trigger_tokens: default_tool_result_clearing_trigger_tokens(),
             keep_tool_uses: default_tool_result_clearing_keep_tool_uses(),
+            keep_recent_tool_batches: default_tool_result_clearing_keep_recent_tool_batches(),
             clear_at_least_tokens: default_tool_result_clearing_clear_at_least_tokens(),
             clear_tool_inputs: default_tool_result_clearing_clear_tool_inputs(),
         }
@@ -377,6 +384,10 @@ const fn default_tool_result_clearing_trigger_tokens() -> u64 {
 }
 
 #[inline]
+const fn default_tool_result_clearing_keep_recent_tool_batches() -> u32 {
+    2
+}
+
 const fn default_tool_result_clearing_keep_tool_uses() -> u32 {
     2
 }

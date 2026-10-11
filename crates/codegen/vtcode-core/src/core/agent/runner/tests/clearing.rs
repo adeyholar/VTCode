@@ -180,11 +180,12 @@ fn evidence_history(capacity: usize, protected_large: bool) -> Vec<Message> {
 #[tokio::test]
 async fn headless_clearing_stages_before_compaction_capacity_sweep() {
     for capacity in [32_000, 64_000, 96_000, 128_000] {
-        for protected_large in [false, true] {
+        for (recent_batches, protected_large) in [(0, false), (0, true), (2, false), (2, true)] {
             let temp = TempDir::new().unwrap();
             let mut cfg = VTCodeConfig::default();
             cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
             cfg.agent.harness.auto_compaction_enabled = true;
+            cfg.agent.harness.tool_result_clearing.keep_recent_tool_batches = recent_batches;
             cfg.context.max_context_tokens = capacity;
             cfg.context.preserve_recent_turns = 2;
             cfg.automation.full_auto.max_turns = 1;
@@ -220,7 +221,20 @@ async fn headless_clearing_stages_before_compaction_capacity_sweep() {
                 })
                 .map(|message| message.tool_call_id.as_deref().unwrap())
                 .collect();
-            assert_eq!(retained, ["evidence_2_2", "evidence_2_1", "evidence_2_0"]);
+            let expected = if recent_batches == 0 {
+                vec!["evidence_2_2", "evidence_2_1", "evidence_2_0"]
+            } else {
+                vec![
+                    "evidence_1_3",
+                    "evidence_1_2",
+                    "evidence_1_1",
+                    "evidence_1_0",
+                    "evidence_2_2",
+                    "evidence_2_1",
+                    "evidence_2_0",
+                ]
+            };
+            assert_eq!(retained, expected);
 
             let mut inspection = task("Inspect retained evidence", "clearing-sweep");
             inspection.description = "Inspect the retained file evidence and reconcile the observations across the three historical tool batches. ".repeat(4);
@@ -246,7 +260,7 @@ async fn headless_clearing_stages_before_compaction_capacity_sweep() {
                         .iter()
                         .filter(|message| message.content.as_text().contains("\"cleared\":\"tool_result\""))
                         .count(),
-                    5
+                    if recent_batches == 0 { 5 } else { 1 }
                 );
                 assert!(
                     final_request

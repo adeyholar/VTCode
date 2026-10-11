@@ -7,8 +7,8 @@ use crate::core::agent::context_reset::maybe_write_reset_after_compaction_with_c
 use crate::core::agent::conversation::conversation_from_messages;
 use crate::core::agent::session::AgentSessionState;
 use crate::core::agent::state::{
-    clear_old_tool_results, normalize_history_for_request_shared, resolve_tool_result_clearing_trigger,
-    should_apply_local_tool_result_clearing,
+    clear_old_tool_results_with_recent_batches, normalize_history_for_request_shared,
+    resolve_tool_result_clearing_trigger, should_apply_local_tool_result_clearing,
 };
 use crate::exec::events::CompactionTrigger;
 use crate::llm::provider::Message;
@@ -30,7 +30,7 @@ impl AgentRunner {
         if !should_apply_local_tool_result_clearing(self.provider_client.name(), false, clearing.enabled) {
             return normalized;
         }
-        Arc::new(clear_old_tool_results(
+        Arc::new(clear_old_tool_results_with_recent_batches(
             &normalized,
             resolve_tool_result_clearing_trigger(
                 self.config(),
@@ -40,6 +40,7 @@ impl AgentRunner {
                 reserved_output_tokens,
             ),
             clearing.keep_tool_uses,
+            clearing.keep_recent_tool_batches,
             clearing.clear_at_least_tokens,
             clearing.clear_tool_inputs,
         ))
