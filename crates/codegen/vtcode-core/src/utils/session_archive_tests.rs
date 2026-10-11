@@ -9,6 +9,7 @@ use crate::utils::error_log_collector::ErrorLogEntry;
 use anyhow::anyhow;
 use chrono::{TimeZone, Timelike};
 use std::mem::size_of;
+use std::process;
 use std::sync::LazyLock;
 use std::time::Duration;
 
