@@ -2,6 +2,69 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.175.4 - 2026-10-11
+
+### Highlights
+#### Bug Fixes
+
+- Retry CI artifact downloads to survive transient gh failures (066511c8) 
+- Redact stateless GitHub App installation tokens (cb095bde) 
+- Keep workflow-coordination tools eager in every mode (ed861a66) 
+- Reinforce HOVER revision feedback and evidence retention (5331b630) 
+#### Documentation
+
+- Enhance HOVER self-correction loop details and update related documentation (63699c0d) 
+#### Features
+
+- Add Decisions Probe usage guide and integrate streaming response handling (82c863a6) 
+- Offer OpenAI Decisions probe opt-in on /model (6b9cedac) 
+- Enhance tool serialization for deferred loading handling (7d76c18b) 
+### Other Changes
+#### Other
+
+- Enhance local clearing and compaction strategies; add tests for budget and history retention (1fc39c92) 
+- Add comprehensive tests for turn loop functionality and plan handling (9f7fcffc) 
+- Add tests for session memory envelope compaction and recovery context previews (9ae4937a) 
+- Add comprehensive tests for compaction functionality across various scenarios (9310a2da) 
+- Add recent tool-batch retention feature and update documentation (4decc46d) 
+#### Refactors
+
+- Extract cron parsing into scheduler/cron module (ffac6200) 
+- Extract service install rendering into scheduler/service module (bfe5672b) 
+- Extract schedule model types into scheduler/spec module (a4a1f3a9) 
+- Extract session scheduling and time parsing into scheduler/session module (3a8b9dde) 
+- Extract durable store and claim handling into scheduler/store module (618199b0) 
+- Extract run daemon into scheduler/daemon module (1c1d30f5) 
+- Extract history settings and env overrides into settings module (df487d78) 
+- Extract message codec into message module (1db5b045) 
+- Extract archive metadata types into metadata module (3c418b28) 
+- Extract snapshot and listing types into snapshot module (a76986bc) 
+- Extract identifier and path helpers into identifier module (74243172) 
+- Extract transcript builders into transcript module (4ab48975) 
+- Extract session search into search module (81219022) 
+- Extract retention pruning into retention module (42295a91) 
+- Extract snapshot shrink pipeline into shrink module (6f1cd859) 
+- Extract SessionArchive core into archive module (86aff490) 
+- Extract session query and listing IO into query module (4939b9f5) 
+- Move inline test suite into tool_policy/tests module (54eede37) 
+- Extract MCP policy store into mcp module (2be260c5) 
+- Extract shell approval helpers into shell_approval module (9e88bda4) 
+- Extract alternative policy configs into alternative module (3ba951cb) 
+- Extract policy model configs into model module (f34b600c) 
+- Consolidate prompt handler and constraints into model module (f107046f) 
+- Extract ToolPolicyManager core into manager module (33dac555) 
+- Move inline test suite into loader/tests module (02e9bd87) 
+- Extract lightweight metadata cache into cache module (104ac530) 
+- Extract mention detection into mentions module (5cc7054f) 
+- Extract codex compat filtering into codex module (d752f2df) 
+- Extract skill resource loading into resources module (5a4e3359) 
+- Extract skill discovery walk into discovery module (eeee3f55) 
+- Extract enhanced loader into enhanced module (e94b9a7c) 
+- Enforce locked checks and add test suite for development gate (cad5d451) 
+- Simplify permission evaluation logic and enhance tool filtering (442adc5b) 
+#### Tests
+
+- Lock ghs token boundary and stream-split redaction (e48f265b) 
 ## 0.175.3 - 2026-10-10
 
 ### Highlights
