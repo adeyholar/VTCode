@@ -242,6 +242,28 @@ fn bracket_split_still_splits_unquoted_items_and_flags_vague_first_item() {
 }
 
 #[test]
+fn per_item_brackets_in_verify_list_validate_as_one_plan() {
+    // Live session session-vtcode-20261011T125442Z_154501-05568 step 3:
+    // the model emitted each verification command in its own bracket group
+    // (`verify: [cmd_a], [cmd_b]`). The old parser stripped only the outer
+    // pair before splitting, producing the fragments `cmd_a]` and `[cmd_b`,
+    // and item 2 failed as "verification item 2 must be a concrete command or
+    // check", terminally rejecting an otherwise valid README plan.
+    let verify = "[npx markdownlint-cli2 README.md], [git diff -- README.md]";
+    let items = parse_bracket_list(verify);
+    assert_eq!(items, vec!["npx markdownlint-cli2 README.md", "git diff -- README.md"]);
+    for item in &items {
+        assert!(validate_concrete_verification(item).is_ok(), "each per-item bracket command must validate: {item}");
+    }
+    assert!(validate_concrete_verification(verify).is_ok());
+
+    let plan = format!(
+        "## Summary\nRefine README.\n\n## Implementation Steps\n1. Refine intro -> files: [README.md] -> verify: [git diff -- README.md]\n2. Check links -> files: [README.md, docs/INDEX.md] -> verify: [python3 scripts/check_markdown_location.py]\n3. Review format -> files: [README.md] -> verify: {verify}\n\n## Test Cases and Validation\nRun checks.\n\n## Assumptions and Defaults\nREADME only."
+    );
+    assert!(validate_plan_content(&plan).is_ready());
+}
+
+#[test]
 fn bracket_split_handles_backslash_escapes_outside_single_quotes() {
     // Escaped comma outside quotes stays inside one item.
     let items = split_bracket_items("foo\\,bar, baz");
@@ -252,4 +274,26 @@ fn bracket_split_handles_backslash_escapes_outside_single_quotes() {
     assert_eq!(items.len(), 2);
     assert!(items[0].contains("rg -n"));
     assert!(items[1].contains("cargo check"));
+}
+
+#[test]
+fn parse_bracket_list_supports_whole_group_and_per_item_forms() {
+    // One outer group wrapping the whole list keeps the legacy behavior.
+    assert_eq!(parse_bracket_list("[src/a.rs, src/b.rs]"), vec!["src/a.rs", "src/b.rs"]);
+    // Per-item groups each unwrap to their own entry.
+    assert_eq!(parse_bracket_list("[cmd_a], [cmd_b]"), vec!["cmd_a", "cmd_b"]);
+    // Mixed per-item group followed by a bare value.
+    assert_eq!(parse_bracket_list("[cmd_a], cmd_b"), vec!["cmd_a", "cmd_b"]);
+    // Bare comma-separated values with no brackets.
+    assert_eq!(parse_bracket_list("src/a.rs, src/b.rs"), vec!["src/a.rs", "src/b.rs"]);
+    // A comma nested inside a per-item group never fragments the entry.
+    assert_eq!(
+        parse_bracket_list("[rg -n 'a,b' README.md], [cargo check]"),
+        vec!["rg -n 'a,b' README.md", "cargo check"]
+    );
+    // Trailing bracket content (`README.md:42` in a group) is preserved.
+    assert_eq!(parse_bracket_list("[README.md:42], [src/lib.rs]"), vec!["README.md:42", "src/lib.rs"]);
+    // A single group with a quoted comma stays one command.
+    assert_eq!(parse_bracket_list("[sed -n '1,40p' README.md]"), vec!["sed -n '1,40p' README.md"]);
+    assert!(parse_bracket_list("[]").is_empty());
 }

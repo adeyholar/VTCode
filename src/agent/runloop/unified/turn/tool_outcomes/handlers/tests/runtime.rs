@@ -3172,10 +3172,13 @@ async fn preflight_archived_tracker_fixture_stops_after_one_corrective_turn() {
         }
     }
     assert_eq!(
-        calls, 8,
-        "six initial failures, one changed corrective call, then its unchanged rejection stops recovery"
+        calls, 7,
+        "six initial failures, one changed corrective call, then its semantic repeat stops recovery: \
+         cosmetic status/max_output_tokens variation on the same invalid `list` cannot open another turn"
     );
-    assert_eq!(calls - distinct.len(), 3, "independently counted duplicate calls");
+    // One `create` variant collapses into the lead `create`'s identity, so the
+    // independently counted exact duplicates changed with semantic identity.
+    assert_eq!(calls - distinct.len(), 2, "independently counted duplicate calls");
     assert_eq!(continuations, 1);
     assert!(backing.session_stats.preflight_recovery.exhausted());
     assert_eq!(
@@ -3217,6 +3220,7 @@ async fn preflight_corrective_turn_revalidates_live_schema_and_stops_unchanged_c
             crate::agent::runloop::unified::state::ValidationCategory::Arguments,
             Some(&args),
             6,
+            false,
         );
         ctx.session_stats.preflight_recovery.synthesis();
         ctx.session_stats.preflight_recovery.begin_corrective_turn();
@@ -3365,6 +3369,7 @@ async fn preflight_corrective_turn_uses_current_schema_before_identity_check() {
         crate::agent::runloop::unified::state::ValidationCategory::Arguments,
         Some(&args),
         6,
+        true,
     );
     ctx.session_stats.preflight_recovery.synthesis();
     ctx.session_stats.preflight_recovery.begin_corrective_turn();
@@ -3392,6 +3397,7 @@ async fn preflight_failed_corrective_execution_does_not_clear_episode() {
         crate::agent::runloop::unified::state::ValidationCategory::Arguments,
         Some(&json!({"action":"list","index":1})),
         6,
+        false,
     );
     ctx.session_stats.preflight_recovery.synthesis();
     ctx.session_stats.preflight_recovery.begin_corrective_turn();

@@ -161,6 +161,7 @@ pub(crate) fn handle_preflight_failure(
             },
             arguments,
             max_failures,
+            ctx.is_planning_active(),
         );
     let exhausted = ctx.session_stats.preflight_recovery.exhausted();
     let circuit_tripped = !is_llm_mistake && (failure_count >= max_failures || exhausted);

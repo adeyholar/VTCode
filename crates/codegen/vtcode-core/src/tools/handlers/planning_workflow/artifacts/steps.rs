@@ -116,13 +116,123 @@ pub(super) fn step_action_segments(action: &str) -> Vec<String> {
     segments
 }
 
+/// Parse a bracketed list such as `[a, b]` or the per-item form
+/// `[a], [b]` into its trimmed entries.
+///
+/// Two shapes are supported because models emit both:
+///
+/// * One outer group wrapping the whole list (`[cmd_a, cmd_b]`): its inner
+///   body is split on quoted commas via [`split_bracket_items`].
+/// * Each entry in its own bracket group (`[cmd_a], [cmd_b]`) or a bare
+///   comma-separated value: split on top-level commas (commas inside a
+///   balanced `[…]` stay part of the same entry) and then strip one outer
+///   bracket pair per entry.
+///
+/// Stripping only the outer pair before splitting produced `cmd_a]` /
+/// `[cmd_b` fragments for the per-item form, so an otherwise valid README plan
+/// failed with `verification item 2 must be a concrete command or check`
+/// (session session-vtcode-20261011T125442Z_154501-05568).
 pub(super) fn parse_bracket_list(raw: &str) -> Vec<String> {
-    let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
-    split_bracket_items(trimmed)
+    let trimmed = raw.trim();
+    match whole_bracket_group(trimmed) {
+        Some(inner) => strip_entries(split_bracket_items(inner)),
+        None => strip_entries(split_top_level_bracket_items(trimmed)),
+    }
+}
+
+fn strip_entries(entries: Vec<String>) -> Vec<String> {
+    entries
         .into_iter()
-        .map(|item| item.trim().to_owned())
+        .map(|item| unwrap_bracket_group(item.trim()).to_owned())
         .filter(|value| !value.is_empty())
         .collect()
+}
+
+/// Strip one balanced outer `[` … `]` pair from an entry, if present. A
+/// trailing `]` is only removed when the entry also starts with `[`, so a
+/// stray closer on a bare command never corrupts the value.
+fn unwrap_bracket_group(item: &str) -> &str {
+    item.strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .map(str::trim)
+        .unwrap_or(item)
+}
+
+/// Return the inner body when `value` is a single bracket group that wraps the
+/// whole string (`[a, b]`), i.e. the `[` at position 0 matches a `]` at the
+/// final character. Returns `None` for per-item groups (`[a], [b]`) or bare
+/// values so the caller splits on top-level commas instead.
+fn whole_bracket_group(value: &str) -> Option<&str> {
+    let inner = value.strip_prefix('[')?;
+    let mut depth = 1usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for (offset, ch) in inner.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '[' if !in_single && !in_double => depth += 1,
+            ']' if !in_single && !in_double => {
+                depth -= 1;
+                if depth == 0 {
+                    let close_end = offset + ch.len_utf8();
+                    return (close_end == inner.len()).then(|| inner[..offset].trim());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split on commas outside quotes and outside balanced `[…]` groups. This is
+/// [`split_bracket_items`] plus bracket-depth tracking, used for per-item
+/// bracket forms so a comma nested inside a group never fragments the entry.
+fn split_top_level_bracket_items(body: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut current = String::with_capacity(body.len());
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut depth = 0usize;
+    let mut chars = body.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' if !in_single => {
+                current.push(ch);
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+                current.push(ch);
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                current.push(ch);
+            }
+            '[' if !in_single && !in_double => {
+                depth += 1;
+                current.push(ch);
+            }
+            ']' if !in_single && !in_double => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' if depth == 0 && !in_single && !in_double => {
+                items.push(std::mem::take(&mut current));
+            }
+            _ => current.push(ch),
+        }
+    }
+    items.push(current);
+    items
 }
 
 /// Split a bracket-list body on commas that sit outside single/double quotes.

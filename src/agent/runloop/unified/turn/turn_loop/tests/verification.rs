@@ -460,6 +460,7 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
         crate::agent::runloop::unified::state::ValidationCategory::Arguments,
         Some(&json!({"action":"list","index":1})),
         6,
+        false,
     );
     turn_context.session_stats.preflight_recovery.synthesis();
     turn_context.session_stats.preflight_recovery.begin_corrective_turn();

@@ -1485,6 +1485,7 @@ mod tests {
             ValidationCategory::Arguments,
             Some(&serde_json::json!({"action":"list","index":1})),
             6,
+            false,
         );
         stats.preflight_recovery.synthesis();
         stats.preflight_recovery.begin_corrective_turn();
@@ -1875,7 +1876,7 @@ mod tests {
         stats.record_plan_continuation_turn_with_limit(3);
         stats
             .preflight_recovery
-            .reject("task_tracker", ValidationCategory::Arguments, None, 6);
+            .reject("task_tracker", ValidationCategory::Arguments, None, 6, false);
         stats.preflight_recovery.synthesis();
         stats.preflight_recovery.begin_corrective_turn();
         stats.preflight_recovery.finish_corrective_turn();

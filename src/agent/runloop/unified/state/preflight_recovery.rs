@@ -128,26 +128,58 @@ fn operation_matches(tool_name: &str, previous: &Value, current: &Value, plannin
 
 impl PreflightRecovery {
     /// Returns whether this is a repeated identity, independent of JSON key order.
+    ///
+    /// Identity is the tool plus its **operation key** (not the raw JSON), so a
+    /// cosmetic field change — `max_output_tokens`, or the action-irrelevant
+    /// `status` on a `task_tracker list` — does not masquerade as a fresh
+    /// correction. Session `session-vtcode-20261011T073126Z_754860-74519` burned
+    /// 17 autonomous turns because every re-sent invalid `list` carried a
+    /// different `status`, so the bounded repair budget never exhausted.
     pub(crate) fn reject(
         &mut self,
         tool_name: &str,
         category: ValidationCategory,
         arguments: Option<&Value>,
         cap: usize,
+        planning_active: bool,
     ) -> bool {
-        let identity = RejectedCall {
-            tool_name: tool_name.into(),
-            category,
-            arguments: operational_arguments(arguments),
-        };
-        let repeated = self.rejected_calls.contains(&identity);
+        let repeated = self.repeats_rejected_operation(tool_name, category, arguments, planning_active);
         if repeated && self.phase == RecoveryPhase::Corrective {
             self.phase = RecoveryPhase::Exhausted;
         }
         if !repeated && self.rejected_calls.len() < cap {
-            self.rejected_calls.push(identity);
+            self.rejected_calls.push(RejectedCall {
+                tool_name: tool_name.into(),
+                category,
+                arguments: operational_arguments(arguments),
+            });
         }
         repeated
+    }
+
+    /// Whether `arguments` repeats an already-recorded rejected operation.
+    ///
+    /// Shares [`operation_matches`] with `succeeded` so the rejection detector
+    /// and the correction detector can never disagree on what identifies an
+    /// operation. Malformed-JSON rejections carry no arguments, so they repeat
+    /// on tool name and category alone.
+    fn repeats_rejected_operation(
+        &self,
+        tool_name: &str,
+        category: ValidationCategory,
+        arguments: Option<&Value>,
+        planning_active: bool,
+    ) -> bool {
+        let current = operational_arguments(arguments);
+        self.rejected_calls.iter().any(|rejected| {
+            rejected.tool_name == tool_name
+                && rejected.category == category
+                && match (rejected.arguments.as_ref(), current.as_ref()) {
+                    (None, None) => true,
+                    (None, Some(_)) | (Some(_), None) => false,
+                    (Some(previous), Some(current)) => operation_matches(tool_name, previous, current, planning_active),
+                }
+        })
     }
 
     pub(crate) fn synthesis(&mut self) {
@@ -208,33 +240,67 @@ mod tests {
     fn preflight_recovery_bounds_one_corrective_turn_and_canonical_identity() {
         let mut episode = PreflightRecovery::default();
         let rejected = json!({"action":"list","index":2,"max_output_tokens":100});
-        assert!(!episode.reject("task_tracker", ValidationCategory::Arguments, Some(&rejected), 2));
+        assert!(!episode.reject("task_tracker", ValidationCategory::Arguments, Some(&rejected), 2, false));
         episode.synthesis();
         assert!(episode.corrective_pending());
         episode.begin_corrective_turn();
         let reordered: Value = serde_json::from_str(r#"{"max_output_tokens":5,"index":2,"action":"list"}"#).unwrap();
-        assert!(episode.reject("task_tracker", ValidationCategory::Arguments, Some(&reordered), 2));
+        assert!(episode.reject("task_tracker", ValidationCategory::Arguments, Some(&reordered), 2, false));
         assert!(episode.exhausted());
         episode.synthesis();
         assert!(!episode.corrective_pending());
     }
 
     #[test]
+    fn preflight_cosmetic_field_variations_repeat_the_same_operation() {
+        // Live session session-vtcode-20261011T073126Z_754860-74519: the model
+        // re-sent an invalid `list` across 17 autonomous turns, changing only
+        // `status` and `max_output_tokens` each time. Full-JSON equality
+        // treated every variant as a fresh correction, so the bounded repair
+        // budget never exhausted. Operation identity must ignore fields that
+        // do not change the operation.
+        let mut episode = PreflightRecovery::default();
+        let first = json!({"action":"list","index":1,"index_path":"1","status":"pending","max_output_tokens":1000});
+        assert!(!episode.reject("task_tracker", ValidationCategory::Arguments, Some(&first), 6, true));
+        episode.synthesis();
+        episode.begin_corrective_turn();
+        // Same operation despite cosmetic `status`/token-budget variation.
+        let variant =
+            json!({"action":"list","index":1,"index_path":"1","status":"in_progress","max_output_tokens":1500});
+        assert!(
+            episode.reject("task_tracker", ValidationCategory::Arguments, Some(&variant), 6, true),
+            "a re-sent invalid list with changed status must count as a repeat"
+        );
+        assert!(episode.exhausted(), "repeating inside the corrective phase must exhaust recovery");
+    }
+
+    #[test]
     fn preflight_changed_calls_stay_bounded_and_unrelated_success_does_not_clear() {
         let mut episode = PreflightRecovery::default();
-        episode.reject("task_tracker", ValidationCategory::Arguments, Some(&json!({"action":"list","index":2})), 2);
+        episode.reject(
+            "task_tracker",
+            ValidationCategory::Arguments,
+            Some(&json!({"action":"update","index":2,"status":"in_progress"})),
+            2,
+            false,
+        );
         episode.synthesis();
         episode.begin_corrective_turn();
         episode.succeeded("exec_command", &json!({"cmd":"cargo check --locked"}), false);
         episode.succeeded("task_tracker", &json!({"action":"update","index":1,"status":"completed"}), false);
         assert!(!episode.corrective_pending());
+        // A genuinely different operation (different target item) is a new
+        // rejection, not a repeat: for `list`, index fields are forbidden and
+        // ignored, so `list` variants share one operation identity — but
+        // distinct `update` targets stay distinct.
         assert!(!episode.reject(
             "task_tracker",
             ValidationCategory::Arguments,
-            Some(&json!({"action":"list","index":3})),
-            2
+            Some(&json!({"action":"update","index":3,"status":"pending"})),
+            2,
+            false
         ));
-        episode.reject("task_tracker", ValidationCategory::MalformedJson, None, 2);
+        episode.reject("task_tracker", ValidationCategory::MalformedJson, None, 2, false);
         assert_eq!(episode.rejected_calls.len(), 2);
         episode.finish_corrective_turn();
         assert!(episode.exhausted());
@@ -243,7 +309,13 @@ mod tests {
     #[test]
     fn preflight_successful_correction_clears_only_the_validation_episode() {
         let mut episode = PreflightRecovery::default();
-        episode.reject("task_tracker", ValidationCategory::Arguments, Some(&json!({"action":"list","items":[]})), 2);
+        episode.reject(
+            "task_tracker",
+            ValidationCategory::Arguments,
+            Some(&json!({"action":"list","items":[]})),
+            2,
+            false,
+        );
         episode.synthesis();
         episode.begin_corrective_turn();
         episode.succeeded("task_tracker", &json!({"action":"list"}), false);
@@ -254,7 +326,7 @@ mod tests {
     #[test]
     fn preflight_tracker_corrections_repair_invalid_fields_and_preserve_valid_targets() {
         let mut episode = PreflightRecovery::default();
-        episode.reject(tools::TASK_TRACKER, ValidationCategory::Arguments, Some(&json!({"action":"lst"})), 6);
+        episode.reject(tools::TASK_TRACKER, ValidationCategory::Arguments, Some(&json!({"action":"lst"})), 6, false);
         episode.succeeded(tools::TASK_TRACKER, &json!({"action":"list"}), false);
         assert!(episode.is_clear());
 
@@ -263,6 +335,7 @@ mod tests {
             ValidationCategory::Arguments,
             Some(&json!({"action":"update","index":1})),
             6,
+            false,
         );
         episode.succeeded(tools::TASK_TRACKER, &json!({"action":"update","index":2,"status":"completed"}), false);
         assert!(!episode.is_clear());
@@ -278,6 +351,7 @@ mod tests {
             ValidationCategory::Arguments,
             Some(&json!({"action":"update","index_path":"01.02"})),
             6,
+            false,
         );
         episode.succeeded(tools::TASK_TRACKER, &json!({"action":"update","index_path":"1.3","status":"pending"}), true);
         assert!(!episode.is_clear());
@@ -289,6 +363,7 @@ mod tests {
             ValidationCategory::Arguments,
             Some(&json!({"action":"update","index":0})),
             6,
+            true,
         );
         episode.succeeded(tools::TASK_TRACKER, &json!({"action":"update","index":1,"status":"completed"}), true);
         assert!(episode.is_clear(), "planning index zero is invalid and can be repaired");

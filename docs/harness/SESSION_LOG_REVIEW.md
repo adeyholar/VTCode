@@ -1,5 +1,53 @@
 # Session Log Review
 
+## 2026-10-11 | Semantic operation identity bounds repeated preflight rejections across turns
+
+### Baseline
+
+Session `session-vtcode-20261011T073126Z_754860-74519` ("use plan mode, refine and improve vtcode @README.md", 19 turns,
+~2.6M input tokens) ran 17 autonomous continuation turns with 43 failed tool calls. 35 of 39 `task_tracker` calls were
+`action:"list"` carrying forbidden `index`/`index_path` (plus varying `status`/`max_output_tokens`); every turn ended
+in turn-loop auto-continuation, and the harness never stopped.
+
+| Observation                                                                                                                                                             | Disposition                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PreflightRecovery::reject` compared full JSON equality, so each cosmetic variant (`status`, `max_output_tokens`) counted as a new rejection and the cap-6 distinct budget never exhausted. | `reject` now reuses `operation_matches` (shared with `succeeded`) so repeat detection is semantic: tool + action + selectors. `list` variants collapse to one identity; distinct `update` targets stay distinct. Malformed-JSON rejects repeat on tool+category. |
+| The live-session fixture (`tracker_preflight_session.json`) pinned the old exact-dedup outcome (8 calls, 3 exact duplicates).                                             | Fixture now stops after 7 calls / 2 exact duplicates; unit regression `preflight_cosmetic_field_variations_repeat_the_same_operation` covers the variant-repeat shape directly.                                                             |
+| `create`-variant items-text differences don't change the operation (title identity), so two distinct drafts collapse correctly.                                            | No change to `tracker_operation_matches`; title-based identity already covers it.                                                                                                                                                          |
+
+### Verification
+
+<!-- markdownlint-disable-next-line MD013 -->
+- `cargo nextest run -p vtcode -E 'test(preflight)'` — 38 passed (incl. fixture + new unit regression)
+- `cargo nextest run -p vtcode --profile quick -E 'test(tracker) or test(continuation) or test(auto_continue) or test(cross_turn) or test(turn_loop)'` — 365 passed
+- `cargo clippy --locked -p vtcode --all-targets -- -D warnings` — clean; `cargo fmt --all -- --check` — clean
+- Pre-existing unrelated failure (also on clean base): `picker_separates_openrouter_reasoning_from_effort_support`
+
+## 2026-10-11 | Per-item bracket `verify:` list terminally rejected a valid README plan
+
+### Baseline
+
+Session `session-vtcode-20261011T125442Z_154501-05568` ("use plan mode, refine and improve vtcode @README.md") ended
+its only turn with `PLANNING_PLAN_REJECTION_NOTICE` and
+`step 3: verification item 2 must be a concrete command or check`, exhausting the bounded repair budget instead of
+reaching approval. The model emitted each verification command in its own bracket group:
+`verify: [npx markdownlint-cli2 README.md], [git diff -- README.md]`.
+
+| Observation                                                                                                                                        | Disposition                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `parse_bracket_list` stripped only the outermost `[`/`]` *before* `split_bracket_items`, so the per-item group form fragmented into `npx markdownlint-cli2 README.md]` and `[git diff -- README.md`; item 2 then failed as non-concrete. | `parse_bracket_list` now detects a single whole-string bracket group (`whole_bracket_group`, quote- and bracket-aware) and otherwise splits on top-level commas (bracket-depth aware, `split_top_level_bracket_items`) before unwrapping one balanced pair per entry (`unwrap_bracket_group`). `split_bracket_items` still serves the whole-group body and the three tracker callers. |
+| The prior 2026-09-30 issue was the whole-group form `[a, b]` with `npx` missing from `COMMAND_NAMES`; this is a distinct bracket-shape bug, not an allowlist gap. | No allowlist change. Regressions: `per_item_brackets_in_verify_list_validate_as_one_plan` (exact live plan) and `parse_bracket_list_supports_whole_group_and_per_item_forms` (whole-group, per-item, mixed, bare, nested-comma, `[]`).                                                                          |
+| The earlier-session rate-limit `trajectory-20261011T125442Z.jsonl` (`ts` 09:47:56Z) is a rotated file whose name reflects rotation time, not this session; it is not the reported failure. | Confirmed non-cause; the reported session's only turn failed on plan validation.                                                                                                                                                                                                                       |
+
+### Verification
+
+<!-- markdownlint-disable-next-line MD013 -->
+- `cargo nextest run -p vtcode-core -E 'test(planning) or test(tracker) or test(bracket) or test(artifact) or test(verify)'` — 274 passed
+- `cargo nextest run -p vtcode -E 'test(plan) or test(repair) or test(reject) or test(tracker) or test(planning)'` — 556 passed
+- `cargo clippy --locked -p vtcode-core --all-targets -- -D warnings` — clean
+- `cargo fmt --all -- --check` — clean
+- `./scripts/check-dev.sh` — PASS
+
 ## 2026-09-19 | Post-merge review: inspection verify allowlist tightening
 
 ### Baseline
