@@ -1520,13 +1520,13 @@ below based on the topic area.
 
 - **File**: `docs/harness/SESSION_LOG_REVIEW.md`
   - **Content**: Session Log Review
-  - **Topics**: 2026-10-11 | Per-item bracket `verify:` list terminally rejected a valid README plan, 2026-09-19 |
-    Post-merge review: inspection verify allowlist tightening, 2026-09-19 | Planning recovery rejects inspection-command
-    verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 |
-    Checkpoints 912–917 diagnostics audit
-  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-10-11 | Per-item bracket
-    `verify:` list terminally rejected a valid README plan work?", "How does 2026-09-19 | Post-merge review: inspection
-    verify allowlist tightening work?"
+  - **Topics**: 2026-10-11 | Semantic operation identity bounds repeated preflight rejections across turns, 2026-10-11 |
+    Per-item bracket `verify:` list terminally rejected a valid README plan, 2026-09-19 | Post-merge review: inspection
+    verify allowlist tightening, 2026-09-19 | Planning recovery rejects inspection-command verifies, 2026-09-14 |
+    Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit
+  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-10-11 | Semantic operation
+    identity bounds repeated preflight rejections across turns work?", "How does 2026-10-11 | Per-item bracket `verify:`
+    list terminally rejected a valid README plan work?"
 
 - **File**: `docs/compose/spec/session-residual-hygiene.md`
   - **Content**: Session Residual Hygiene

@@ -278,11 +278,18 @@ impl OllamaProvider {
     /// Verify the server is up and the model is available before generating.
     /// Returns the (possibly substituted) model id or a structured error with a
     /// recovery command (`ollama pull <model>` / `/local start ollama`).
+    ///
+    /// `VTCODE_LOCAL_AUTOPULL` is deliberately strict (`1`/`true`, no
+    /// whitespace/casing slack) because enabling it side-effects: a missing
+    /// model triggers a network `ollama pull` at generate time. Widening to
+    /// the canonical tri-state set (canonical parser, `parse_bool_env_value`)
+    /// would silently enable downloads for casual values (`yes`/`on`). Keep a
+    /// minimal literal comparison; the canonical parser governs the non-wire,
+    /// non-side-effecting flags.
     async fn ensure_ready(&self, requested: &str) -> Result<String, LLMError> {
         let autopull = std::env::var("VTCODE_LOCAL_AUTOPULL")
             .ok()
-            .and_then(|v| vtcode_commons::utils::parse_bool_env_value(&v))
-            .unwrap_or(false);
+            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
 
         match resolve_local_model(LocalProvider::Ollama, requested, Some(&self.base_url)).await {
             Ok(model) => Ok(model),
