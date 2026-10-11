@@ -6,6 +6,15 @@
 use hashbrown::HashSet;
 use regex::Regex;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+/// Markdown link target extractor (`[text](path)`).
+static MD_LINK_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[.*?\]\((.*?)\)").expect("valid markdown link regex"));
+
+/// Bare `scripts/`, `references/`, or `assets/` path tokens.
+static PLAIN_PATH_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\b(scripts|references|assets)/[^\s\),\]`\"<>]+"#).expect("valid plain path regex"));
 
 /// Validates that file references in skill instructions follow the Agent Skills spec
 ///
@@ -49,12 +58,8 @@ impl FileReferenceValidator {
     /// - `assets/image.png`
     fn extract_references(&self, instructions: &str) -> HashSet<String> {
         let mut references = HashSet::new();
-        let Ok(md_link_regex) = Regex::new(r"\[.*?\]\((.*?)\)") else {
-            return references;
-        };
-        let Ok(plain_path_regex) = Regex::new(r#"\b(scripts|references|assets)/[^\s\),\]`\"<>]+"#) else {
-            return references;
-        };
+        let md_link_regex = &*MD_LINK_REGEX;
+        let plain_path_regex = &*PLAIN_PATH_REGEX;
 
         let link_ranges = md_link_regex
             .find_iter(instructions)

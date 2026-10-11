@@ -576,6 +576,37 @@ traversals/s that is ~500M atomics/s — the lock bookkeeping, not the data, bec
 - **Match the lock to the context.** `parking_lot` for short sync sections (no poisoning, no async
   yield); `tokio::sync` only in async code and never held across `.await` in a per-item loop.
 
+## Per-Unit Cost of Expensive Work
+
+The worst performance shape is not slow code — it is *cheap* code called
+per-unit. Clippy's `nonstandard_macro_braces` lint ran a post-expansion check
+that, for every expression, statement, and item in a compiled crate, locked the
+compiler's session globals, locked the symbol interner, and re-derived source
+spans with arithmetic. Each individual call looked innocuous behind an
+abstraction; the aggregate was a 3133x slowdown. Rewriting the lint to decide
+from pre-expansion data — no locked globals, no interner, no span math — fixed
+it in under 200 lines ([source](https://blog.goose.love/posts/making-a-clippy-lint-faster-by-3133x/)).
+
+### VT Code translation
+
+Per-unit in VT Code means per streamed chunk, per rendered line/frame, per tool
+call, per recorded event, per indexed file. The lesson ports directly:
+
+- **Static data must be compiled or looked up once.** Literal regexes belong in
+  `LazyLock` / `Lazy` / `OnceLock` statics, never in a function body. Runtime
+  patterns (config globs, deny lists) stay at the call site but are memoized
+  behind a signature-keyed cache — see `ShellPolicyChecker::check_command`
+  (deny regex/glob patterns) and `APPROVAL_REGEX_CACHE` in
+  `tool_policy/manager.rs`.
+- **Never do expensive work while holding a global lock.** Keep per-unit loops
+  outside lock scopes; reborrow a guard once (`let state = &mut *guard;`)
+  instead of re-acquiring per field access.
+- **Make the fast path the easy path.** The `no-per-call-regex-literal` ast-grep
+  rule (`rules/rust/`, enforced by `vtcode check ast-grep`) fails the build on a
+  literal `Regex::new` outside a lazy initializer, so the hoisted shape is the
+  path of least resistance — the maintainer duty from the article is to make
+  the bad shape hard to write, not to catch it in review.
+
 ## Checklist for VT Code Hot Paths
 
 When reviewing or writing a hot path in vtcode:
@@ -602,6 +633,12 @@ When reviewing or writing a hot path in vtcode:
       sparse large payloads boxed, and a `size_of` guard test pinning it? See
       [Enum Footprint](#enum-footprint-in-bulk-collections).
 - [ ] Is overflow handling explicit (`checked_*`/`saturating_*`/`wrapping_*`) rather than relying on implicit wrap?
+- [ ] Is a literal regex compiled inside a function body instead of a `LazyLock`/`Lazy`/`OnceLock`
+      static? CI-enforced by the `no-per-call-regex-literal` ast-grep rule — see
+      [Per-Unit Cost of Expensive Work](#per-unit-cost-of-expensive-work).
+- [ ] Is a runtime-derived pattern (config glob, deny list) recompiled per call instead of memoized
+      behind a signature-keyed cache?
+- [ ] Does any per-unit path acquire a global lock or re-read shared state per element?
 - [ ] Has the performance been measured against baseline before/after?
 
 ---
@@ -631,6 +668,10 @@ When reviewing or writing a hot path in vtcode:
 - [The Performance Cost of RwLock in Our Read-Heavy Workload](https://pranitha.dev/posts/rwlock-vs-lockfree/) —
   Pranitha Madapathi, 2026 (source of the RwLock vs Lock-Free section: per-item `RwLock` atomic RMW cost,
   single-`pin()` epoch traversal, coarse-lock vs `ArcSwap` vs `left-right` tradeoffs).
+- [Optimizing a single Rust Clippy lint by 3133X](https://blog.goose.love/posts/making-a-clippy-lint-faster-by-3133x/) —
+  blyxyas, 2026 (source of the Per-Unit Cost of Expensive Work section: per-expression global-lock and
+  interner acquisition behind an innocuous helper, the pre-expansion rewrite, and the maintainer duty to
+  make the bad shape hard to write — enforced here by the `no-per-call-regex-literal` ast-grep rule).
 - VT Code internal: `docs/development/performance.md`
 - VT Code internal: `docs/development/performance-hasher-policy.md`
 - VT Code internal: `docs/development/async-performance-audit.md`
