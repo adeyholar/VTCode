@@ -2,6 +2,23 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.175.5 - 2026-10-11
+
+### Highlights
+#### Documentation
+
+- Docs: update installation instructions and enhance project configuration details (15b892ab) 
+#### Features
+
+- Style the authoritative handoff diff in the TUI (6bf3512d) 
+- Optimize regex usage by introducing LazyLock for static compilation (e3469a8f) 
+### Other Changes
+#### Other
+
+- Implement preflight validation recovery mechanism and enhance tool call handling (11809e56) 
+#### Performance
+
+- Memoize parsed bash trees across shell classification passes (0b17b246) 
 ## 0.175.4 - 2026-10-11
 
 ### Highlights
