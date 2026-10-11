@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Timelike;
 use tempfile::tempdir;
 
 fn utc(y: i32, m: u32, d: u32, hh: u32, mm: u32, ss: u32) -> DateTime<Utc> {
