@@ -5,6 +5,7 @@ use crate::core::agent::snapshots::SnapshotTurnDiagnostics;
 use crate::llm::provider::{
     AssistantPhase, ContentPart, Message, MessageClearAt, MessageContent, MessageRole, ToolCall,
 };
+use crate::utils::error_log_collector::ErrorLogEntry;
 use anyhow::anyhow;
 use chrono::{TimeZone, Timelike};
 use std::mem::size_of;
