@@ -10,7 +10,6 @@ use dialoguer::console::style;
 use hashbrown::{HashMap, HashSet};
 use indexmap::{IndexMap, IndexSet};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -36,7 +35,10 @@ pub use self::alternative::{
 
 pub use self::mcp::{McpPolicyStore, McpProviderPolicy};
 pub(crate) use self::mcp::{mcp_standard_logging, parse_mcp_policy_key};
-pub use self::model::{APPROVAL_CACHE_MAX_ENTRIES, ApprovalCacheConfig, ToolExecutionDecision, ToolPolicyConfig};
+pub use self::model::{
+    APPROVAL_CACHE_MAX_ENTRIES, ApprovalCacheConfig, PermissionPromptHandler, ToolConstraints, ToolExecutionDecision,
+    ToolPolicyConfig,
+};
 pub(crate) use self::shell_approval::{
     derived_shell_approval_prefixes, shell_command_words_match_prefix, shell_words_lossy, split_shell_approval_entry,
 };
@@ -89,15 +91,6 @@ const MUTATING_OPTION_HINTS: &[&str] = &[
     "-i",
     "-o",
 ];
-
-/// Handler for tool permission prompts
-///
-/// This trait allows different UI modes (CLI, TUI) to provide their own
-/// implementation for prompting users about tool execution.
-pub trait PermissionPromptHandler: Send + Sync {
-    /// Prompt the user for tool execution permission
-    fn prompt_tool_permission(&mut self, tool_name: &str) -> Result<ToolExecutionDecision>;
-}
 
 /// Tool policy manager
 pub struct ToolPolicyManager {
@@ -982,35 +975,6 @@ impl ToolPolicyManager {
     pub fn config_path(&self) -> &Path {
         &self.config_path
     }
-}
-
-/// Scoped, optional constraints for a tool to align with safe defaults
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ToolConstraints {
-    /// Whitelisted modes for tools that support modes (e.g., 'terminal')
-    #[serde(default)]
-    pub allowed_modes: Option<Vec<String>>,
-    /// Cap on results for list/search-like tools
-    #[serde(default)]
-    pub max_results_per_call: Option<usize>,
-    /// Cap on items scanned for file listing
-    #[serde(default)]
-    pub max_items_per_call: Option<usize>,
-    /// Default response format if unspecified by caller
-    #[serde(default)]
-    pub default_response_format: Option<String>,
-    /// Cap maximum bytes when reading files
-    #[serde(default)]
-    pub max_bytes_per_read: Option<usize>,
-    /// Cap maximum bytes when fetching over the network
-    #[serde(default)]
-    pub max_response_bytes: Option<usize>,
-    /// Allowed URL schemes for network tools
-    #[serde(default)]
-    pub allowed_url_schemes: Option<Vec<String>>,
-    /// Denied URL hosts or suffixes for network tools
-    #[serde(default)]
-    pub denied_url_hosts: Option<Vec<String>>,
 }
 
 #[cfg(test)]

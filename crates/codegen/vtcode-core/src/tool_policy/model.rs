@@ -1,7 +1,8 @@
+use anyhow::Result;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 
-use super::{McpPolicyStore, ToolConstraints, ToolPolicy};
+use super::{McpPolicyStore, ToolPolicy};
 
 /// Decision result for tool execution
 #[derive(Debug, Clone, PartialEq)]
@@ -86,4 +87,42 @@ impl ApprovalCacheConfig {
         }
         trimmed
     }
+}
+
+/// Handler for tool permission prompts
+///
+/// This trait allows different UI modes (CLI, TUI) to provide their own
+/// implementation for prompting users about tool execution.
+pub trait PermissionPromptHandler: Send + Sync {
+    /// Prompt the user for tool execution permission
+    fn prompt_tool_permission(&mut self, tool_name: &str) -> Result<ToolExecutionDecision>;
+}
+
+/// Scoped, optional constraints for a tool to align with safe defaults
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ToolConstraints {
+    /// Whitelisted modes for tools that support modes (e.g., 'terminal')
+    #[serde(default)]
+    pub allowed_modes: Option<Vec<String>>,
+    /// Cap on results for list/search-like tools
+    #[serde(default)]
+    pub max_results_per_call: Option<usize>,
+    /// Cap on items scanned for file listing
+    #[serde(default)]
+    pub max_items_per_call: Option<usize>,
+    /// Default response format if unspecified by caller
+    #[serde(default)]
+    pub default_response_format: Option<String>,
+    /// Cap maximum bytes when reading files
+    #[serde(default)]
+    pub max_bytes_per_read: Option<usize>,
+    /// Cap maximum bytes when fetching over the network
+    #[serde(default)]
+    pub max_response_bytes: Option<usize>,
+    /// Allowed URL schemes for network tools
+    #[serde(default)]
+    pub allowed_url_schemes: Option<Vec<String>>,
+    /// Denied URL hosts or suffixes for network tools
+    #[serde(default)]
+    pub denied_url_hosts: Option<Vec<String>>,
 }
