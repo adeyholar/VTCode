@@ -60,8 +60,11 @@ pub const ERR_PARSE_REQUEST_JSON: &str = "failed to parse request JSON";
 pub const ERR_PARSE_ARGS: &str = "failed to parse tokenized args";
 pub const ERR_PARSE_RESULT: &str = "failed to parse de-tokenized result";
 
-/// Helper macro for file operation errors with context
-/// Usage: file_err!("path", "read") -> "failed to read path"
+/// Helper macro for file operation errors with context.
+///
+/// Usage: `file_err!(path, read)` where `path` is an expression and the
+/// operation is matched as a bare identifier (not a string literal).
+/// Expands to `"failed to read <path>"`.
 #[macro_export]
 macro_rules! file_err {
     ($path:expr, read) => {
