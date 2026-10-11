@@ -1,5 +1,8 @@
+use super::shell_approval::derived_shell_approval_prefixes;
 use super::*;
 use crate::config::constants::tools;
+use crate::config::core::tools::ToolsConfig;
+use hashbrown::{HashMap, HashSet};
 use tempfile::tempdir;
 
 #[test]
