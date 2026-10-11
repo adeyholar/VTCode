@@ -7,7 +7,7 @@ use crate::llm::provider::{
 };
 use crate::utils::error_log_collector::ErrorLogEntry;
 use anyhow::anyhow;
-use chrono::{TimeZone, Timelike};
+use chrono::{TimeZone, Timelike, Utc};
 use std::mem::size_of;
 use std::process;
 use std::sync::LazyLock;
