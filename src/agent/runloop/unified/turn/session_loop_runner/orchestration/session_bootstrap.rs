@@ -4,6 +4,7 @@
 use super::super::archive::{create_session_archive, workspace_archive_label};
 use super::super::support::prepare_resume_bootstrap_without_archive;
 use super::*;
+use crate::agent::runloop::unified::turn::is_internal_harness_follow_up;
 use vtcode_core::core::threads::{ThreadBootstrap, prepare_archived_session};
 use vtcode_core::utils::session_archive::SessionArchiveMetadata;
 
@@ -268,6 +269,14 @@ pub(crate) fn resolve_thread_completion_status(
 
 /// Load user prompts from recent session archives (last 24 hours) and inject
 /// them into the history picker so Ctrl+R can search across sessions.
+///
+/// Only genuine user-typed prompts are kept: harness-generated `User`-role
+/// follow-ups (tracker / plan-mode / verification / background continuations)
+/// are skipped via `is_internal_harness_follow_up`, and LLM-enrichment
+/// wrappers plus trailing `[file_reference_metadata]` /
+/// `[agent_reference_metadata]` blocks are stripped so the picker shows what
+/// the user typed. Full (cleaned) content is stored; the picker collapses it
+/// to a single display row and restores the full text on accept.
 pub(super) async fn load_archived_prompts_for_history(handle: &vtcode_ui::tui::app::InlineHandle) {
     let listings = match session_archive::list_recent_sessions(50).await {
         Ok(listings) => listings,
@@ -282,17 +291,14 @@ pub(super) async fn load_archived_prompts_for_history(handle: &vtcode_ui::tui::a
                 continue;
             }
             let content = msg.content.as_text();
-            let trimmed = content.trim();
-            if trimmed.is_empty() {
+            let Some(cleaned) = archived_prompt_content(content.trim()) else {
                 continue;
-            }
-            // Use first line as the prompt preview
-            let preview = trimmed.lines().next().unwrap_or(trimmed).chars().take(200).collect::<String>();
+            };
             // NOTE: `created_at` uses the session start time because per-message
             // timestamps are not stored in the archive format. The time label is
             // therefore an approximation of when the conversation happened.
             entries.push(ArchivedPromptEntry {
-                content: preview,
+                content: cleaned,
                 created_at: listing.snapshot.started_at,
                 session_label: session_label.clone(),
             });
@@ -304,6 +310,77 @@ pub(super) async fn load_archived_prompts_for_history(handle: &vtcode_ui::tui::a
     if !entries.is_empty() {
         handle.set_archived_history(entries);
     }
+}
+
+/// Map one archived message body to a history-picker entry.
+///
+/// Returns `None` for empty or harness-generated follow-ups so reverse
+/// history only surfaces genuine user-typed prompts.
+fn archived_prompt_content(trimmed: &str) -> Option<String> {
+    if trimmed.is_empty() {
+        return None;
+    }
+    if is_internal_harness_follow_up(trimmed) {
+        return None;
+    }
+    let cleaned = clean_archived_user_content(trimmed);
+    let cleaned_trimmed = cleaned.trim();
+    if cleaned_trimmed.is_empty() {
+        return None;
+    }
+    if is_internal_harness_follow_up(cleaned_trimmed) {
+        return None;
+    }
+    Some(cleaned)
+}
+
+/// Restore the user-typed text from an archived `User`-role message.
+///
+/// Archived messages hold the model-facing (refined/enriched) prompt, not the
+/// raw composer text. This strips the known wrappers so reverse history shows
+/// the typed message instead of harness phrasing:
+///
+/// - `User request: <original>` vibe-enrichment wrapper (keeps `<original>`,
+///   see `EnrichedPrompt::to_llm_prompt` in `agent/runloop/prompt.rs`)
+/// - trailing `[file_reference_metadata]` / `[agent_reference_metadata]`
+///   blocks appended at submit time (see `build_file_reference_metadata` /
+///   `append_agent_reference_metadata` in
+///   `turn/session/interaction_loop_runner/support.rs`)
+/// - trailing `Note: For diagnostics, ...` refinement suffix (see
+///   `finalize_refined_prompt` in `agent/runloop/prompt.rs`)
+/// - trailing `Please interpret the user's request using this context.`
+///   (enrichment tail in `agent/runloop/prompt.rs`)
+fn clean_archived_user_content(trimmed: &str) -> String {
+    let mut text = trimmed;
+
+    if let Some(rest) = text.strip_prefix("User request: ") {
+        // Enriched format is `User request: {original}\n\n<sections>`.
+        // Keep everything up to the first blank-line section boundary.
+        if let Some(end) = rest.find("\n\n") {
+            let candidate = rest[..end].trim();
+            text = if candidate.is_empty() { rest.trim() } else { candidate };
+        } else {
+            text = rest.trim();
+        }
+    } else if let Some(rest) = text.strip_prefix("User request:") {
+        text = rest.trim();
+    }
+
+    for marker in ["\n\n[file_reference_metadata]", "\n\n[agent_reference_metadata]"] {
+        if let Some(idx) = text.find(marker) {
+            text = text[..idx].trim_end();
+        }
+    }
+
+    if let Some(idx) = text.find("\n\nNote: For diagnostics, inspect files") {
+        text = text[..idx].trim_end();
+    }
+
+    if let Some(stripped) = text.strip_suffix("Please interpret the user's request using this context.") {
+        text = stripped.trim_end();
+    }
+
+    text.trim().to_string()
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use vtcode_core::utils::session_archive::{
 };
 
 use super::super::super::support::checkpoint_session_archive_start;
-use super::{CoreAgentConfig, ResumeSession, SessionArchiveMetadata, prepare_session_thread};
+use super::{CoreAgentConfig, ResumeSession, SessionArchiveMetadata, archived_prompt_content, prepare_session_thread};
 
 fn config(workspace: &Path) -> CoreAgentConfig {
     CoreAgentConfig {
@@ -253,4 +253,41 @@ fn config_poll_retains_rejected_config_and_recovers_with_cli_overrides() {
     assert_eq!(reloaded.agent.default_model, config.model);
     assert!(watcher.take_reload_error().is_none());
     assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn archived_history_keeps_genuine_user_prompts_verbatim() {
+    assert_eq!(archived_prompt_content("fix login bug"), Some("fix login bug".to_string()));
+    let multiline = "cargo test \\\n  -- --nocapture\nthird line";
+    assert_eq!(archived_prompt_content(multiline), Some(multiline.to_string()));
+}
+
+#[test]
+fn archived_history_skips_harness_generated_follow_ups() {
+    assert_eq!(archived_prompt_content(""), None);
+    for harness in [
+        "The task tracker still has incomplete steps: foo. This follow-up is the harness resuming the work.",
+        "The previous turn ended on a recoverable block: budget exhausted. This follow-up is the harness resuming the work.",
+        "Plan-mode auto-continue: no validated persisted plan is ready for approval yet.",
+        "Review the authoritative background subprocess completion notice and continue the user's request.",
+        "Continue autonomously from the last stalled turn. Verification is still pending.",
+        "   ",
+    ] {
+        assert_eq!(archived_prompt_content(harness), None, "harness text leaked: {harness}");
+    }
+}
+
+#[test]
+fn archived_history_strips_enrichment_wrappers_to_typed_text() {
+    let enriched = "User request: fix login bug\n\nResolved references:\n- \"that\" → Auth in src/auth.rs:1\n\nPlease interpret the user's request using this context.";
+    assert_eq!(archived_prompt_content(enriched), Some("fix login bug".to_string()));
+
+    let with_meta = "check @README.md\n\n[file_reference_metadata]\n@README.md=/work/README.md\nHint: Read each referenced file once.\n";
+    assert_eq!(archived_prompt_content(with_meta), Some("check @README.md".to_string()));
+
+    let with_agent = "use rust-engineer agent\n\n[agent_reference_metadata]\nselected=@agent-rust-engineer\n";
+    assert_eq!(archived_prompt_content(with_agent), Some("use rust-engineer agent".to_string()));
+
+    let with_note = "debug the auth flow\n\nNote: For diagnostics, inspect files and run verification commands through `exec_command`.";
+    assert_eq!(archived_prompt_content(with_note), Some("debug the auth flow".to_string()));
 }

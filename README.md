@@ -99,10 +99,12 @@ Requirements: macOS, Linux, or Windows/WSL. The Cargo path also needs Rust 1.98.
 ### 1. Install
 
 ```bash
+# Review the installer script before running it: https://github.com/vinhnx/vtcode/blob/main/scripts/install.sh
 curl -fsSL https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.sh | bash
 ```
 
-The installer also sets up `ripgrep` and `ast-grep` on macOS/Linux. Or use Homebrew or Cargo:
+On macOS/Linux, the installer also sets up `ripgrep` and `ast-grep` by default. For package-managed installs, use
+Homebrew or Cargo instead:
 
 ```bash
 brew trust vinhnx/tap
@@ -113,14 +115,15 @@ cargo install vtcode
 ```
 
 Verify the install with `vtcode --version`, then see the [installation guide](./docs/installation/README.md) for
-prerequisites, other methods, and the installer script to review before running.
+prerequisites, additional methods, and optional search-tool setup.
 
 > [!NOTE]
 > Windows artifacts are best-effort and may lag behind macOS/Linux.
 
 ### 2. Configure your project
 
-In your project, initialize configuration and instructions, then add provider credentials. For example, with OpenAI:
+From your project directory, initialize configuration and instructions, then add provider credentials. For example,
+with OpenAI:
 
 ```bash
 cd path/to/your/project
@@ -128,9 +131,9 @@ vtcode init                # scaffolds config + AGENTS.md; review before committ
 vtcode secret add openai   # stores an OpenAI API key in your OS keyring
 ```
 
-Replace `openai` with your provider. Credentials can also come from environment variables or a workspace `.env`;
-`vtcode login` handles supported login flows. See [Getting started](./docs/user-guide/getting-started.md) and
-[Provider guides](./docs/providers/PROVIDER_GUIDES.md).
+Replace `openai` with your provider. You can also provide credentials through environment variables or a workspace
+`.env`; `vtcode login` supports available login flows. See [Getting started](./docs/user-guide/getting-started.md) and
+[Provider guides](./docs/providers/PROVIDER_GUIDES.md) for provider-specific setup.
 
 > [!NOTE]
 > ChatGPT OAuth reuses the Codex CLI's public client identity via an unofficial compatibility flow; prefer your
@@ -148,8 +151,8 @@ Replace `openai` with your provider. Credentials can also come from environment 
 vtcode   # open the interactive TUI in your project
 ```
 
-Start with a focused request, such as "Explain how this project handles authentication," then review the diff and test
-results before committing. See [Usage](#usage) for automation and session commands, or
+Give VT Code a focused request, such as "Explain how this project handles authentication." Review its proposed changes
+and test results before committing. See [Usage](#usage) for automation and session commands, or
 [getting started](./docs/user-guide/getting-started.md) for a guided tour.
 
 ## Usage
