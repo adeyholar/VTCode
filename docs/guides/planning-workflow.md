@@ -15,8 +15,8 @@ During planning, the agent can:
 - run explicitly safe inspection or validation commands when the active permission policy allows them
 - ask clarifying questions through `request_user_input`
 
-The footer shows `Planning...` only while a planning turn is active; a completed or rejected draft returns to idle while
-Plan mode remains selected. Canonical step metadata uses `-> files:` and `-> verify:`; arrows inside action prose or
+The footer shows `Planning...` only while a planning turn is active; a completed draft returns to idle, while exhausted
+validation repair leaves the turn blocked with Plan mode still selected. Canonical step metadata uses `-> files:` and `-> verify:`; arrows inside action prose or
 quoted verification patterns remain content. List separate verification commands as comma-separated entries rather than
 semicolon chains. Documentation checks such as `npx markdownlint-cli2 README.md` are valid verification commands.
 Markdown-only steps may use `verify: [skip Markdown lint if unavailable]` as their sole check; code or mixed-target
@@ -234,8 +234,10 @@ include optional `Expected Outcomes` and `Dependencies and Prerequisites` sectio
 sections and enforces only the canonical four. Every numbered implementation step must name a concrete file, symbol,
 behavior, or other repository target and include a non-empty `verify:`/`verification:` command or check. Placeholder
 tokens and unresolved `Next open decision` or `Open question` entries block approval. Invalid candidates are rejected
-before persistence, so an existing valid draft is preserved. VT Code gives the model one bounded repair request; if the
-repaired artifact is still invalid, planning remains active with the validation reasons visible.
+before persistence, so an existing valid draft is preserved. VT Code gives the model up to two repair requests; if the
+repaired artifact is still invalid, planning remains active with the validation reasons visible. Once the bounded repair
+attempts are exhausted, the turn ends blocked, retains the rejected draft and validator feedback, and waits for a revised
+request instead of automatically continuing or reporting success.
 
 Creating the `task_tracker` checklist is part of the approval gate. If the tracker tool is unavailable, fails, or does
 not persist its tracker file, the planning workflow remains active and no write-capable execution turn is started. All
@@ -260,6 +262,7 @@ Routing follows the session state and confirmation policy:
 
 An invalid revision is rejected with visible feedback, never overwrites the persisted plan, and never pushes
 planning-repair directives into the execution turn; no continuation turn is scheduled in that case.
+The rejected revision ends the turn blocked; a final rejection message does not count as successful implementation.
 
 ### Streaming-to-persistence handoff
 

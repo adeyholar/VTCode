@@ -14,6 +14,7 @@ pub(crate) const PLAN_PSEUDO_TOOL_CALL_REPROMPT_DIRECTIVE: &str = "Planning: the
 
 const EXECUTION_PLAN_REJECTION_NOTICE: &str = "The proposed plan was rejected and discarded; no continuation turn was scheduled. Adjust the request or revise the plan to continue.";
 const PLANNING_PLAN_REJECTION_NOTICE: &str = "The proposed plan was rejected and discarded; no continuation turn was scheduled. Revise the plan or restate the request to continue.";
+const TERMINAL_PLAN_REJECTION_REASON: &str = "plan artifact rejected; revise the plan before continuing";
 const PLAN_APPROVAL_WAITING_NOTICE: &str = "Plan is awaiting approval. Type `approve`, `implement`, or `yes` to begin execution, or `edit` to revise the plan.";
 const PLAN_APPROVAL_DISMISSED_NOTICE: &str = "Plan review ended without starting implementation. The plan remains available for revision or approval in a later turn.";
 
@@ -295,7 +296,7 @@ impl<'a> TurnProcessingContext<'a> {
             }
             // The rejection is a terminal, user-visible outcome. Publish it
             // through the assistant-response path as well as the renderer so
-            // finalization does not mistake this completed control-flow turn
+            // finalization does not mistake this blocked control-flow turn
             // for a turn that never produced a final response. History must
             // carry the validator feedback, not only the TUI lines above —
             // otherwise a later `continue` resubmits the same invalid shape.
@@ -307,7 +308,9 @@ impl<'a> TurnProcessingContext<'a> {
                 Some(uni::AssistantPhase::FinalAnswer),
             )?;
             append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
-            return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false }));
+            return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+                reason: Some(TERMINAL_PLAN_REJECTION_REASON.to_string()),
+            }));
         }
 
         if self.recovery_is_tool_free() && self.is_planning_active() {
@@ -382,7 +385,9 @@ impl<'a> TurnProcessingContext<'a> {
             Some(uni::AssistantPhase::FinalAnswer),
         )?;
         append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
-        Ok(TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false }))
+        Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+            reason: Some(TERMINAL_PLAN_REJECTION_REASON.to_string()),
+        }))
     }
 
     /// Schedule the one bounded plan-only retry allowed after a permanent

@@ -120,6 +120,7 @@ async fn planning_prompt_size_fixed_fixture() {
             estimate_tokens(&prompt)
         );
         assert!(prompt.contains(PLANNING_WORKFLOW_PLAN_PERSISTENCE_POLICY_LINE));
+        assert!(prompt.contains("Rejected plans stay blocked; repair before approval"));
         assert!(prompt.len() <= case.max_prompt_bytes, "{} planning fixture exceeded byte budget", case.density);
         assert!(
             estimate_tokens(&prompt) <= case.max_estimated_tokens,
@@ -340,6 +341,11 @@ fn plan_quality_line_requires_scope_section() {
 }
 
 #[test]
+fn plan_quality_line_keeps_rejected_work_blocked_until_repaired() {
+    assert!(PLANNING_WORKFLOW_PLAN_QUALITY_LINE.contains("Rejected plans stay blocked; repair before approval"));
+}
+
+#[test]
 fn plan_quality_line_forbids_markdown_link_file_references() {
     let line = PLANNING_WORKFLOW_PLAN_QUALITY_LINE;
     assert!(line.contains("never as markdown links or editor/IDE URIs"));
@@ -384,8 +390,7 @@ fn plan_quality_line_requires_concrete_verify_checks() {
             && line.contains("`git diff`")
             && line.contains("`git blame`")
     );
-    assert!(line.contains("Reuse evidence already visible"));
-    assert!(line.contains("keep command output focused"));
+    assert!(line.contains("Reuse evidence; focus output"));
 }
 
 #[test]

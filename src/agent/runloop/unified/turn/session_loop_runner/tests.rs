@@ -515,6 +515,25 @@ fn exit_after_completed_turn_reports_success_instead_of_cancellation() {
 }
 
 #[test]
+fn terminal_plan_rejection_never_reports_success_on_session_completion() {
+    let rejected = TurnLoopResult::Blocked {
+        reason: Some("plan artifact rejected; revise the plan before continuing".to_string()),
+    };
+    for end_reason in [
+        SessionEndReason::Completed,
+        SessionEndReason::NewSession,
+        SessionEndReason::Exit,
+    ] {
+        let (_, subtype) = resolve_thread_completion_status(&end_reason, false, None, Some(&rejected), false);
+        assert_ne!(subtype, ThreadCompletionSubtype::Success);
+    }
+    assert_eq!(
+        resolve_thread_completion_status(&SessionEndReason::Completed, false, None, Some(&rejected), false),
+        ("blocked", ThreadCompletionSubtype::ErrorDuringExecution)
+    );
+}
+
+#[test]
 fn latest_assistant_result_text_uses_latest_substantive_final_assistant_message() {
     let tool_call =
         ToolCall::function("call-1".to_string(), "read_file".to_string(), r#"{"path":"README.md"}"#.to_string());

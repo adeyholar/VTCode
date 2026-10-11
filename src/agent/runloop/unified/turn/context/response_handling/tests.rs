@@ -1,4 +1,7 @@
 use super::*;
+use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
+    plan_mode_recoverable_block, tracker_auto_continue_is_recoverable_block,
+};
 use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
 use vtcode_core::tools::handlers::planning_workflow::CANONICAL_STEP_FORMAT;
 
@@ -18,6 +21,15 @@ fn assert_history_carries_validator_feedback(final_text: &str) {
         final_text.contains("Plan validation issues:") && final_text.contains(CANONICAL_STEP_FORMAT),
         "history must carry validator feedback and canonical step format, got: {final_text}"
     );
+}
+
+fn assert_terminal_plan_rejection_is_blocked(outcome: &TurnHandlerOutcome) {
+    let TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) }) = outcome else {
+        panic!("a rejected plan must end blocked instead of reporting completion");
+    };
+    assert_eq!(reason, "plan artifact rejected; revise the plan before continuing");
+    assert!(!plan_mode_recoverable_block(reason));
+    assert!(!tracker_auto_continue_is_recoverable_block(Some(reason)));
 }
 
 /// Unparseable pseudo-tool-call markup: the `<tools:call>` name is empty,
@@ -416,10 +428,7 @@ async fn untagged_planlike_text_with_exhausted_budget_rejects_with_specific_reas
         .await
         .expect("untagged plan-like text should be handled");
 
-    assert!(
-        matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Completed { .. })),
-        "exhausted repair budget must end the turn with the specific rejection, not a silent hint"
-    );
+    assert_terminal_plan_rejection_is_blocked(&outcome);
     assert_history_carries_validator_feedback(&last_final_answer_text(&ctx));
 }
 
@@ -602,10 +611,7 @@ async fn execution_mode_invalid_unapproved_plan_repair_is_bounded() {
         .handle_text_response(String::new(), Vec::new(), None, Some(INVALID_PLAN.to_string()), false)
         .await
         .expect("a failed repair should end with feedback");
-    assert!(matches!(
-        second,
-        TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false })
-    ));
+    assert_terminal_plan_rejection_is_blocked(&second);
     assert!(ctx.working_history.iter().any(|message| {
         message.role == uni::MessageRole::Assistant
             && message.phase == Some(uni::AssistantPhase::FinalAnswer)
@@ -638,13 +644,7 @@ async fn execution_mode_replan_rejection_surfaces_feedback_without_repair_direct
         .await
         .expect("invalid replan should end the turn with feedback");
 
-    assert!(
-        matches!(
-            outcome,
-            TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false })
-        ),
-        "a rejected revision must not schedule an execution turn"
-    );
+    assert_terminal_plan_rejection_is_blocked(&outcome);
     assert!(
         !ctx.working_history
             .iter()
@@ -685,10 +685,7 @@ async fn plan_only_execution_rejection_still_publishes_final_response() {
         .await
         .expect("plan-only invalid replan should end the turn with feedback");
 
-    assert!(matches!(
-        outcome,
-        TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false })
-    ));
+    assert_terminal_plan_rejection_is_blocked(&outcome);
     assert!(ctx.working_history.iter().any(|message| {
         message.role == uni::MessageRole::Assistant
             && message.phase == Some(uni::AssistantPhase::FinalAnswer)

@@ -198,10 +198,14 @@ async fn streamed_third_invalid_plan_is_terminal_and_retains_each_rejected_draft
     }));
 
     let mut history = vec![uni::Message::user("make a plan for the streamed handoff".to_string())];
-    run_turn_loop(&mut history, backing.turn_loop_context())
+    let outcome = run_turn_loop(&mut history, backing.turn_loop_context())
         .await
         .expect("the third invalid draft should terminate the bounded repair loop");
 
+    assert!(matches!(&outcome.result, TurnLoopResult::Blocked { reason: Some(reason) }
+        if reason == "plan artifact rejected; revise the plan before continuing"));
+    assert!(!outcome.plan_approved_execution_pending);
+    assert!(outcome.turn_modified_files.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 3, "the third invalid draft must not trigger a fourth request");
     assert_eq!(
         history
