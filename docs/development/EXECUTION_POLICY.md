@@ -150,11 +150,22 @@ bounded.
   `tool_documentation_mode = minimal`, and does not inherit the parent's MCP servers unless explicitly requested. This
   prevents replaying the full parent bootstrap on every child turn.
 - **Tool-result clearing is on by default.** Old tool results are stripped from context once it grows past
-  `trigger_tokens` (default 100k), keeping only the most recent `keep_tool_uses` (default 3) results. Requests that will
+  `trigger_tokens` (default 40k), protecting the most recent `keep_tool_uses` (default 2) results. Requests that will
   not carry native context edits get the request-only local rewrite (`clear_old_tool_results`): non-Anthropic providers,
   Anthropic routes whose model capability profile lacks context edits, and headless (`vtcode exec`) Anthropic runs,
   which never attach native context management. The local rewrite stubs older tool-result bodies while preserving
-  `tool_call_id` pairing. Durable session history and `ThreadEvent`s keep the full payload.
+  `tool_call_id` pairing. The local trigger is capped at 60% of the history budget: the resolved provider/session
+  context limit minus reserved output tokens and system/tool-schema overhead. Lower configured triggers still win;
+  unknown capacity preserves the configured trigger. Set `enabled = false` to opt out. Local retention extends
+  to every result in each protected result's originating assistant tool-call batch, even with reordered completions
+  or intervening system directives. Small results remain unchanged when a placeholder would not save tokens.
+  Durable session history and `ThreadEvent`s keep the full payload. Headless automatic compaction checks the
+  normalized, cleared request projection first; if pressure remains high, the existing compaction engine receives
+  full history and the request projection is rebuilt afterward.
+- **Local summary requests reserve their prefix.** Flat and hierarchical summaries share a history-budget resolver
+  that intersects provider/session limits and reserves parent system/tool-schema overhead, any explicit summary
+  output limit, and existing safety headroom. Impossible fixed inputs fail before a summary call; unknown capacity
+  keeps the existing fallback. See [the compaction contract](../guides/agent-loop-contract.md#unified-auto-compaction).
 - **Builtin tool count is capped.** The number of LLM-exposed builtin tools stays within a small cap; new tools must
   consolidate, defer, or deliberately raise the cap. Builtin tool schemas in `progressive` mode fit in a **2,000-token**
   envelope (measured ~1,793 on the Codex-4 default profile). The always-eager set is the Codex baseline plus structured
@@ -165,7 +176,8 @@ bounded.
 - **Tool-result clearing defaults** (`agent.harness.tool_result_clearing`): `trigger_tokens: 40000`,
   `keep_tool_uses: 2`. Research/audit turns were observed at ~1M input tokens/turn with the old 100k trigger — tool
   results piled up long before any clearing. Durable history is unchanged. `clear_tool_inputs` defaults to `true`, so
-  paired `apply_patch` / `write_file` arguments are replaced with a JSON placeholder whenever their results are stubbed;
+  paired `apply_patch` / `write_file` arguments are replaced with a JSON placeholder when their results are actually
+  stubbed, without increasing projected tokens. Retained results keep their arguments and signatures;
   set it `false` to keep full tool-call inputs on the wire.
 - **Tool-output economy.** Interactive and headless paths share `reduce_tool_result` hard caps (32 KiB / 2000 lines on
   read/exec bodies). `list_files` `mode=tree` emits at most 200 nodes and 50 children per directory and sets

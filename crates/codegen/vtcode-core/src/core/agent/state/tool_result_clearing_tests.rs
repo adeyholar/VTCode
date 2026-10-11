@@ -1,0 +1,187 @@
+use super::*;
+use crate::config::VTCodeConfig;
+use crate::llm::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, MessageRole, ToolCall};
+
+struct CapacityProvider(usize);
+
+#[async_trait::async_trait]
+impl LLMProvider for CapacityProvider {
+    fn name(&self) -> &str {
+        "clearing-test"
+    }
+
+    fn effective_context_size(&self, _model: &str) -> usize {
+        self.0
+    }
+
+    async fn generate(&self, _request: LLMRequest) -> Result<LLMResponse, LLMError> {
+        Ok(LLMResponse::new("unknown-test-model", "unused"))
+    }
+
+    fn supported_models(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn clearing_trigger_intersects_limits_and_subtracts_overhead_and_output() {
+    let mut config = VTCodeConfig::default();
+    config.context.max_context_tokens = 32_000;
+    let resolve = |config: &VTCodeConfig, capacity, overhead, output| {
+        resolve_tool_result_clearing_trigger(
+            config,
+            &CapacityProvider(capacity),
+            "unknown-test-model",
+            overhead,
+            output,
+        )
+    };
+    assert_eq!(resolve(&config, 64_000, 2_000, 4_000), 15_600);
+    assert_eq!(resolve(&config, 16_000, 2_000, 4_000), 6_000);
+    assert_eq!(resolve(&config, 0, 2_000, 4_000), 15_600);
+    config.context.max_context_tokens = 0;
+    assert_eq!(resolve(&config, 64_000, 2_000, 4_000), 34_800);
+    assert_eq!(resolve(&config, 0, usize::MAX, usize::MAX), 40_000);
+    assert_eq!(resolve(&config, 1, 2_000, 4_000), 1);
+    config.agent.harness.tool_result_clearing.trigger_tokens = 37;
+    assert_eq!(resolve(&config, 64_000, 0, 0), 37);
+    config.agent.harness.tool_result_clearing.enabled = false;
+    assert_eq!(resolve(&config, 64_000, 0, 0), 0);
+    config.agent.harness.tool_result_clearing.enabled = true;
+    config.agent.harness.tool_result_clearing.trigger_tokens = 0;
+    assert_eq!(resolve(&config, 64_000, 0, 0), 0);
+    config.agent.harness.tool_result_clearing.trigger_tokens = u64::MAX;
+    assert_eq!(resolve(&config, usize::MAX, 0, 0), (usize::MAX as u64 / 5) * 3 + (usize::MAX as u64 % 5) * 3 / 5);
+}
+
+fn batch_history() -> Vec<Message> {
+    let mut messages = vec![Message::user("Inspect evidence".into())];
+    for (batch, count) in [1, 4, 3].into_iter().enumerate() {
+        let calls: Vec<_> = (0..count)
+            .map(|call| {
+                let mut tool_call = ToolCall::function(
+                    format!("batch_{batch}_{call}"),
+                    "read_file".into(),
+                    format!("{{\"path\":\"evidence_{batch}_{call}\"}}"),
+                );
+                tool_call.thought_signature = Some(format!("signature_{batch}_{call}"));
+                tool_call
+            })
+            .collect();
+        let mut assistant = Message::assistant(format!("Inspect batch {batch}"));
+        assistant.tool_calls = Some(calls);
+        messages.push(assistant);
+        // Reordered completions and system directives must not split batches.
+        for call in (0..count).rev() {
+            messages.push(Message::system(format!("directive {batch}_{call}")));
+            messages.push(Message::tool_response(
+                format!("batch_{batch}_{call}"),
+                format!("evidence_{batch}_{call} ").repeat(400),
+            ));
+        }
+    }
+    messages
+}
+
+#[test]
+fn clearing_retains_complete_asymmetric_batches_by_call_id() {
+    let messages = batch_history();
+    for (keep, cleared_ids) in [
+        (1, vec!["batch_0_0", "batch_1_3", "batch_1_2", "batch_1_1", "batch_1_0"]),
+        (3, vec!["batch_0_0", "batch_1_3", "batch_1_2", "batch_1_1", "batch_1_0"]),
+        (4, vec!["batch_0_0"]),
+        (7, vec!["batch_0_0"]),
+        (8, vec![]),
+    ] {
+        let projected = clear_old_tool_results(&messages, 1, keep, 1, true);
+        let actual: Vec<_> = projected
+            .iter()
+            .filter(|message| message.content.as_text().contains("\"cleared\":\"tool_result\""))
+            .map(|message| message.tool_call_id.as_deref().unwrap())
+            .collect();
+        assert_eq!(actual, cleared_ids, "keep={keep}");
+        assert!(validate_history_invariants(&projected).is_valid());
+        for (original, retained) in messages.iter().zip(&projected) {
+            assert_eq!(original.role, retained.role);
+            assert_eq!(original.tool_call_id, retained.tool_call_id);
+            if original.role == MessageRole::Tool && !cleared_ids.contains(&original.tool_call_id.as_deref().unwrap()) {
+                assert_eq!(original, retained);
+            }
+            if let Some(calls) = &retained.tool_calls {
+                for (original_call, call) in original.tool_calls.as_ref().unwrap().iter().zip(calls) {
+                    if cleared_ids.contains(&call.id.as_str()) {
+                        assert_eq!(call.function.as_ref().unwrap().arguments, CLEARED_TOOL_INPUT_PLACEHOLDER);
+                    } else {
+                        assert_eq!(original_call, call);
+                    }
+                }
+            }
+        }
+        assert_eq!(clear_old_tool_results(&projected, 1, keep, 1, true), projected);
+        assert!(
+            projected.iter().map(Message::estimate_tokens).sum::<usize>()
+                <= messages.iter().map(Message::estimate_tokens).sum::<usize>()
+        );
+    }
+    assert_eq!(messages, batch_history(), "durable history remains intact");
+}
+
+#[test]
+fn clearing_preserves_small_results_and_their_inputs_at_trigger_boundary() {
+    let mut messages = batch_history();
+    let result_index = messages.iter().position(|message| message.role == MessageRole::Tool).unwrap();
+    messages[result_index].content = crate::llm::provider::MessageContent::Text("ok".into());
+    let tokens = messages.iter().map(Message::estimate_tokens).sum::<usize>() as u64;
+    assert_eq!(clear_old_tool_results(&messages, tokens + 1, 1, 1, true), messages);
+    assert_eq!(clear_old_tool_results(&messages, 0, 1, 1, true), messages);
+    let projected = clear_old_tool_results(&messages, tokens, 1, 1, true);
+    assert_eq!(projected[result_index], messages[result_index]);
+    assert_eq!(projected[1], messages[1], "small retained output keeps arguments and signature");
+    assert!(
+        projected
+            .iter()
+            .any(|message| message.content.as_text().contains("\"cleared\":\"tool_result\""))
+    );
+}
+
+#[test]
+fn clearing_unmatched_results_uses_count_retention() {
+    let messages: Vec<_> = (0..3)
+        .map(|index| Message::tool_response(format!("orphan_{index}"), "unmatched evidence ".repeat(400)))
+        .collect();
+    let projected = clear_old_tool_results(&messages, 1, 1, 1, true);
+    assert!(projected[0].content.as_text().contains("\"cleared\":\"tool_result\""));
+    assert!(projected[1].content.as_text().contains("\"cleared\":\"tool_result\""));
+    assert_eq!(projected[2], messages[2]);
+}
+
+#[test]
+fn clearing_reused_call_id_preserves_newest_origin_inputs() {
+    let mut messages = batch_history();
+    let first_id = "batch_0_0";
+    let last_assistant = messages.iter_mut().rev().find(|message| message.tool_calls.is_some()).unwrap();
+    last_assistant.tool_calls.as_mut().unwrap()[0].id = first_id.into();
+    let last_result = messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.role == MessageRole::Tool)
+        .unwrap();
+    last_result.tool_call_id = Some(first_id.into());
+    let projected = clear_old_tool_results(&messages, 1, 1, 1, true);
+    let retained_assistant = projected.iter().rev().find(|message| message.tool_calls.is_some()).unwrap();
+    let original_assistant = messages.iter().rev().find(|message| message.tool_calls.is_some()).unwrap();
+    assert_eq!(retained_assistant, original_assistant);
+    assert_eq!(
+        projected[1].tool_calls.as_ref().unwrap()[0]
+            .function
+            .as_ref()
+            .unwrap()
+            .arguments,
+        CLEARED_TOOL_INPUT_PLACEHOLDER
+    );
+    assert!(validate_history_invariants(&projected).is_valid());
+}

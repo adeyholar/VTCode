@@ -359,9 +359,23 @@ pub(super) async fn build_turn_request(
         )
     {
         let clearing = &vt_cfg.agent.harness.tool_result_clearing;
+        let prompt_overhead_tokens =
+            (vtcode_core::prompts::system::estimate_token_count(&request_envelope.system_prompt()) as usize)
+                .saturating_add(
+                    vtcode_core::llm::usage_cost::estimate_tool_definition_tokens(&ordered_wire_tools) as usize
+                );
+        let trigger_tokens = vtcode_core::core::agent::state::resolve_tool_result_clearing_trigger(
+            vt_cfg,
+            ctx.provider_client.as_ref(),
+            request_model,
+            prompt_overhead_tokens,
+            max_tokens_opt.map_or(vtcode_core::compaction::memory_envelope::DEFAULT_OUTPUT_RESERVE_TOKENS, |tokens| {
+                tokens as usize
+            }),
+        );
         normalized_history = vtcode_core::core::agent::state::clear_old_tool_results(
             &normalized_history,
-            clearing.trigger_tokens,
+            trigger_tokens,
             clearing.keep_tool_uses,
             clearing.clear_at_least_tokens,
             clearing.clear_tool_inputs,
@@ -1538,6 +1552,60 @@ mod tests {
         let runtime_context = system_prompt_text(&built.request);
         assert!(runtime_context.contains("- Request model: overlay-model"));
         assert!(runtime_context.contains("- Request reasoning effort: high"));
+    }
+
+    #[tokio::test]
+    async fn local_clearing_uses_session_budget_and_preserves_recent_batch() {
+        for enabled in [true, false] {
+            let mut backing = TestTurnProcessingBacking::new(4).await;
+            let mut cfg = VTCodeConfig::default();
+            cfg.context.max_context_tokens = 16_000;
+            cfg.agent.harness.tool_result_clearing.trigger_tokens = 40_000;
+            cfg.agent.harness.tool_result_clearing.enabled = enabled;
+            backing.set_vt_cfg_for_test(cfg);
+            let mut ctx = backing.turn_processing_context();
+            ctx.working_history.push(uni::Message::user("Inspect evidence".into()));
+            for (batch, count) in [1, 3].into_iter().enumerate() {
+                let mut assistant = uni::Message::assistant("Inspect batch".into());
+                assistant.tool_calls = Some(
+                    (0..count)
+                        .map(|call| {
+                            uni::ToolCall::function(
+                                format!("call_{batch}_{call}"),
+                                "read_file".into(),
+                                "{\"path\":\"source.rs\"}".into(),
+                            )
+                        })
+                        .collect(),
+                );
+                ctx.working_history.push(assistant);
+                for call in (0..count).rev() {
+                    ctx.working_history.push(uni::Message::tool_response(
+                        format!("call_{batch}_{call}"),
+                        format!("evidence_{batch}_{call} ").repeat(1_000),
+                    ));
+                }
+            }
+            let original = ctx.working_history.clone();
+            let tokens = original.iter().map(uni::Message::estimate_tokens).sum::<usize>();
+            assert!(tokens < 40_000 && tokens > 9_600, "fixture lies between capped and configured triggers");
+            let snapshot = capture_turn_request_snapshot(&mut ctx, "test-model", false);
+            let built = build_turn_request(&mut ctx, 1, "test-model", &snapshot, Some(2_000), None, false)
+                .await
+                .unwrap();
+            let results: Vec<_> = built
+                .continuation_messages
+                .iter()
+                .filter(|message| message.role == uni::MessageRole::Tool)
+                .collect();
+            assert_eq!(results.len(), 4);
+            assert_eq!(results[0].content.as_text().contains("\"cleared\":\"tool_result\""), enabled);
+            for result in &results[1..] {
+                assert!(result.content.as_text().contains("evidence_1_"));
+            }
+            assert!(vtcode_core::core::agent::state::validate_history_invariants(&built.request.messages).is_valid());
+            assert!(ctx.working_history.starts_with(&original), "durable history retains full evidence");
+        }
     }
 
     #[tokio::test]

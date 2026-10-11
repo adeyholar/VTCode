@@ -80,9 +80,9 @@ python3 scripts/generate_config_field_reference.py
 | `agent.harness.skeptic_panel.models[]` | `string` | no | `-` | - |
 | `agent.harness.tool_result_clearing.clear_at_least_tokens` | `integer` | no | `30000` | - |
 | `agent.harness.tool_result_clearing.clear_tool_inputs` | `boolean` | no | `true` | Replace paired `tool_calls[].function.arguments` for stubbed results. Leaving inputs in place keeps full `apply_patch`/`write_file` bodies on every request after the result was already reclaimed. Defaults to `true`; set `false` to opt out. Bare `#[serde(default)]` on a `bool` is `false`, so this field names its default fn explicitly. |
-| `agent.harness.tool_result_clearing.enabled` | `boolean` | no | `true` | - |
-| `agent.harness.tool_result_clearing.keep_tool_uses` | `integer` | no | `2` | - |
-| `agent.harness.tool_result_clearing.trigger_tokens` | `integer` | no | `40000` | - |
+| `agent.harness.tool_result_clearing.enabled` | `boolean` | no | `true` | Enables native or request-only local clearing; set `false` to opt out. Durable history and events retain full outputs. |
+| `agent.harness.tool_result_clearing.keep_tool_uses` | `integer` | no | `2` | Protect newest results. Local clearing also retains all results from their originating assistant tool-call batches, matching call IDs across reordered completions and intervening directives. |
+| `agent.harness.tool_result_clearing.trigger_tokens` | `integer` | no | `40000` | Local clearing caps this at 60% of the provider/session history budget after output reserves and system/tool-schema overhead (minimum positive cap: 1). Lower configured triggers win; unknown capacity keeps this value. Configured values must be positive. Native edit thresholds keep the configured value. |
 | `agent.harness.verification.auto_execute` | `boolean` | no | `true` | Run the detected project verifier through the normal tool pipeline when the model exhausts its directive retries without verifying. Default: true. Set to false to restore directive-only recovery. |
 | `agent.harness.verification.cross_turn_turns` | `integer` | no | `2` | Autonomous cross-turn recovery turns scheduled after a verification-blocked turn before a manual blocked handoff is written. Default: 2. |
 | `agent.harness.verification.default_verifier_override` | `null \| string` | no | `null` | Explicit verifier command overriding project-marker detection (e.g. `"cargo nextest run -p mycrate"`). Must be a standalone verifier or pure `&&` chain; pipes and `;`/`\|\|` joins are rejected at use. |

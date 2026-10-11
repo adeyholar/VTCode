@@ -88,8 +88,11 @@ VT Code has undergone significant improvements:
 - **Primary Agent Switching & Mode Guard** - Switch main-session agents (`plan`/`build`/`auto`) with `Shift+Tab`; mode
   switches lock during a turn to keep tool-access and instructions consistent. See
   [Keyboard Shortcuts](./user-guide/keyboard-shortcuts.md#agent-and-mode-switching).
-- **Automatic Compaction & Memory Envelope** - Unified compaction orchestration with a shared memory envelope as the
-  single source of truth for both runloops.
+- **Context Clearing & Automatic Compaction** - Request-only clearing protects complete recent tool batches, and headless
+  runs measure the cleared projection before summarizing. Both runloops share the compaction engine and memory envelope;
+  canonical `ThreadEvent` history remains authoritative. See
+  [context architecture](./ARCHITECTURE.md#request-projection-and-context-budgets) and the
+  [Compaction Engine](./development/compaction.md).
 - **`/config checkup` Command** - Configuration diagnostics that surface reversible, confirm-before-apply optimizations
   (e.g. tool-result clearing, client tool search, token-efficiency warnings).
 - **GPT-5.6 Models** - Added support for OpenAI's GPT-5.6 family across configurations.

@@ -257,10 +257,20 @@ impl Default for VerificationAutoRecoveryConfig {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolResultClearingConfig {
+    /// Enables native or request-only local clearing; set `false` to opt out.
+    /// Durable history and events retain full outputs.
     #[serde(default = "default_tool_result_clearing_enabled")]
     pub enabled: bool,
+    /// Local clearing caps this at 60% of the provider/session history budget
+    /// after output reserves and system/tool-schema overhead (minimum positive
+    /// cap: 1). Lower configured triggers win; unknown capacity keeps this
+    /// value. Configured values must be positive. Native edit thresholds keep
+    /// the configured value.
     #[serde(default = "default_tool_result_clearing_trigger_tokens")]
     pub trigger_tokens: u64,
+    /// Protect newest results. Local clearing also retains all results from
+    /// their originating assistant tool-call batches, matching call IDs across
+    /// reordered completions and intervening directives.
     #[serde(default = "default_tool_result_clearing_keep_tool_uses")]
     pub keep_tool_uses: u32,
     #[serde(default = "default_tool_result_clearing_clear_at_least_tokens")]

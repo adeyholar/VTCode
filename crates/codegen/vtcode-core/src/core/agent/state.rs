@@ -368,14 +368,47 @@ pub fn normalize_history_for_request(messages: &[Message]) -> Vec<Message> {
 /// and `ThreadEvent` log keep the original payload.
 const CLEARED_TOOL_RESULT_NOTE: &str = "Older tool result cleared to bound context growth. Full output remains in session logs; re-run the tool if raw bytes are needed.";
 
+/// Cap local clearing at 60% of the history capacity left after the request
+/// prefix and output reserve. Zero capacity is unknown; zero trigger or an
+/// explicit opt-out keeps clearing disabled.
+#[must_use]
+pub fn resolve_tool_result_clearing_trigger(
+    config: &crate::config::VTCodeConfig,
+    provider: &dyn crate::llm::provider::LLMProvider,
+    model: &str,
+    prompt_overhead_tokens: usize,
+    reserved_output_tokens: usize,
+) -> u64 {
+    let clearing = &config.agent.harness.tool_result_clearing;
+    if !clearing.enabled || clearing.trigger_tokens == 0 {
+        return 0;
+    }
+    let capacity = crate::compaction::effective_context_budget(Some(config), provider, model);
+    if capacity == 0 {
+        return clearing.trigger_tokens;
+    }
+    let history_budget = capacity
+        .saturating_sub(reserved_output_tokens)
+        .saturating_sub(prompt_overhead_tokens) as u64;
+    // Divide before multiplying, retaining the remainder to avoid overflow
+    // even at the largest representable context budget.
+    let cap = (history_budget / 5)
+        .saturating_mul(3)
+        .saturating_add((history_budget % 5) * 3 / 5)
+        .max(1);
+    clearing.trigger_tokens.min(cap)
+}
+
 /// Request-only local stand-in for Anthropic `clear_tool_uses_20250919`.
 ///
 /// Providers without `context_management.edits` never get native tool-result
 /// clearing, so long histories keep paying full price for every old tool body
 /// on each request. Once estimated history tokens exceed `trigger_tokens`, this
 /// rewrites every tool-result *request* message except the newest
-/// `keep_tool_uses` to a bounded stub. `clear_at_least_tokens` is a floor on
-/// reclaimed tokens (not a ceiling): clearing must stub all non-kept results so
+/// `keep_tool_uses` and their complete originating tool-call batches to a
+/// bounded stub. Small results stay intact when a stub would not save tokens.
+/// `clear_at_least_tokens` is a floor on reclaimed tokens (not a ceiling):
+/// clearing must stub all eligible non-kept results so
 /// re-running on full durable history cannot leave a permanently growing tail.
 ///
 /// Contract (same as [`normalize_history_for_request`]):
@@ -419,26 +452,45 @@ pub fn clear_old_tool_results(
     }
 
     let mut cleared_tokens = 0u64;
-    let mut cleared_call_ids: HashSet<String> = HashSet::new();
-    // Stub every non-kept tool result (oldest-first). `clear_at_least_tokens`
+    let analysis = analyze_request_history(messages);
+    let retained_batches: HashSet<usize> = tool_indices
+        .iter()
+        .rev()
+        .take(keep)
+        .filter_map(|index| analysis.result_batch_by_index.get(index).copied())
+        .collect();
+    let mut cleared_calls_by_assistant: HashMap<usize, HashSet<&str>> = HashMap::new();
+    // Stub every eligible non-kept tool result (oldest-first). `clear_at_least_tokens`
     // is a floor on reclaimed tokens; stopping early would leave a permanently
     // growing tail on the next request that re-shapes full durable history.
     let mut out = messages.to_vec();
     for &tool_index in &tool_indices[..tool_indices.len() - keep] {
+        let batch_index = analysis.result_batch_by_index.get(&tool_index);
+        if batch_index.is_some_and(|index| retained_batches.contains(index)) {
+            continue;
+        }
         let original = &messages[tool_index];
         let original_tokens = original.estimate_tokens() as u64;
         let stub = build_cleared_tool_result_stub(original);
         let stub_tokens = stub.estimate_tokens() as u64;
-        if let Some(call_id) = original.tool_call_id.clone() {
-            cleared_call_ids.insert(call_id);
+        if stub_tokens >= original_tokens {
+            continue;
+        }
+        if let Some(&batch_index) = batch_index
+            && let Some(call_id) = original.tool_call_id.as_deref()
+        {
+            cleared_calls_by_assistant
+                .entry(analysis.batches[batch_index].assistant_index)
+                .or_default()
+                .insert(call_id);
         }
         out[tool_index] = stub;
         cleared_tokens = cleared_tokens.saturating_add(original_tokens.saturating_sub(stub_tokens));
     }
 
-    // Floor is advisory: all non-kept results are already stubbed, so the
-    // floor is met whenever anything was reclaimable. Surface a miss only if
-    // the keep window left less than the configured floor (tiny histories).
+    // The floor is advisory: every eligible result is already stubbed. A
+    // protected batch or small results can leave less reclaimable than the
+    // configured floor.
     if cleared_tokens < clear_at_least_tokens {
         tracing::debug!(
             cleared_tokens,
@@ -447,16 +499,17 @@ pub fn clear_old_tool_results(
         );
     }
 
-    if clear_tool_inputs && !cleared_call_ids.is_empty() {
-        for message in &mut out {
-            if message.role != crate::llm::provider::MessageRole::Assistant {
+    if clear_tool_inputs {
+        for (assistant_index, original_message) in out.iter_mut().enumerate() {
+            let Some(cleared_call_ids) = cleared_calls_by_assistant.remove(&assistant_index) else {
                 continue;
-            }
+            };
+            let mut message = original_message.clone();
             let Some(tool_calls) = message.tool_calls.as_mut() else {
                 continue;
             };
             for call in tool_calls.iter_mut() {
-                if cleared_call_ids.contains(&call.id) {
+                if cleared_call_ids.contains(call.id.as_str()) {
                     if let Some(function) = call.function.as_mut() {
                         // Valid JSON placeholder: providers send `arguments`
                         // verbatim; prose would break OpenAI tool-call parsing.
@@ -469,6 +522,14 @@ pub fn clear_old_tool_results(
                     }
                     call.thought_signature = None;
                 }
+            }
+            // Tiny arguments can be cheaper than the JSON placeholder. Do
+            // not spend more tokens on inputs than the results reclaimed.
+            let input_growth =
+                (message.estimate_tokens() as u64).saturating_sub(original_message.estimate_tokens() as u64);
+            if input_growth <= cleared_tokens {
+                *original_message = message;
+                cleared_tokens = cleared_tokens.saturating_sub(input_growth);
             }
         }
     }
@@ -1276,3 +1337,6 @@ mod tests {
         assert!(call.thought_signature.is_none());
     }
 }
+
+#[cfg(test)]
+mod tool_result_clearing_tests;

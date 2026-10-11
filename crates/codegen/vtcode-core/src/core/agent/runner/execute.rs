@@ -24,9 +24,6 @@ use crate::core::agent::hash_utils::stable_system_prefix_hash;
 use crate::core::agent::refusal;
 use crate::core::agent::runtime::{AgentRuntime, RuntimeControl};
 use crate::core::agent::session::AgentSessionState;
-use crate::core::agent::state::{
-    clear_old_tool_results, normalize_history_for_request_shared, should_apply_local_tool_result_clearing,
-};
 use crate::core::agent::task::{ContextItem, Task, TaskOutcome, TaskResults};
 use crate::exec::events::HarnessEventKind;
 use crate::llm::provider::{Message, ToolCall, ToolChoice, ToolDefinition, supports_responses_chaining};
@@ -651,63 +648,6 @@ impl AgentRunner {
                     .max_tokens
                     .or(if is_simple_task { Some(800) } else { Some(2000) });
 
-                let context_budget = crate::compaction::effective_context_budget(
-                    Some(self.config()),
-                    self.provider_client.as_ref(),
-                    &turn_model,
-                );
-                runtime.state.constraints.max_context_tokens = context_budget;
-                let reserved_output_tokens = max_tokens
-                    .map_or(crate::compaction::memory_envelope::DEFAULT_OUTPUT_RESERVE_TOKENS, |value| value as usize);
-                let prompt_overhead_tokens = (prompt_bundle.system_prompt_report.token_estimate as usize)
-                    .saturating_add(prompt_bundle.tool_def_tokens as usize);
-                tracing::info!(
-                    turn, model = %turn_model, context_budget,
-                    reserved_output_tokens, prompt_overhead_tokens,
-                    "Resolved per-turn context budget denominator"
-                );
-                self.maybe_auto_compact(
-                    &mut runtime.state,
-                    &mut event_recorder,
-                    &turn_model,
-                    preserve_recent_turns,
-                    prompt_overhead_tokens,
-                    reserved_output_tokens,
-                    &mut prompt_bundle.request_envelope,
-                )
-                .await;
-                let (fits, estimated, budget) = runtime.state.preflight_token_check(
-                    prompt_bundle.system_prompt_report.token_estimate as usize,
-                    prompt_bundle.tool_def_tokens as usize,
-                    reserved_output_tokens,
-                );
-                if !fits {
-                    // Advisory only: the estimate can overshoot (un-droppable
-                    // messages, suppressed compaction), and the provider owns
-                    // the authoritative context limit. Aborting here turned a
-                    // recoverable situation into a dead `exec`/auto run.
-                    tracing::warn!(
-                        estimated,
-                        budget,
-                        "Pre-flight token check failed: prompt exceeds context budget after compaction"
-                    );
-                    #[allow(
-                        clippy::cast_sign_loss,
-                        reason = "Intentional compatibility, platform, or test-only suppression."
-                    )]
-                    let pct = (estimated as f64 / budget.max(1) as f64 * 100.0) as u32;
-                    runtime
-                        .state
-                        .warnings
-                        .push(format!("Pre-flight check: {pct}% of context budget used before LLM call"));
-                }
-
-                let parallel_tool_config = if self.provider_client.supports_parallel_tool_config(&turn_model) {
-                    Some(Box::new(crate::llm::provider::ParallelToolConfig::anthropic_optimized()))
-                } else {
-                    None
-                };
-
                 let provider_kind = turn_model
                     .parse::<ModelId>()
                     .map(|model| model.provider())
@@ -743,6 +683,87 @@ impl AgentRunner {
                     runtime.state.messages_mut().extend(new_messages);
                     runtime.state.last_processed_message_idx = runtime.state.conversation.len();
                 }
+
+                let context_budget = crate::compaction::effective_context_budget(
+                    Some(self.config()),
+                    self.provider_client.as_ref(),
+                    &turn_model,
+                );
+                runtime.state.constraints.max_context_tokens = context_budget;
+                let reserved_output_tokens = max_tokens
+                    .map_or(crate::compaction::memory_envelope::DEFAULT_OUTPUT_RESERVE_TOKENS, |value| value as usize);
+                let prompt_overhead_tokens = (prompt_bundle.system_prompt_report.token_estimate as usize)
+                    .saturating_add(prompt_bundle.tool_def_tokens as usize);
+                tracing::info!(
+                    turn, model = %turn_model, context_budget,
+                    reserved_output_tokens, prompt_overhead_tokens,
+                    "Resolved per-turn context budget denominator"
+                );
+                let mut normalized_messages = self.project_request_history(
+                    &runtime.state,
+                    &turn_model,
+                    prompt_overhead_tokens,
+                    reserved_output_tokens,
+                );
+                let projected_token_usage = normalized_messages
+                    .iter()
+                    .map(Message::estimate_tokens)
+                    .fold(0usize, usize::saturating_add)
+                    .saturating_add(prompt_overhead_tokens);
+                let compacted = self
+                    .maybe_auto_compact(
+                        &mut runtime.state,
+                        &mut event_recorder,
+                        &turn_model,
+                        preserve_recent_turns,
+                        projected_token_usage,
+                        reserved_output_tokens,
+                        &mut prompt_bundle.request_envelope,
+                    )
+                    .await;
+                let estimated = if compacted {
+                    normalized_messages = self.project_request_history(
+                        &runtime.state,
+                        &turn_model,
+                        prompt_overhead_tokens,
+                        reserved_output_tokens,
+                    );
+                    normalized_messages
+                        .iter()
+                        .map(Message::estimate_tokens)
+                        .fold(0usize, usize::saturating_add)
+                        .saturating_add(prompt_overhead_tokens)
+                } else {
+                    projected_token_usage
+                };
+                let budget = context_budget.saturating_sub(reserved_output_tokens);
+                let fits = context_budget == 0 || estimated <= budget;
+                if !fits {
+                    // Advisory only: the estimate can overshoot (un-droppable
+                    // messages, suppressed compaction), and the provider owns
+                    // the authoritative context limit. Aborting here turned a
+                    // recoverable situation into a dead `exec`/auto run.
+                    tracing::warn!(
+                        estimated,
+                        budget,
+                        "Pre-flight token check failed: prompt exceeds context budget after compaction"
+                    );
+                    #[allow(
+                        clippy::cast_sign_loss,
+                        reason = "Intentional compatibility, platform, or test-only suppression."
+                    )]
+                    let pct = (estimated as f64 / budget.max(1) as f64 * 100.0) as u32;
+                    runtime
+                        .state
+                        .warnings
+                        .push(format!("Pre-flight check: {pct}% of context budget used before LLM call"));
+                }
+
+                let parallel_tool_config = if self.provider_client.supports_parallel_tool_config(&turn_model) {
+                    Some(Box::new(crate::llm::provider::ParallelToolConfig::anthropic_optimized()))
+                } else {
+                    None
+                };
 
                 let reasoning_mapping = turn_reasoning
                     .map(|requested| {
@@ -842,30 +863,6 @@ impl AgentRunner {
                     top_p_override = top_p_override.filter(|value| *value >= 0.95);
                 }
 
-                let normalized_messages = normalize_history_for_request_shared(Arc::clone(&runtime.state.messages));
-                // Local stand-in for Anthropic `clear_tool_uses` on routes
-                // without context edits (same gate as the interactive
-                // runloop). Request-only: durable history is untouched.
-                let normalized_messages = {
-                    let clearing = &self.config().agent.harness.tool_result_clearing;
-                    // Headless requests never attach native context
-                    // management (`context_management: None` in the
-                    // HarnessRequestPlanInput below), so the gate must not
-                    // consume the provider capability: for Anthropic that
-                    // combination would apply neither native nor local
-                    // clearing and old tool bodies would ride every request.
-                    if should_apply_local_tool_result_clearing(&provider_name, false, clearing.enabled) {
-                        Arc::new(clear_old_tool_results(
-                            normalized_messages.as_slice(),
-                            clearing.trigger_tokens,
-                            clearing.keep_tool_uses,
-                            clearing.clear_at_least_tokens,
-                            clearing.clear_tool_inputs,
-                        ))
-                    } else {
-                        normalized_messages
-                    }
-                };
                 let (request_messages, previous_response_id) = prepare_responses_request_messages(
                     &mut runtime.state.previous_response_chains,
                     &provider_name,

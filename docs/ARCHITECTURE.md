@@ -84,6 +84,54 @@ The harness configuration is intentionally split across three existing surfaces 
 
 That split keeps VT Code aligned with the current runtime while making the harness explicit enough to evolve.
 
+### Request projection and context budgets
+
+The runtime keeps three related surfaces with distinct ownership:
+
+| Surface | Owner and behavior |
+| --- | --- |
+| Canonical events | `vtcode-exec-events::ThreadEvent` records runtime history for persistence and replay. |
+| Live session history | `AgentSessionState.messages` is shared through `Arc<Vec<Message>>`; actual compaction replaces this working history and preserves a recoverable history artifact. |
+| Request projection | Normalization repairs tool pairing and order; local clearing replaces eligible old results only in the provider-facing copy. Original outputs remain in session history and events. |
+
+Both interactive request assembly and headless execution use the clearing helpers in
+`crates/codegen/vtcode-core/src/core/agent/state.rs`. The trigger resolves the provider/session capacity, reserves
+system/tool-schema overhead and output, and caps the configured threshold at 60% of the remaining history budget.
+Recent retention expands from individual results to their complete originating assistant tool-call batches.
+Interactive Anthropic requests carrying native context edits use that provider path; headless requests attach no native
+context edits and use the local fallback when clearing is enabled.
+
+The headless request path stages clearing before deciding whether to summarize:
+
+```mermaid
+flowchart TD
+    H[Live session history] --> S[Synchronize pending conversation messages]
+    S --> P[Normalize and clear request projection]
+    P --> B{Shared compaction readiness using projected history plus prefix}
+    B -->|Skip| R[Build provider request and preflight diagnostics]
+    B -->|Compact| E[Shared compaction engine]
+    S -->|Full history| E
+    E --> A[Archive history and emit compact boundary]
+    E --> N[Replace live history and rebuild request projection]
+    N --> R
+```
+
+`core/agent/runner/execute.rs` owns synchronization, projection-based pressure estimates, and rebuilding after compaction.
+`core/agent/runner/summarize.rs` delegates to `compaction::auto_compact_messages`, checking its shared readiness predicate
+before requesting copy-on-write access. Disabled, suppressed, unknown-budget, and below-threshold passes therefore keep
+shared history intact. Preflight uses the same projected history plus prompt overhead; its warning remains advisory.
+Failed or unchanged compaction passes keep the existing projection; the archive and replacement steps describe a
+successful pass.
+
+The compaction engine owns provider strategy selection, local summary bounds, continuity tails, and memory envelopes.
+Local summary forks reserve the frozen parent prefix and any explicit summary output limit, then validate the aggregate
+bounded history before dispatch. Both hierarchical bands are validated before either call. Provider-native returned
+windows remain canonical and retain their opaque replay state.
+
+See the [Compaction Engine](./development/compaction.md) for formulas and source ownership, the
+[Agent Loop Contract](./guides/agent-loop-contract.md#unified-auto-compaction) for lifecycle behavior, and the
+[configuration reference](./config/CONFIG_FIELD_REFERENCE.md) for clearing controls.
+
 When `agent.harness.orchestration_mode = "plan_build_evaluate"` is enabled for `exec/full-auto`, VT Code adds a
 lightweight planner/evaluator loop on top of the single-agent runtime instead of introducing a separate always-on agent
 subsystem:

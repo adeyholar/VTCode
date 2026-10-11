@@ -91,6 +91,9 @@ pub use strategy::*;
 pub use summarize::*;
 
 #[cfg(test)]
+mod local_summary_budget_tests;
+
+#[cfg(test)]
 mod summarization_fork_bounds_tests;
 
 #[cfg(test)]

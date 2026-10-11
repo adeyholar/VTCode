@@ -244,6 +244,11 @@ graph LR
 Building requires Rust 1.98.1+ (edition 2024); tests need `cargo-nextest`. The full 23-crate map lives in the
 [architecture guide](./docs/ARCHITECTURE.md).
 
+Context handling separates session history from provider request projections. Local clearing protects complete recent
+tool batches; headless runs estimate the cleared projection before automatic compaction. See
+[context architecture](./docs/ARCHITECTURE.md#request-projection-and-context-budgets) and the
+[compaction guide](./docs/development/compaction.md) for budgets, provider strategies, and persistence boundaries.
+
 ```bash
 git clone https://github.com/vinhnx/VTCode.git
 cd VTCode

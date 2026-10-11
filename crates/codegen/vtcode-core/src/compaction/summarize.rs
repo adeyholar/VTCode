@@ -2,15 +2,66 @@
 
 use super::*;
 
+/// Keep the existing safety headroom while reserving the frozen request prefix
+/// and any explicit summary output limit. Unknown capacity keeps legacy bounds.
+fn local_summary_history_budget(
+    provider: &dyn LLMProvider,
+    model: &str,
+    context_budget: Option<usize>,
+    instructions: &str,
+    max_output_tokens: Option<u32>,
+    parent: Option<&CompactionParentContext>,
+) -> Result<Option<usize>> {
+    let context_size =
+        effective_session_context_budget(provider.effective_context_size(model), context_budget.unwrap_or(0));
+    if context_size == 0 {
+        return Ok(None);
+    }
+    let prefix_tokens = parent.map_or(0, |parent| {
+        let system_tokens = parent
+            .system_prompt
+            .as_ref()
+            .map_or(0, |prompt| crate::prompts::system::estimate_token_count(prompt) as usize);
+        let tool_tokens = parent
+            .tools
+            .as_ref()
+            .map_or(0, |tools| crate::llm::usage_cost::estimate_tool_definition_tokens(tools) as usize);
+        system_tokens.saturating_add(tool_tokens)
+    });
+    let output_reserve = max_output_tokens.map_or(0, |tokens| tokens as usize);
+    let history_budget = compaction_history_budget(provider, model, Some(context_size))
+        .unwrap_or(0)
+        .saturating_sub(prefix_tokens)
+        .saturating_sub(output_reserve);
+    // A positive budget must fit the instruction plus one minimal history
+    // message. Otherwise the bounder's minimum (or zero-as-unknown sentinel)
+    // would turn an exhausted budget back into an oversized request.
+    let minimum_tokens = Message::user(instructions.to_owned()).estimate_tokens().saturating_add(4);
+    anyhow::ensure!(
+        history_budget >= minimum_tokens,
+        "local summary request budget exhausted for {} / {} (context_size={context_size}, prefix_tokens={prefix_tokens}, output_reserve={output_reserve}, minimum_tokens={minimum_tokens})",
+        provider.name(),
+        model,
+    );
+    Ok(Some(history_budget))
+}
+
+fn bound_local_summary_history(history: &[Message], instructions: &str, budget: Option<usize>) -> Result<Vec<Message>> {
+    let bounded = bound_history_for_summarization(history, instructions, budget);
+    if let Some(budget) = budget {
+        let request_tokens = bounded
+            .iter()
+            .map(Message::estimate_tokens)
+            .fold(Message::user(instructions.to_owned()).estimate_tokens(), usize::saturating_add);
+        anyhow::ensure!(
+            request_tokens <= budget,
+            "local summary request budget exhausted by minimum protocol history (request_tokens={request_tokens}, budget={budget})",
+        );
+    }
+    Ok(bounded)
+}
+
 /// Build a cache-safe local-summary request that reuses the parent prefix.
-/// `tool_choice` is forced to `none` so the summarizer cannot spend the
-/// compaction pass on tool calls while the system/tools/messages prefix
-/// stays identical to the parent's last request.
-///
-/// `supports_turn_scoped` mirrors the live turn path: canonical history keeps
-/// the typed `clear_at` marker, but routes without native support receive it
-/// as an ordinary system directive (text preserved, `clear_at` stripped) so
-/// `merge-gateway` and other non-Anthropic wires do not fail validation./// Build a cache-safe local-summary request that reuses the parent prefix.
 /// `tool_choice` is forced to `none` so the summarizer cannot spend the
 /// compaction pass on tool calls while the system/tools/messages prefix
 /// stays identical to the parent's last request.
@@ -114,13 +165,14 @@ pub async fn compact_history_with_budget(
     // Bound the fork so the summary request itself fits the summarizer window;
     // an unbounded fork is what made `/compact` fail on near-full or
     // smaller-window (model-switch) histories.
-    let history_budget = compaction_history_budget(provider, model, context_budget);
+    let history_budget =
+        local_summary_history_budget(provider, model, context_budget, &effective_config.summary_prompt, None, None)?;
     let tail_target = route_tail_target_tokens(provider, model, context_budget);
     // Trim oversized tool outputs before bounding so large dumps do not evict
     // whole protocol groups from the summarizer fork.
     let pruned_history = prune_oversized_tool_outputs(history);
     let summary_source =
-        bound_history_for_summarization(&pruned_history, &effective_config.summary_prompt, history_budget);
+        bound_local_summary_history(&pruned_history, &effective_config.summary_prompt, history_budget)?;
     let summary = generate_local_summary_with_retry(
         provider,
         model,
@@ -191,7 +243,14 @@ pub(crate) async fn summarize_locally(
         &config.clone().with_manual_overrides(options),
         context_budget,
     );
-    let history_budget = compaction_history_budget(provider, model, context_budget);
+    let history_budget = local_summary_history_budget(
+        provider,
+        model,
+        context_budget,
+        &effective_config.summary_prompt,
+        options.max_output_tokens,
+        parent,
+    )?;
     let tail_target = route_tail_target_tokens(provider, model, context_budget);
     // Bound the fork so the summary request itself fits the summarizer window.
     // `/compact` is normally run when the context is already near full, so an
@@ -200,7 +259,7 @@ pub(crate) async fn summarize_locally(
     // whole protocol groups from the fork.
     let pruned_history = prune_oversized_tool_outputs(history);
     let summary_source =
-        bound_history_for_summarization(&pruned_history, &effective_config.summary_prompt, history_budget);
+        bound_local_summary_history(&pruned_history, &effective_config.summary_prompt, history_budget)?;
     let summary = generate_local_summary_with_retry(
         provider,
         model,
@@ -410,19 +469,31 @@ async fn summarize_locally_hierarchical(
     let band_size = total / 3;
     let abstract_end = band_size;
     let detail_end = band_size * 2;
-    let history_budget = compaction_history_budget(provider, model, context_budget);
     let max_overflow_retries = CompactionRoutePolicy::resolve(provider.name(), model).max_overflow_retries;
 
     // Band 1 (oldest): compress into 1-2 sentence abstract.
+    let abstract_budget =
+        local_summary_history_budget(provider, model, context_budget, ABSTRACT_BAND_INTRO, Some(150), parent)?;
+    // Validate both prefixes and bounded histories before spending either call.
+    let detail_budget = local_summary_history_budget(
+        provider,
+        model,
+        context_budget,
+        &effective_config.summary_prompt,
+        options.max_output_tokens,
+        parent,
+    )?;
     let pruned_abstract = prune_oversized_tool_outputs(&summary_history[..abstract_end]);
-    let abstract_band = bound_history_for_summarization(&pruned_abstract, "", history_budget);
+    let abstract_band = bound_local_summary_history(&pruned_abstract, ABSTRACT_BAND_INTRO, abstract_budget)?;
+    let pruned_detail = prune_oversized_tool_outputs(&summary_history[abstract_end..detail_end]);
+    let detail_band = bound_local_summary_history(&pruned_detail, &effective_config.summary_prompt, detail_budget)?;
     let abstract_summary = generate_summary_with_capacity_retry(
         provider,
         model,
         &pruned_abstract,
-        "",
+        ABSTRACT_BAND_INTRO,
         &abstract_band,
-        history_budget,
+        abstract_budget,
         max_overflow_retries,
         "Failed to generate abstract summary",
         |band| {
@@ -438,15 +509,13 @@ async fn summarize_locally_hierarchical(
     .await?;
 
     // Band 2 (middle): paragraph-level summary using the full summary prompt.
-    let pruned_detail = prune_oversized_tool_outputs(&summary_history[abstract_end..detail_end]);
-    let detail_band = bound_history_for_summarization(&pruned_detail, &effective_config.summary_prompt, history_budget);
     let detail_summary = generate_summary_with_capacity_retry(
         provider,
         model,
         &pruned_detail,
         &effective_config.summary_prompt,
         &detail_band,
-        history_budget,
+        detail_budget,
         max_overflow_retries,
         "Failed to generate detail summary",
         |band| {

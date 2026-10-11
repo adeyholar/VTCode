@@ -5,6 +5,8 @@ Entry point for VT Code contributor workflows.
 ## Getting Started
 
 - [Development Setup](./DEVELOPMENT_SETUP.md) - Canonical local setup and quality loop.
+- [Architecture Guide](../ARCHITECTURE.md#request-projection-and-context-budgets) - Runtime ownership, request projections,
+  context budgets, and staged headless compaction.
 - [Testing Guide](./testing.md) - Test commands, structure, and benchmark coverage, including the startup launch
   benchmark.
 - [TUI design system](./tui-design-system.md) - Canonical list rows, keyboard copy, and group spacing in
@@ -57,7 +59,8 @@ Entry point for VT Code contributor workflows.
   cancellation, HTTP fallback, and service-tier recovery.
 - [Adding Models](./ADDING_MODELS.md) - Complete workflow for adding new LLM models.
 - [Model Addition Checklist](./MODEL_ADDITION_CHECKLIST.md) - Step-by-step checklist for model additions.
-- [Compaction Engine](./compaction.md) - Provider compaction strategies, context-edit ladder, and budgets.
+- [Compaction Engine](./compaction.md) - Request-only clearing, complete tool-batch retention, provider strategies, and
+  local summary budgets.
 
 ## Maintenance Workflows
 

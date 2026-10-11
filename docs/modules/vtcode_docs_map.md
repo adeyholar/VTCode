@@ -117,10 +117,10 @@ below based on the topic area.
 
 - **File**: `docs/development/compaction.md`
   - **Content**: Compaction Engine
-  - **Topics**: Strategy dispatch, Anthropic context-edit ladder, Input bounding and overflow retry, Per-route policy,
-    Verification
-  - **User Questions**: "What can you tell me about Compaction Engine?", "How does Strategy dispatch work?", "How does
-    Anthropic context-edit ladder work?"
+  - **Topics**: Request history and local clearing, Headless staging and module ownership, Strategy dispatch, Anthropic
+    context-edit ladder, Input bounding and overflow retry
+  - **User Questions**: "What can you tell me about Compaction Engine?", "How does Request history and local clearing
+    work?", "How does Headless staging and module ownership work?"
 
 - **File**: `docs/development/configuration-reload.md`
   - **Content**: Configuration reset and live reload

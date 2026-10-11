@@ -283,6 +283,13 @@ output reservation. Disabling normal auto-compaction does not disable the single
 a provider rejects a follow-up that follows successful tool output; that safety path preserves the current request and
 completed tool results, and blocks truthfully if it cannot reduce the context.
 
+Local summary requests intersect the provider capacity with a positive session ceiling before bounding history.
+They reserve the reused parent system prompt and tool schemas, any explicit summary output limit, and the existing
+safety headroom. Flat summaries and both hierarchical bands share this resolver. If the fixed prefix, output reserve,
+and summary instructions leave no room for history, compaction returns a contextual error before calling the provider.
+The bounded history must also fit in aggregate; protocol metadata and minimum message overhead can exhaust this budget.
+Unknown capacity keeps the existing unbounded-input fallback; provider-native compaction retains its own strategy.
+
 To preserve conversational continuity, every compacted history keeps:
 
 - a **continuity tail** — approximately 20,000 estimated tokens of the newest complete user/assistant/tool protocol
