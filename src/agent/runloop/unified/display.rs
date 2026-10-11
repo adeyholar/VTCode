@@ -48,6 +48,9 @@ fn persist_theme_config(workspace: &Path, theme_id: &str) -> Result<()> {
 
 /// Display a user message using the active user styling
 pub(crate) fn display_user_message(renderer: &mut AnsiRenderer, message: &str) -> Result<()> {
+    if super::webmcp::is_turn_handoff(message) {
+        return super::webmcp::display_turn_handoff(renderer, message);
+    }
     let rendered = highlight_shell_user_input(message).unwrap_or_else(|| message.to_string());
     renderer.line(MessageStyle::User, &rendered)
 }

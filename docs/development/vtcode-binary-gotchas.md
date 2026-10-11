@@ -121,6 +121,11 @@ changing the runloop, update path, allocator, or request assembly.
   require terminal confirmation.
 - Bridge prompts use a prompt-only inline event and must not enter slash-command parsing. Keep browser authority
   separate from terminal-owned origins, roots, pairing, and policy.
+- The active handoff prompt keeps its `<webmcp_authoritative_diff>` tags and ```` ```diff ```` fence for the model.
+  `unified::webmcp::display_turn_handoff` is display-only shaping for the transcript: it splits on those exact markers
+  (falling back to the raw prompt when they do not match), hides the structural markers, and styles the untrusted diff
+  body through the shared `tool_output::styles` diff palette after ANSI-stripping it. Never re-shape the prompt string
+  that reaches conversation history or the provider.
 
 ## Request assembly and planning
 

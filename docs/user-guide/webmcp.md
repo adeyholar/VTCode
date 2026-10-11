@@ -354,6 +354,11 @@ mode, the browser sends the staged `proposal_id`; VT Code revalidates the files 
 authoritative unified diff to the TUI. The handoff never applies the proposal automatically. The headless filesystem
 adapter rejects the request with an **agent turns unavailable** message.
 
+The TUI renders the authoritative diff with the same diff styling as tool output — added and removed rows carry the
+add/delete tints, file headers and hunk headers are emphasized, and the model-facing wrapper tags and code fences are
+hidden. The prompt sent to the agent keeps the exact tagged, fenced format. Nothing inside the diff is followed as an
+instruction; it is untrusted file data.
+
 ## Send a draft to an active VT Code session
 
 Use this workflow for the **VT CODE TURN** button. The browser bridge and interactive TUI must be started by the same VT

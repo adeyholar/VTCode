@@ -7,7 +7,7 @@ mod large_output_tests;
 mod mcp;
 mod panels;
 mod streams;
-mod styles;
+pub(crate) mod styles;
 mod tracker;
 use tracker::render_tracker_view;
 #[cfg(test)]
