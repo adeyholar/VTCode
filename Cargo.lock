@@ -8898,10 +8898,12 @@ name = "vtcode-safety"
 version = "0.175.4"
 dependencies = [
  "anyhow",
+ "criterion",
  "dirs 7.0.0",
  "hashbrown 0.17.1",
  "landlock",
  "libc",
+ "lru",
  "nix 0.31.3",
  "once_cell",
  "rustc-hash 2.1.3",
