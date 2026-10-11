@@ -14,7 +14,6 @@ use crate::skills::types::{Skill, SkillContext};
 use crate::tools::error_messages::skill_ops;
 use anyhow::{Context, Result};
 use hashbrown::HashSet;
-use serde::Deserialize;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,7 +38,10 @@ pub struct SkillRoot {
 }
 
 mod cache;
+mod codex;
 mod mentions;
+
+use self::codex::filter_disabled_skills;
 
 pub use self::mentions::{SkillMentionDetectionOptions, detect_skill_mentions, detect_skill_mentions_with_options};
 
@@ -138,78 +140,6 @@ fn dedup_and_sort(outcome: &mut SkillLoadOutcome) {
         );
     }
     outcome.skills.sort_by(|a, b| a.name.cmp(&b.name));
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CodexConfig {
-    #[serde(default)]
-    skills: CodexSkillsConfig,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CodexSkillsConfig {
-    #[serde(default)]
-    config: Vec<CodexSkillToggle>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CodexSkillToggle {
-    #[serde(default)]
-    path: Option<PathBuf>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default = "default_skill_toggle_enabled")]
-    enabled: bool,
-}
-
-#[derive(Debug, Default)]
-struct DisabledSkillSelectors {
-    paths: HashSet<PathBuf>,
-    names: HashSet<String>,
-}
-
-fn default_skill_toggle_enabled() -> bool {
-    true
-}
-
-fn filter_disabled_skills(outcome: &mut SkillLoadOutcome, home_dir: Option<&Path>) {
-    let disabled = disabled_skill_selectors(home_dir);
-    if disabled.paths.is_empty() && disabled.names.is_empty() {
-        return;
-    }
-
-    outcome.skills.retain(|skill| {
-        let canonical = dunce::canonicalize(&skill.path).unwrap_or_else(|_| skill.path.clone());
-        !disabled.paths.contains(&canonical) && !disabled.names.contains(&skill.name)
-    });
-}
-
-fn disabled_skill_selectors(home_dir: Option<&Path>) -> DisabledSkillSelectors {
-    let Some(home_dir) = home_dir else {
-        return DisabledSkillSelectors::default();
-    };
-
-    let config_path = home_dir.join(".codex").join("config.toml");
-    let Ok(content) = fs::read_to_string(&config_path) else {
-        return DisabledSkillSelectors::default();
-    };
-    let Ok(config) = toml::from_str::<CodexConfig>(&content) else {
-        return DisabledSkillSelectors::default();
-    };
-
-    let mut selectors = DisabledSkillSelectors::default();
-    for entry in config.skills.config.into_iter().filter(|entry| !entry.enabled) {
-        if let Some(path) = entry.path {
-            selectors.paths.insert(dunce::canonicalize(&path).unwrap_or(path));
-        }
-        if let Some(name) = entry.name.map(|name| name.trim().to_string())
-            && !name.is_empty()
-        {
-            selectors.names.insert(name);
-        }
-    }
-
-    selectors
 }
 
 fn skill_roots_with_home_dir(config: &SkillLoaderConfig, home_dir: Option<&Path>) -> Vec<SkillRoot> {
