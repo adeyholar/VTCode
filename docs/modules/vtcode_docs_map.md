@@ -287,6 +287,13 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Runtime Guidance and Project Instructions?", "How does Planning
     contract ownership work?", "How does User-facing progress contract work?"
 
+- **File**: `docs/development/rust-error-handling-reference.md`
+  - **Content**: Rust Error Handling — Reference Notes
+  - **Topics**: Source (not vendored), Why this matters to VT Code, Distilled principles (in our own words), How VT Code
+    applies this, Regression guard
+  - **User Questions**: "What can you tell me about Rust Error Handling — Reference Notes?", "How does Source (not
+    vendored) work?", "How does Why this matters to VT Code work?"
+
 - **File**: `docs/development/rust-performance-principles.md`
   - **Content**: Rust-Specific Performance Principles for VT Code
   - **Topics**: Core Insight: Rust Is Not Faster Than C/C++ — It Is _Safer While Being Equally Fast_, Destructive Move
@@ -1513,13 +1520,13 @@ below based on the topic area.
 
 - **File**: `docs/harness/SESSION_LOG_REVIEW.md`
   - **Content**: Session Log Review
-  - **Topics**: 2026-09-19 | Post-merge review: inspection verify allowlist tightening, 2026-09-19 | Planning recovery
-    rejects inspection-command verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning
-    validation audit, 2026-08-16 | Checkpoints 912–917 diagnostics audit, 2026-08-12 | Planning wire-catalog collapse
-    (turns 912–913)
-  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-09-19 | Post-merge review:
-    inspection verify allowlist tightening work?", "How does 2026-09-19 | Planning recovery rejects inspection-command
-    verifies work?"
+  - **Topics**: 2026-10-11 | Per-item bracket `verify:` list terminally rejected a valid README plan, 2026-09-19 |
+    Post-merge review: inspection verify allowlist tightening, 2026-09-19 | Planning recovery rejects inspection-command
+    verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 |
+    Checkpoints 912–917 diagnostics audit
+  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-10-11 | Per-item bracket
+    `verify:` list terminally rejected a valid README plan work?", "How does 2026-09-19 | Post-merge review: inspection
+    verify allowlist tightening work?"
 
 - **File**: `docs/compose/spec/session-residual-hygiene.md`
   - **Content**: Session Residual Hygiene

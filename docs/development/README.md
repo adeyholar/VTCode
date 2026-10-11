@@ -46,6 +46,8 @@ Entry point for VT Code contributor workflows.
 - [Rust Performance Principles](./rust-performance-principles.md) - Rust hot-path and I/O guidance.
 - [Declarative Macro Hygiene](./rust-macro-hygiene.md) - `$crate`/absolute-path qualification and follow-set rules for
   exported `macro_rules!`.
+- [Rust Error Handling](./rust-error-handling-reference.md) - Type-first recovery, context that never masks the cause,
+  and the cause-chain fallback used by `classify_anyhow_error`.
 - [Performance Hasher Policy](./performance-hasher-policy.md) - `rustc_hash` usage policy.
 - [Async Performance Audit](./async-performance-audit.md) - Async architecture performance findings.
 - [Session Event Persistence](./session-persistence.md) - Canonical session events, exporter boundaries, retention, and

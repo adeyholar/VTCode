@@ -476,13 +476,7 @@ fn llm_error_message(error: &LLMError) -> String {
 }
 
 fn llm_metadata_context(error: &LLMError) -> Option<String> {
-    let metadata = match error {
-        LLMError::Authentication { metadata, .. }
-        | LLMError::RateLimit { metadata }
-        | LLMError::InvalidRequest { metadata, .. }
-        | LLMError::Network { metadata, .. }
-        | LLMError::Provider { metadata, .. } => metadata.as_deref(),
-    }?;
+    let metadata = error.metadata()?;
 
     let mut context = Vec::new();
     if let Some(code) = metadata.code.as_deref() {
@@ -495,13 +489,7 @@ fn llm_metadata_context(error: &LLMError) -> Option<String> {
 }
 
 fn llm_retry_after(error: &LLMError) -> Option<std::time::Duration> {
-    let metadata = match error {
-        LLMError::Authentication { metadata, .. }
-        | LLMError::RateLimit { metadata }
-        | LLMError::InvalidRequest { metadata, .. }
-        | LLMError::Network { metadata, .. }
-        | LLMError::Provider { metadata, .. } => metadata.as_ref(),
-    }?;
+    let metadata = error.metadata()?;
 
     retry_after_from_llm_metadata(metadata)
 }
