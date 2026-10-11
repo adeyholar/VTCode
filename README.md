@@ -68,9 +68,27 @@ execution policy.
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | **Planning**     | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs.              |
 | **Safety**       | [Auditable command policy](./docs/security/SECURITY_MODEL.md) and sandboxing.              |
+| **Self-correct** | [HOVER loop](./docs/development/hypothesis-revision-validation.md): Hypothesize, Observe,  |
+|                  | Verify, Evaluate, Revise, Repeat on tool mismatch.                                         |
 | **Long runs**    | [Headless exec](./docs/user-guide/exec-mode.md) with compaction, resumption, and logs.     |
 | **Integrations** | [MCP](./docs/guides/mcp-integration.md), Skills, plugins, and editor bridges.              |
 | **Models**       | [Hosted or local providers](./docs/README.md#provider-index), chosen per task.             |
+
+```mermaid
+flowchart LR
+    H[Hypothesize] --> O[Observe tool evidence]
+    O --> V[Verify outcome]
+    V --> E[Evaluate vs hypothesis]
+    E -->|mismatch| R[Revise and retry corrected]
+    R --> H
+    E -->|match| D[Done]
+```
+
+Legend: **H** states the expected outcome; **O** collects bounded tool evidence; **V** checks exit
+status and verifier result; **E** compares expectation against evidence; **R** applies an
+evidence-supported correction. `mismatch` (non-zero exit, empty search, stale patch, failed verifier,
+repeated evidence) loops back with corrected arguments; `match` exits to `Done`. Rereads alone are not
+revision. Full acceptance table: [HOVER validation](./docs/development/hypothesis-revision-validation.md).
 
 The rest of this page covers installation, configuration, a first task, and the deeper topics.
 
@@ -225,7 +243,7 @@ Guides grouped by task. The full catalog lives in the [documentation index](./do
 | Work in the TUI      | [TUI](./docs/user-guide/interactive-mode.md) · [Command reference](./docs/user-guide/commands.md) · [Planning](./docs/guides/planning-workflow.md) · [Turn diffs](./docs/development/diff-preview.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) · [Safety](./docs/security/SECURITY_MODEL.md)                                                       |
 | Automate             | [Exec mode](./docs/user-guide/exec-mode.md) · [Full automation](./docs/guides/full-automation.md) · [Decisions probe](./docs/guides/decisions-probe.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [Hooks](./docs/guides/hooks-guide.md)                                                                                                            |
 | Extend and integrate | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Memcode](./docs/guides/memcode-mcp.md)                                                                                                          |
-| Develop and evaluate | [Development](./docs/development/README.md) · [Testing](./docs/development/testing.md) · [Evals](./docs/guides/eval.md) · [Architecture](./docs/ARCHITECTURE.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md)                                                                                     |
+| Develop and evaluate | [Development](./docs/development/README.md) · [Testing](./docs/development/testing.md) · [Evals](./docs/guides/eval.md) · [Architecture](./docs/ARCHITECTURE.md) · [HOVER](./docs/development/hypothesis-revision-validation.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md)                     |
 
 ## Development
 

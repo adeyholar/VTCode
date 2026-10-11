@@ -51,6 +51,8 @@ Last reviewed: 2026-08-28
 - [Development Guide](development/README.md) - Local dev workflows.
 - [Diff Preview Architecture](development/diff-preview.md) - Shared diff computation, bounded layout, and renderer
   boundaries.
+- [HOVER Validation](development/hypothesis-revision-validation.md) - HOVER acceptance, deterministic checks, live
+  replay pilot.
 - [Roadmap](project/ROADMAP.md) - Planned work.
 - [Loop Engineering](loop-engineering.md) - Worktree isolation, propose/verify sub-agents, loop state, cost guardrails.
 

@@ -37,6 +37,8 @@ Download from [GitHub Releases](https://github.com/vinhnx/vtcode/releases) for L
 VT Code represents a modern approach to AI-powered software development, featuring:
 
 - **Single-Agent Reliability (default)** - Streamlined, linear agent with robust context engineering
+- **HOVER Self-Correction** - Hypothesize, Observe, Verify, Evaluate, Revise, Repeat on tool mismatch with
+  evidence-backed revision guidance. See [validation](./development/hypothesis-revision-validation.md).
 - **Decision Ledger** - Structured, compact record of key decisions injected each turn for consistency
 - **Error Recovery & Resilience** - Intelligent error handling with pattern detection and context preservation
 - **Conversation Summarization** - Automatic compression when exceeding thresholds with quality assessment

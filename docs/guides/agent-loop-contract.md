@@ -148,11 +148,12 @@ The UI renders an `Info` block and emits an existing `ReasoningItem` with stage 
 `ToolOutput`; this remains visible when native reasoning is hidden. Provider-native reasoning continues to follow its
 existing capability and display settings, and raw chain-of-thought is never exposed.
 
-Execution-failure `next_action` values append hypothesis-revision framing from `core::agent::hypothesis`
-after deterministic or model-assisted selection, including memoized diagnoses. The bounded action retains its corrective
-instructions with room for the trusted suffix. Policy rejection and cancellation retain their safe actions without retry
-coaching. Terminal verifier failures and redundant returned-evidence notices also supply mismatch-specific guidance;
-running, unrelated, rejected, or lost checker results cannot establish a verifier failure or success.
+Execution-failure `next_action` values append HOVER revision framing from `core::agent::hypothesis`
+(Hypothesize → Observe → Verify → Evaluate → Revise → Repeat) after deterministic or model-assisted selection,
+including memoized diagnoses. The bounded action retains its corrective instructions with room for the trusted
+suffix. Policy rejection and cancellation retain their safe actions without retry coaching. Terminal verifier
+failures and redundant returned-evidence notices also supply mismatch-specific guidance; running, unrelated,
+rejected, or lost checker results cannot establish a verifier failure or success.
 Native Copilot ACP replies append the same queued revision notices directly to the tool result because they bypass
 ordinary history flushing. Notices are consumed after the outcome; successful verification clears pending failure
 feedback, and cancellation does not append recovery guidance.

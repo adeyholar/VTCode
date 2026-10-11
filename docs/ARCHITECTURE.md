@@ -84,6 +84,30 @@ The harness configuration is intentionally split across three existing surfaces 
 
 That split keeps VT Code aligned with the current runtime while making the harness explicit enough to evolve.
 
+### HOVER self-correction loop
+
+VT Code's compiled guidance names the HOVER loop: **Hypothesize → Observe → Verify → Evaluate → Revise →
+Repeat**. The mismatch contract is Hypothesis → Observation → Mismatch → Inspect evidence → Revise hypothesis.
+Guidance and bounded diagnosis feedback encourage this behavior; they do not prove compliance.
+
+- Pure classification lives in `crates/codegen/vtcode-core/src/core/agent/hypothesis.rs`: `MismatchEvidence`,
+  `classify_mismatch` (patch mismatch first, repeated evidence last), and `revision_guidance` per
+  `MismatchKind` (`NonZeroExit`, `EmptySearch`, `PatchMismatch`, `VerifierFailed`, `RepeatedEvidence`).
+- Deterministic failure diagnosis in `src/agent/runloop/unified/turn/tool_outcomes/execution_result/` appends
+  that framing to the bounded `next_action`; policy rejection and cancellation keep their safe actions.
+- `LoopTracker` in `src/agent/runloop/unified/turn/tool_outcomes/helpers/loop_tracker.rs` supplies one-shot
+  verifier-failed and repeated-evidence notices; successful verification clears pending failure feedback.
+  Native Copilot ACP replies consume the same notices in the tool reply because they bypass history flushing.
+- `score_hypothesis_revision` in `crates/codegen/vtcode-core/src/core/agent/evaluator.rs` is a count-based
+  heuristic only: rereads alone can score 1.0 and zero mismatches are inconclusive. Acceptance needs an
+  observed mismatch, an evidence-supported corrective action, and an independent outcome check.
+- Already-visible, current evidence can be sufficient; fresh targeted context or a spool page is required when
+  evidence is stale or insufficient. Rereading alone is not revision.
+
+See [Agent Loop Contract](./guides/agent-loop-contract.md) for model-visible ordering, the
+[validation](./development/hypothesis-revision-validation.md) acceptance table and deterministic checks, and
+[runtime guidance](./development/runtime-guidance.md) for the compiled prompt bullet.
+
 ### Request projection and context budgets
 
 The runtime keeps three related surfaces with distinct ownership:
