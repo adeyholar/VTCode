@@ -16,8 +16,9 @@ During planning, the agent can:
 - ask clarifying questions through `request_user_input`
 
 The footer shows `Planning...` only while a planning turn is active; a completed draft returns to idle, while exhausted
-validation repair leaves the turn blocked with Plan mode still selected. Canonical step metadata uses `-> files:` and `-> verify:`; arrows inside action prose or
-quoted verification patterns remain content. List separate verification commands as comma-separated entries rather than
+validation repair leaves the turn blocked with Plan mode still selected. Canonical step metadata uses `-> files:` and
+`-> verify:`; arrows inside action prose or quoted verification patterns remain content. List separate verification
+commands as comma-separated entries rather than
 semicolon chains. Documentation checks such as `npx markdownlint-cli2 README.md` are valid verification commands.
 Markdown-only steps may use `verify: [skip Markdown lint if unavailable]` as their sole check; code or mixed-target
 steps still require an ordinary command or observable check. If the Markdown linter is unavailable, skip that optional
@@ -102,6 +103,10 @@ complete descriptions with status prefixes or actual objects such as
 `{"description":"Review links","status":"completed"}`. JSON-encoded update commands inside strings are rejected before
 changing the tracker. To change one existing step while preserving its description and metadata, use
 `{"action":"update","index_path":"1","status":"completed"}`.
+
+Tracker lists and updates execute against live checklist state, including after approval or checklist replacement;
+they must not replay earlier results from read-only caches or conversation history. Use the latest update result for
+progress totals and the changed item. Request `action: "list"` only when the full current checklist is needed.
 
 Successful tracker updates honor display mode: compact shows header plus the single current task (`▶ …`, first
 `in_progress` leaf else first `pending`/`blocked`; header-only when all done) while expanded shows header plus truncated

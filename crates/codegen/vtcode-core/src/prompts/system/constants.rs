@@ -101,7 +101,7 @@ pub const MINIMAL_SPECIFIC_LINES: &[&str] = &[];
 /// These canonical wordings avoid drift between profiles that state the same
 /// rule with slightly different phrasing. Mode deltas below must reuse them
 /// verbatim; `operating_profile_deltas_share_canonical_sentences` enforces it.
-pub const OPERATING_TASK_TRACKER: &str = "Track the work in `task_tracker` once it stops being trivial.";
+pub const OPERATING_TASK_TRACKER: &str = "Track multi-step work; use `task_tracker` updates over lists.";
 
 pub const DEFAULT_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 
@@ -113,12 +113,12 @@ pub const DEFAULT_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 pub const MINIMAL_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 
 - Follow the project instruction map (`AGENTS.md`/`CLAUDE.md`).
-- Track the work in `task_tracker` once it stops being trivial."#;
+- Track multi-step work; use `task_tracker` updates over lists."#;
 
 pub const LIGHTWEIGHT_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 
 - This profile is for simple work: act directly in this thread and keep the loop short.
-- Track the work in `task_tracker` once it stops being trivial."#;
+- Track multi-step work; use `task_tracker` updates over lists."#;
 
 pub const SPECIALIZED_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 

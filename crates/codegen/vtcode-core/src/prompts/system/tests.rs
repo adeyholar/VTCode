@@ -315,6 +315,7 @@ fn test_prompt_mode_enum_parsing() {
 fn operating_profile_deltas_share_canonical_sentences() {
     assert!(MINIMAL_OPERATING_PROFILE_DELTA.contains(OPERATING_TASK_TRACKER));
     assert!(LIGHTWEIGHT_OPERATING_PROFILE_DELTA.contains(OPERATING_TASK_TRACKER));
+    assert!(OPERATING_TASK_TRACKER.contains("use `task_tracker` updates over lists"));
     // `start_planning` guidance has one home: the tool-gated Active Tools
     // line, which is present only when the tool is.
     for delta in [
@@ -1513,7 +1514,7 @@ You are VT Code (Build mode), a coding agent working in the user's repository an
 ## Operating Profile
 
 - This profile is for simple work: act directly in this thread and keep the loop short.
-- Track the work in `task_tracker` once it stops being trivial.
+- Track multi-step work; use `task_tracker` updates over lists.
 
 
 ## Structured Reasoning

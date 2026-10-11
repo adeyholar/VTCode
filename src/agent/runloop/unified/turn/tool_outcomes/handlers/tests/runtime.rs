@@ -2413,6 +2413,128 @@ async fn repeated_read_only_guard_dedups_plan_file_in_planning_mode() {
     }));
 }
 
+async fn execute_tracker_regression_call(
+    outcome_ctx: &mut ToolOutcomeContext<'_, '_>,
+    call_id: &str,
+    args: serde_json::Value,
+) -> serde_json::Value {
+    let history_len = outcome_ctx.ctx.tool_registry.execution_history_len();
+    let outcome = handle_single_tool_call(outcome_ctx, call_id, tool_names::TASK_TRACKER, args)
+        .await
+        .expect("tracker call should execute");
+    assert!(outcome.is_none());
+    assert!(outcome_ctx.ctx.tool_registry.execution_history_len() > history_len, "tracker must execute live");
+    let response = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .rev()
+        .find(|message| message.tool_call_id.as_deref() == Some(call_id))
+        .expect("tracker response");
+    let payload: serde_json::Value = serde_json::from_str(&response.content.as_text()).expect("tracker JSON");
+    assert!(payload.get("error").is_none(), "{payload}");
+    assert!(
+        payload.get("reused_recent_result").is_none(),
+        "stateful tracker results must never replay: {payload}"
+    );
+    payload
+}
+
+#[tokio::test]
+async fn tracker_repeated_lists_observe_current_progress_without_replay() {
+    struct TrackerCallCase {
+        call_id: &'static str,
+        args: serde_json::Value,
+        expected_completed: usize,
+    }
+    let mut backing = TestContextBacking::new(12).await;
+    backing.select_build_primary_agent();
+    let calls = [
+        TrackerCallCase {
+            call_id: "create",
+            args: json!({"action":"create", "title":"README work", "items":["Revise copy", "Check links"]}),
+            expected_completed: 0,
+        },
+        TrackerCallCase {
+            call_id: "list_before",
+            args: json!({"action":"list"}),
+            expected_completed: 0,
+        },
+        TrackerCallCase {
+            call_id: "finish_links",
+            args: json!({"action":"update", "index":2, "status":"completed"}),
+            expected_completed: 1,
+        },
+        TrackerCallCase {
+            call_id: "list_after",
+            args: json!({"action":"list"}),
+            expected_completed: 1,
+        },
+    ];
+    for case in &calls {
+        cache_tool_permission(&mut backing, tool_names::TASK_TRACKER, &case.args, PermissionGrant::Permanent).await;
+    }
+    let mut ctx = backing.turn_processing_context();
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+    for case in calls {
+        let payload = execute_tracker_regression_call(&mut outcome_ctx, case.call_id, case.args).await;
+        assert_eq!(payload["checklist"]["completed"], case.expected_completed, "{}: {payload}", case.call_id);
+        assert_eq!(payload["checklist"]["total"], 2);
+    }
+    handle_single_tool_call(&mut outcome_ctx, "list_over_limit", tool_names::TASK_TRACKER, json!({"action":"list"}))
+        .await
+        .expect("excessive tracker polling should return policy feedback");
+    let response = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .rev()
+        .find(|message| message.tool_call_id.as_deref() == Some("list_over_limit"))
+        .expect("blocked tracker response");
+    let payload: serde_json::Value = serde_json::from_str(&response.content.as_text()).expect("tracker JSON");
+    assert_eq!(payload["error_class"], "policy_blocked", "repeat limits must remain active: {payload}");
+    assert!(payload.get("reused_recent_result").is_none());
+}
+
+#[tokio::test]
+async fn tracker_repeated_update_targets_replaced_checklist_instead_of_old_history() {
+    let mut backing = TestContextBacking::new(12).await;
+    backing.select_build_primary_agent();
+    let old_create = json!({"action":"create", "title":"Planning", "items":["Inspect README", "Draft plan"]});
+    let finish_second = json!({"action":"update", "index":2, "status":"completed"});
+    let new_create =
+        json!({"action":"create", "title":"Implementation", "items":["[x] Revise copy", "Check new links"]});
+    for args in [&old_create, &finish_second, &new_create] {
+        cache_tool_permission(&mut backing, tool_names::TASK_TRACKER, args, PermissionGrant::Permanent).await;
+    }
+    let mut ctx = backing.turn_processing_context();
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+    execute_tracker_regression_call(&mut outcome_ctx, "old_create", old_create).await;
+    let old_update = execute_tracker_regression_call(&mut outcome_ctx, "old_update", finish_second.clone()).await;
+    assert_eq!(old_update["checklist"]["completed"], 1);
+    execute_tracker_regression_call(&mut outcome_ctx, "new_create", new_create).await;
+    outcome_ctx.ctx.tool_registry.begin_tracker_request(false);
+    let new_update = execute_tracker_regression_call(&mut outcome_ctx, "new_update", finish_second).await;
+    assert_eq!(new_update["checklist"]["completed"], 2);
+    assert_eq!(new_update["changed_item"]["description"], "Check new links");
+    assert!(
+        outcome_ctx.ctx.tool_registry.tracker_adopted_for_request(),
+        "a repeated update must adopt the current request"
+    );
+}
+
 #[tokio::test]
 async fn repeated_registry_results_keep_new_inspections_visible() {
     for planning in [false, true] {

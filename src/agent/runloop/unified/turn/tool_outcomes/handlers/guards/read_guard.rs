@@ -509,7 +509,10 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
     effective_args: &Value,
     readonly_classification: bool,
 ) -> Option<ValidationResult> {
-    if !readonly_classification {
+    // Tracker calls are read-only with respect to workspace files, but their
+    // state changes independently of file-read signatures and history caches.
+    // Both list and updates must execute against the current checklist.
+    if !readonly_classification || canonical_tool_name == tool_names::TASK_TRACKER {
         return None;
     }
 
