@@ -2,28 +2,17 @@
 
 <div align="center">
 
-<picture>
-  <img src="./resources/logo/vt_code_adaptive.svg" alt="VT Code" width="300" />
-</picture>
+<img src="./resources/logo/vt_code_adaptive.svg" alt="VT Code" width="240" />
 
-**An open-source terminal coding agent built in Rust.**
+**An open-source coding agent for your terminal.**
 
-Plan, run, and review coding work from your terminal, with hosted or local models, sandboxed execution, and
-resumable sessions.
+Plan, build, and review with hosted or local models, sandboxed tools, and resumable sessions.
 
 [![GitHub release](https://img.shields.io/github/release/vinhnx/vtcode.svg)](https://github.com/vinhnx/vtcode/releases)
-[![Rust](https://img.shields.io/badge/rust-1.98.1%2B-000000?style=flat-square&logo=rust&logoColor=white)](https://github.com/vinhnx/VTCode)
 [![License](https://img.shields.io/badge/License-MIT_OR_Apache--2.0-30363D?style=flat-square)](#license)
 
-[![Agent Skills](https://img.shields.io/badge/Agent_Skills-BFB38F?style=flat-square)](https://agentskills.io/)
-[![Agent Client Protocol](https://img.shields.io/badge/Agent_Client_Protocol-383B73?style=flat-square&logo=zedindustries&logoColor=white)](./docs/guides/zed-acp.md)
-[![Model Context Protocol](https://img.shields.io/badge/Model_Context_Protocol-A63333?style=flat-square&logo=modelcontextprotocol&logoColor=white)](./docs/guides/mcp-integration.md)
-[![Agent Plugins](https://img.shields.io/badge/Agent_Plugins-5865F2?style=flat-square)](./docs/guides/agent-plugins.md)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vinhnx/vtcode)
-
 <!-- markdownlint-disable-next-line MD013 -->
-<img src="./resources/gif/vtcode.gif" alt="VT Code demo: plan, then review changes in the terminal" width="70%" />
-<br />
+<img src="./resources/gif/vtcode.gif" alt="VT Code demo: plan, then review changes in the terminal" width="76%" />
 </div>
 
 <details>
@@ -94,7 +83,7 @@ The rest of this page covers installation, configuration, a first task, and the 
 
 ## Quick start
 
-Requirements: macOS, Linux, or Windows/WSL. The Cargo path also needs Rust 1.98.1+ (edition 2024).
+Requirements: macOS, Linux, or Windows/WSL. Installing with Cargo also requires Rust 1.98.1+ (edition 2024).
 
 ### 1. Install
 
@@ -103,8 +92,8 @@ Requirements: macOS, Linux, or Windows/WSL. The Cargo path also needs Rust 1.98.
 curl -fsSL https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.sh | bash
 ```
 
-On macOS/Linux, the installer also sets up `ripgrep` and `ast-grep` by default. For package-managed installs, use
-Homebrew or Cargo instead:
+On macOS and Linux, the installer also installs `ripgrep` and `ast-grep` by default. Prefer Homebrew or Cargo if you
+want to manage the installation yourself:
 
 ```bash
 brew trust vinhnx/tap
@@ -114,16 +103,16 @@ brew install vinhnx/tap/vtcode
 cargo install vtcode
 ```
 
-Verify the install with `vtcode --version`, then see the [installation guide](./docs/installation/README.md) for
-prerequisites, additional methods, and optional search-tool setup.
+Run `vtcode --version` to verify the installation. The [installation guide](./docs/installation/README.md) covers
+prerequisites, other install methods, and optional search-tool setup.
 
 > [!NOTE]
 > Windows artifacts are best-effort and may lag behind macOS/Linux.
 
 ### 2. Configure your project
 
-From your project directory, initialize configuration and instructions, then add provider credentials. For example,
-with OpenAI:
+From your project directory, scaffold the project configuration and agent instructions, then add credentials for your
+chosen provider. For example, with OpenAI:
 
 ```bash
 cd path/to/your/project
@@ -131,9 +120,9 @@ vtcode init                # scaffolds config + AGENTS.md; review before committ
 vtcode secret add openai   # stores an OpenAI API key in your OS keyring
 ```
 
-Replace `openai` with your provider. You can also provide credentials through environment variables or a workspace
-`.env`; `vtcode login` supports available login flows. See [Getting started](./docs/user-guide/getting-started.md) and
-[Provider guides](./docs/providers/PROVIDER_GUIDES.md) for provider-specific setup.
+Replace `openai` with your provider. Alternatively, set credentials in environment variables or a workspace `.env`
+file, or use `vtcode login` for a supported login flow. See [Getting started](./docs/user-guide/getting-started.md) and
+[Provider guides](./docs/providers/PROVIDER_GUIDES.md) for provider-specific instructions.
 
 > [!NOTE]
 > ChatGPT OAuth reuses the Codex CLI's public client identity via an unofficial compatibility flow; prefer your
@@ -151,18 +140,18 @@ Replace `openai` with your provider. You can also provide credentials through en
 vtcode   # open the interactive TUI in your project
 ```
 
-Give VT Code a focused request, such as "Explain how this project handles authentication." Review its proposed changes
-and test results before committing. See [Usage](#usage) for automation and session commands, or
-[getting started](./docs/user-guide/getting-started.md) for a guided tour.
+Start with a focused request, such as "Explain how this project handles authentication." Review proposed changes and
+test results before committing. See [Usage](#usage) for automation and session commands, or take the
+[guided tour](./docs/user-guide/getting-started.md).
 
 ## Usage
 
 ### Interactive
 
-Use `vtcode` to explore, plan, and implement changes in the TUI. For larger tasks, start with
-[read-only planning](./docs/guides/planning-workflow.md), then review
-[turn diffs](./docs/development/diff-preview.md) before committing. See the
-[interactive guide](./docs/user-guide/interactive-mode.md) for controls.
+Use `vtcode` to explore, plan, and implement changes in the TUI. For larger tasks, begin with
+[read-only planning](./docs/guides/planning-workflow.md), then review the
+[turn diff](./docs/development/diff-preview.md) before committing. The
+[interactive guide](./docs/user-guide/interactive-mode.md) covers controls.
 
 After a task, `/explain` reviews outcome, changes, decisions, verification, and review priorities without another
 model call:
@@ -176,8 +165,7 @@ Scopes and report options: [explanation usage](./docs/user-guide/commands.md#exe
 
 ### Headless
 
-Three commands cover automation: `ask` for a tool-free answer, `exec` for a tool-enabled coding task, and `review`
-for uncommitted changes:
+Use `ask` for a tool-free answer, `exec` for a tool-enabled coding task, and `review` to inspect uncommitted changes:
 
 ```bash
 vtcode ask "explain Rc vs Arc"    # one-shot answer, no session, no tools
@@ -185,10 +173,10 @@ vtcode exec "refactor main.rs"    # headless task with the full tool loop
 vtcode review                     # agent review of uncommitted changes
 ```
 
-`exec` runs the full tool loop, so it requires `[automation.full_auto]` and `full_auto` workspace trust. Interactive
-terminals prompt for trust; non-TTY runs fail unless `VTCODE_TRUST_WORKSPACE=full-auto` is set. The tool allow-list,
-explicit denies, and execution policy still apply. See [exec mode](./docs/user-guide/exec-mode.md) and
-[full automation](./docs/guides/full-automation.md) for trust, output, and configuration details.
+`exec` runs the full tool loop and requires `[automation.full_auto]` plus `full_auto` workspace trust. Interactive
+terminals prompt for trust. Non-TTY runs require `VTCODE_TRUST_WORKSPACE=full-auto`; tool allow-lists, explicit denies,
+and execution policy still apply. See [exec mode](./docs/user-guide/exec-mode.md) and
+[full automation](./docs/guides/full-automation.md) for configuration and output details.
 
 For repeatable, environment-checked results, use the [eval framework](./docs/guides/eval.md). A completion message
 alone is not verification.
