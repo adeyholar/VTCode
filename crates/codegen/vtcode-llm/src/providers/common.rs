@@ -41,6 +41,10 @@ pub use token_count::{
 
 /// Implements the `LLMClient` trait for an OpenAI-compatible provider.
 /// All providers share the same pattern: create a default request, delegate to `LLMProvider::generate`.
+///
+/// Helpers are named by an absolute `crate::` path (not `super::`) so the
+/// macro stays correct in any invoking module; see
+/// `docs/development/rust-macro-hygiene.md`.
 macro_rules! impl_llm_client {
     ($provider:ty) => {
         #[async_trait::async_trait]
@@ -49,7 +53,7 @@ macro_rules! impl_llm_client {
                 &mut self,
                 prompt: &str,
             ) -> Result<crate::provider::LLMResponse, crate::provider::LLMError> {
-                let request = super::common::make_default_request(prompt, &self.model);
+                let request = crate::providers::common::make_default_request(prompt, &self.model);
                 Ok(<$provider as crate::provider::LLMProvider>::generate(self, request).await?)
             }
 

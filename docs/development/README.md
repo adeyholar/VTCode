@@ -44,6 +44,8 @@ Entry point for VT Code contributor workflows.
 - [Response Progress and Latency](./response-progress.md) - Transient phases, preparation overlap, and monotonic timings.
 - [Terminal program status](./terminal-program-status.md) - Opt-in OSC 7501 activity, child records, and lifecycle.
 - [Rust Performance Principles](./rust-performance-principles.md) - Rust hot-path and I/O guidance.
+- [Declarative Macro Hygiene](./rust-macro-hygiene.md) - `$crate`/absolute-path qualification and follow-set rules for
+  exported `macro_rules!`.
 - [Performance Hasher Policy](./performance-hasher-policy.md) - `rustc_hash` usage policy.
 - [Async Performance Audit](./async-performance-audit.md) - Async architecture performance findings.
 - [Session Event Persistence](./session-persistence.md) - Canonical session events, exporter boundaries, retention, and

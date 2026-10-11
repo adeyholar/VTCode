@@ -144,6 +144,13 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Cross-Compilation Configuration for VT Code?", "How does Overview
     work?", "How does Configuration Details work?"
 
+- **File**: `docs/development/rust-macro-hygiene.md`
+  - **Content**: Declarative Macro Hygiene — Reference Notes
+  - **Topics**: Source (not vendored), Why this matters to VT Code, Applicable rules, Reviewing a macro, Current state
+    (audit 2026-10-11)
+  - **User Questions**: "What can you tell me about Declarative Macro Hygiene — Reference Notes?", "How does Source (not
+    vendored) work?", "How does Why this matters to VT Code work?"
+
 - **File**: `docs/development/DESIRE_PATHS.md`
   - **Content**: Desire Paths in VT Code
   - **Topics**: Philosophy, Current Paved Paths, Desire Paths to Implement, How to Report Friction, Implementation

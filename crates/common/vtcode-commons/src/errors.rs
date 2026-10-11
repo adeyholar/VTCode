@@ -300,6 +300,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn file_err_operations_format_path() {
+        // `file_err!` has no shape test; other relative paths in macros were
+        // also left invariant. Keep the message contract pinned.
+        let path = "config/vtcode.toml";
+        assert_eq!(file_err!(path, read), "failed to read config/vtcode.toml");
+        assert_eq!(file_err!(path, write), "failed to write config/vtcode.toml");
+        assert_eq!(file_err!(path, delete), "failed to delete config/vtcode.toml");
+        assert_eq!(file_err!(path, create), "failed to create config/vtcode.toml");
+    }
+
+    #[test]
+    fn ctx_err_joins_operation_and_context() {
+        assert_eq!(ctx_err!("llm factory", "lock poisoned"), "llm factory: lock poisoned");
+    }
+
+    #[test]
     fn formatter_uses_display() {
         let formatter = DisplayErrorFormatter;
         let error = Error::msg("test error");
