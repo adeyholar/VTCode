@@ -20,7 +20,10 @@ release_commit_is_excluded() {
 	local message="$1"
 	local lower_msg
 	lower_msg=$(echo "$message" | tr '[:upper:]' '[:lower:]')
-	[[ "$lower_msg" =~ (chore\(release\):|bump version|update version|version bump|release v[0-9]+\.[0-9]+\.[0-9]+|chore.*version|chore.*release|build.*version|update.*version.*number|bump.*version.*to|update homebrew|update changelog|update.*todo|docs\(todo\)|docs\(project\).*todo|^update project$) ]]
+	# Mirrors cliff.toml commit_parsers: TODO churn and bare Update subjects
+	# are matched on the subject start only, so conventional commits that
+	# merely contain those words (e.g. `refactor: update TODO with y`) stay included.
+	[[ "$lower_msg" =~ (chore\(release\):|bump version|update version|version bump|release v[0-9]+\.[0-9]+\.[0-9]+|chore.*version|chore.*release|build.*version|update.*version.*number|bump.*version.*to|update homebrew|update changelog|^update.*todo|^docs\(todos?\)|^docs\(project\).*todo|^docs: update.*todo|^update project$|^updates?( |$|:)) ]]
 }
 
 # Insert a generated changelog entry above the newest version so the file stays

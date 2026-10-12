@@ -11,14 +11,7 @@ All notable changes to vtcode will be documented in this file.
 ### Other Changes
 #### Other
 
-- Update README (a711da14) 
-## 0.175.7 - 2026-10-12
-
-### Highlights
-### Other Changes
-#### Other
-
-- Update docs (2bae0f57) (@vinhnx)
+- Refactor OpenAI response handling and enhance Decisions probe functionality (1fab8751) (@vinhnx)
 ## 0.175.6 - 2026-10-11
 
 ### Highlights

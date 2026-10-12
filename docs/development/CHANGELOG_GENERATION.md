@@ -175,6 +175,20 @@ The following commit patterns are automatically excluded from the changelog:
 - `update changelog` - Changelog update commits
 - `update TODO` / `update TODOs` / `update project TODO` (any case) - Owner-only `docs/project/TODO.md` churn
 - `update project` (exact, any case) - Owner-only project-file churn
+- Bare `Update ...` / `Updates ...` subjects (any case, e.g. `Update README`, `Update docs`) - Owner maintenance noise. Conventional commits that merely contain "update" (e.g. `docs: update ...`, `refactor: update TODO with ...`) are still included.
+
+### Subject-Line-Only Matching (important)
+
+git-cliff matches `commit_parsers` and `exclude_patterns` against the **full commit
+message (subject + body)**. Every skip/exclude pattern in `cliff.toml` is therefore
+anchored to the subject line (`^` matches message start; `[^\n]*` cannot cross a
+newline). Without this anchoring, a commit whose *body* merely mentions an excluded
+file — for example a merge-conflict note like `# Conflicts: docs/project/TODO.md` —
+is dropped from the changelog even though its subject describes a real change. This
+silently hid 29 real entries (including conventional ones such as
+`refactor: update TODO with ...`, because the old unanchored skip rules sat before
+the type-group rules and first-match-wins skipped them too) until the patterns
+were anchored. When adding new skip rules, keep them subject-anchored.
 
 ## Customization
 

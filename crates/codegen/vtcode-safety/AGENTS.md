@@ -15,7 +15,7 @@
 
 ## Rules
 
-- `exec_policy::manager` imports `command_safety::command_might_be_dangerous` and `sandboxing::SandboxPolicy` — these form a tightly coupled safety subsystem. Re-export facades in vtcode-core (`command_safety/mod.rs`, `exec_policy/mod.rs`, `sandboxing/mod.rs`) must stay in sync. `SandboxPermissions::normalized_for` is the canonical boundary for additional-permission mode normalization; callers must not duplicate that rule. The `BashParser` singleton (`once_cell::Lazy`) is safe across crates — read-after-init pattern.
+- `exec_policy::manager` imports `command_safety::command_might_be_dangerous` and `sandboxing::SandboxPolicy` — these form a tightly coupled safety subsystem. Re-export facades in vtcode-core (`command_safety/mod.rs`, `exec_policy/mod.rs`, `sandboxing/mod.rs`) must stay in sync. `SandboxPermissions::resolve_request` is the canonical boundary for mode/additional/justification validation (modular proof); `normalized_for` stays the normalization primitive — callers must not duplicate either rule. `derive_mcp_sandbox_policy` is the canonical MCP narrowing boundary. The `BashParser` singleton (`once_cell::Lazy`) is safe across crates — read-after-init pattern.
 
 ## Gotchas
 

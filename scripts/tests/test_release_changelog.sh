@@ -38,14 +38,14 @@ assert_equal "$(get_github_username '123+alice@users.noreply.github.com')" alice
 assert_equal "$(get_github_username 'noreply@vtcode.com')" vtcode-release-bot "release bot identity"
 assert_equal "$(get_github_username 'vinhnguyen.fixture@example.test')" vinhnx "maintainer alias"
 
-for subject in 'chore(release): v1.2.3' 'UPDATE TODOs' 'docs(todo): owner notes' 'Build: update version number'; do
+for subject in 'chore(release): v1.2.3' 'UPDATE TODOs' 'docs(todo): owner notes' 'Build: update version number' 'Update README' 'Update docs' 'Update'; do
 	if ! release_commit_is_excluded "$subject"; then
 		printf 'FAIL: expected excluded subject: %s\n' "$subject" >&2
 		exit 1
 	fi
 	checks=$((checks + 1))
 done
-for subject in 'feat: new behavior' 'fix: preserve version parsing' 'docs: user workflow'; do
+for subject in 'feat: new behavior' 'fix: preserve version parsing' 'docs: user workflow' 'refactor: update TODO with y' 'docs: update fixture guide'; do
 	if release_commit_is_excluded "$subject"; then
 		printf 'FAIL: unexpectedly excluded subject: %s\n' "$subject" >&2
 		exit 1
@@ -153,6 +153,70 @@ if [[ "$legacy_notes" != *'### New Features'* || "$legacy_notes" != *"oldest fea
 	exit 1
 fi
 checks=$((checks + 1))
+
+# git-cliff regression: skip/exclude patterns must match the SUBJECT line only.
+# git-cliff matches commit_parsers and exclude_patterns against the full commit
+# message (subject + body), so an unanchored pattern such as `TODO\.md` used to
+# drop real commits whose body merely mentioned the file (e.g. merge-conflict
+# notes). Conventional subjects were affected too whenever an early unanchored
+# skip rule matched them first (first parser wins, e.g. old `update.*todo` sat
+# before the group rules and dropped `refactor: update TODO with ...`).
+# Bare non-conventional `Update ...` subjects (owner maintenance noise) are
+# excluded by a subject-anchored rule, while conventional commits that
+# merely contain "update" (e.g. `docs: update ...`) must still be included.
+# A separate fixture repo plus a remote-stripped config copy keeps this check
+# hermetic: no GitHub API calls, deterministic hashes.
+if command -v git-cliff >/dev/null 2>&1; then
+	mkdir "$fixture_dir/cliff-repo"
+	(
+		cd "$fixture_dir/cliff-repo"
+		command git init --quiet
+		command git config core.hooksPath /dev/null
+		command git config commit.gpgsign false
+		command git config user.name 'Fixture Author'
+		command git config user.email 'fixture@example.test'
+		# Substantive NON-conventional subject (group rules never match it, so the
+		# skip rules decide its fate), body carries a merge-conflict note naming
+		# the TODO tracker file.
+		command git commit --quiet --allow-empty -m 'Refactor fixture handling for clarity' -m '# Conflicts:
+#	docs/project/TODO.md'
+		# Pure TODO-tracker churn that must stay excluded.
+		command git commit --quiet --allow-empty -m 'Update TODO.md'
+		command git commit --quiet --allow-empty -m 'docs: update project TODO'
+		# Bare non-conventional Update subject: owner noise, must stay excluded.
+		command git commit --quiet --allow-empty -m 'Update fixture readme'
+		# Conventional commit merely containing 'update': must stay included.
+		command git commit --quiet --allow-empty -m 'docs: update fixture guide'
+		command git tag 1.0.0
+	)
+	# Strip the remote section so git-cliff never contacts the GitHub API.
+	grep -v -E '^remote = |^\[remote|^owner = |^repo = ' \
+		"$repo_scripts/../cliff.toml" >"$fixture_dir/cliff.toml"
+	if ! cliff_output=$(cd "$fixture_dir/cliff-repo" &&
+		command git-cliff --config "$fixture_dir/cliff.toml" 2>/dev/null); then
+		printf 'FAIL: git-cliff run against fixture failed\n' >&2
+		exit 1
+	fi
+	if [[ "$cliff_output" != *'Refactor fixture handling for clarity'* ]]; then
+		printf 'FAIL: non-conventional commit whose body mentions TODO.md was dropped from the changelog\n%s\n' "$cliff_output" >&2
+		exit 1
+	fi
+	checks=$((checks + 1))
+	if ! printf '%s' "$cliff_output" | grep -qi 'update fixture guide'; then
+		printf 'FAIL: conventional docs commit containing update was dropped\n%s\n' "$cliff_output" >&2
+		exit 1
+	fi
+	checks=$((checks + 1))
+	for churn in 'Update TODO.md' 'project TODO' 'Update fixture readme'; do
+		if [[ "$cliff_output" == *"$churn"* ]]; then
+			printf 'FAIL: TODO churn subject leaked into the changelog: %s\n%s\n' "$churn" "$cliff_output" >&2
+			exit 1
+		fi
+		checks=$((checks + 1))
+	done
+else
+	printf 'SKIP: git-cliff not installed; skipping changelog parser regression\n' >&2
+fi
 
 mkdir "$fixture_dir/changelogs"
 entry_one=$'## 2.0.0 - 2026-10-05\n\nSecond version: literal 100% and ${HOME} $(touch injection-marker).\n'
