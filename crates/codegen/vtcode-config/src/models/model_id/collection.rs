@@ -47,6 +47,8 @@ impl ModelId {
             ModelId::MetaMuseSpark13,
             ModelId::MetaMuseSpark13Contributor,
             ModelId::MetaMuseSpark11,
+            ModelId::MetaMuseWonder10,
+            ModelId::MetaMuseWonderFull10,
             // NVIDIA NIM models
             ModelId::NvidiaNemotron3Ultra550bA55b,
             ModelId::NvidiaNemotron3Super120bA12b,

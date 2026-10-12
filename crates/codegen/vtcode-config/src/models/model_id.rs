@@ -84,6 +84,10 @@ pub enum ModelId {
     MetaMuseSpark13,
     /// Meta Muse Spark 1.3 Contributor tier - opt-in variant with Meta's discounted data-contribution terms
     MetaMuseSpark13Contributor,
+    /// Meta Muse Wonder 1.0 - Frontier coding, long-running agents, and advanced computer use
+    MetaMuseWonder10,
+    /// Meta Muse Wonder Full 1.0 - Most advanced Meta model for critical workflows (Muse Code subscription)
+    MetaMuseWonderFull10,
 
     // NVIDIA NIM models
     /// NVIDIA Nemotron 3 Ultra - NVIDIA's flagship agentic reasoning model via NIM

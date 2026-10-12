@@ -155,6 +155,8 @@ fn test_model_variants() {
     assert!(ModelId::ClaudeSonnet5.is_pro_variant());
     assert!(ModelId::MetaMuseSpark13.is_pro_variant());
     assert!(ModelId::MetaMuseSpark13Contributor.is_pro_variant());
+    assert!(ModelId::MetaMuseWonder10.is_pro_variant());
+    assert!(ModelId::MetaMuseWonderFull10.is_pro_variant());
     assert!(ModelId::XaiGrok46.is_pro_variant());
     assert!(!ModelId::Gemini38Flash.is_pro_variant());
 
@@ -174,6 +176,8 @@ fn test_model_variants() {
     assert!(ModelId::ClaudeSonnet5.is_top_tier());
     assert!(ModelId::MetaMuseSpark13.is_top_tier());
     assert!(ModelId::MetaMuseSpark13Contributor.is_top_tier());
+    assert!(ModelId::MetaMuseWonder10.is_top_tier());
+    assert!(ModelId::MetaMuseWonderFull10.is_top_tier());
     assert!(ModelId::ZaiGlm53.is_top_tier());
     assert!(ModelId::Gemini38Flash.is_top_tier());
     assert!(ModelId::XaiGrok46.is_top_tier());
@@ -192,6 +196,8 @@ fn test_preferred_lightweight_variant() {
     assert_eq!(ModelId::ZaiGlm53.preferred_lightweight_variant(), None);
     assert_eq!(ModelId::MetaMuseSpark13.preferred_lightweight_variant(), None);
     assert_eq!(ModelId::MetaMuseSpark13Contributor.preferred_lightweight_variant(), None);
+    assert_eq!(ModelId::MetaMuseWonder10.preferred_lightweight_variant(), Some(ModelId::MetaMuseSpark13));
+    assert_eq!(ModelId::MetaMuseWonderFull10.preferred_lightweight_variant(), Some(ModelId::MetaMuseWonder10));
     assert_eq!(ModelId::GPT56Luna.preferred_lightweight_variant(), None);
     assert_eq!(ModelId::XaiGrok46.preferred_lightweight_variant(), None);
 }
@@ -216,6 +222,8 @@ fn test_model_generation() {
     assert_eq!(ModelId::MetaMuseSpark11.generation(), "Muse-Spark-1.1");
     assert_eq!(ModelId::MetaMuseSpark13.generation(), "Muse-Spark-1.3");
     assert_eq!(ModelId::MetaMuseSpark13Contributor.generation(), "Muse-Spark-1.3");
+    assert_eq!(ModelId::MetaMuseWonder10.generation(), "Muse-Wonder-1.0");
+    assert_eq!(ModelId::MetaMuseWonderFull10.generation(), "Muse-Wonder-Full-1.0");
 
     // Z.AI generations
     assert_eq!(ModelId::ZaiGlm53.generation(), "5.3");
@@ -255,7 +263,9 @@ fn test_models_for_provider() {
         &[
             ModelId::MetaMuseSpark13,
             ModelId::MetaMuseSpark13Contributor,
-            ModelId::MetaMuseSpark11
+            ModelId::MetaMuseSpark11,
+            ModelId::MetaMuseWonder10,
+            ModelId::MetaMuseWonderFull10
         ]
     );
 

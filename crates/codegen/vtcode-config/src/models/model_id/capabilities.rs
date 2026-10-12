@@ -342,6 +342,8 @@ impl ModelId {
                 | ModelId::VercelDeepseekFlash
                 | ModelId::MetaMuseSpark13
                 | ModelId::MetaMuseSpark13Contributor
+                | ModelId::MetaMuseWonder10
+                | ModelId::MetaMuseWonderFull10
                 | ModelId::ZaiGlm53
                 | ModelId::ZaiGlm53Flash
                 | ModelId::ZaiGlm53Flashx
@@ -418,6 +420,8 @@ impl ModelId {
             ModelId::MergeGatewayDeepseekFlash => "4.1",
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",
             ModelId::MetaMuseSpark13 | ModelId::MetaMuseSpark13Contributor => "Muse-Spark-1.3",
+            ModelId::MetaMuseWonder10 => "Muse-Wonder-1.0",
+            ModelId::MetaMuseWonderFull10 => "Muse-Wonder-Full-1.0",
             // Z.AI generations
             ModelId::ZaiGlm53
             | ModelId::ZaiGlm53Flash

@@ -414,11 +414,13 @@ mod tests {
     #[test]
     fn meta_presets_keep_standard_default_and_contributor_opt_in() {
         let presets = presets::meta_presets();
-        assert_eq!(presets.len(), 3);
+        assert_eq!(presets.len(), 5);
 
         let default = presets.iter().find(|preset| preset.is_default).expect("Meta default preset");
         assert_eq!(default.model, "muse-spark-1.3");
         assert!(presets.iter().any(|preset| preset.model == "muse-spark-1.3-contributor"));
+        assert!(presets.iter().any(|preset| preset.model == "muse-wonder-1.0"));
+        assert!(presets.iter().any(|preset| preset.model == "muse-wonder-full-1.0"));
         assert!(
             presets
                 .iter()

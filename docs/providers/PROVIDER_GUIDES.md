@@ -332,8 +332,9 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
 - **Provider key:** `meta`
 - **Authentication:** `META_API_KEY` or Meta's documented `MODEL_API_KEY`
 - **Base URL:** `https://api.meta.ai/v1`, override with `META_BASE_URL`
-- **Default model:** `muse-spark-1.2`
-- **Curated models:** Muse Spark 1.2, Muse Spark 1.1, and the opt-in Muse Spark 1.2 Contributor tier
+- **Default model:** `muse-spark-1.3`
+- **Curated models:** Muse Wonder 1.0, Muse Wonder Full 1.0 (Muse Code subscription), Muse Spark 1.3, Muse Spark 1.1,
+  and the opt-in Muse Spark 1.3 Contributor tier
 - **Features:** Streaming, tool calls, structured output, multimodal input, reasoning effort, and 1M-token context
 
 ## NVIDIA NIM
@@ -389,8 +390,8 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
   available.
 - For Meta Muse, prefer the official [`meta` provider](./meta.md) when direct Meta access is desired. OpenRouter's
   `meta/...` entries are separately namespaced marketplace routes.
-- **Meta Muse models via OpenRouter:** `meta/muse-glimmer-30b` and `meta/muse-spark-1.2`
-- **Curated picker catalog:** `openrouter/meta/muse-glimmer-30b`, `openrouter/meta/muse-spark-1.2`,
+- **Meta Muse models via OpenRouter:** `meta/muse-glimmer-30b` and `meta/muse-spark-1.3`
+- **Curated picker catalog:** `openrouter/meta/muse-glimmer-30b`, `openrouter/meta/muse-spark-1.3`,
   `openrouter/deepseek/deepseek-chat`, `openrouter/z-ai/glm-5.1`, `openrouter/z-ai/glm-5.2`,
   `openrouter/z-ai/glm-5.3-flash`, `openrouter/z-ai/glm-5.3-flashx`, `openrouter/moonshotai/kimi-k3`,
   `openrouter/moonshotai/kimi-k2.6`, `openrouter/moonshotai/kimi-k2.7-code`, `openrouter/qwen/qwen3.7-max`,

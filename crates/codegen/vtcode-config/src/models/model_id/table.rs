@@ -271,6 +271,20 @@ model_id_table! {
         display: "Muse Spark 1.3 Contributor (Meta AI)",
         description: "Official Meta AI Muse Spark 1.3 Contributor-tier variant with always-on reasoning and long context",
     },
+    MetaMuseWonder10 {
+        provider: Meta,
+        id: models::meta::MUSE_WONDER_1_0,
+        parse: [models::meta::MUSE_WONDER_1_0],
+        display: "Muse Wonder 1.0 (Meta AI)",
+        description: "Meta Muse Wonder frontier model for coding, long-running agents, and advanced computer use with Active Memory and Active Focus",
+    },
+    MetaMuseWonderFull10 {
+        provider: Meta,
+        id: models::meta::MUSE_WONDER_FULL_1_0,
+        parse: [models::meta::MUSE_WONDER_FULL_1_0],
+        display: "Muse Wonder Full 1.0 (Meta AI)",
+        description: "Meta's most advanced Muse Wonder Full model for critical workflows with SOTA agentic and coding performance",
+    },
     // NVIDIA NIM models
     NvidiaNemotron3Ultra550bA55b {
         provider: NVIDIA,

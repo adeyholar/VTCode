@@ -45,12 +45,12 @@ For direct Meta access, prefer the [official Meta AI provider](./meta.md). OpenR
 model IDs:
 
 ```bash
-vtcode --provider openrouter --model meta/muse-spark-1.2 chat
+vtcode --provider openrouter --model meta/muse-spark-1.3 chat
 vtcode --provider openrouter --model meta/muse-glimmer-30b chat
 ```
 
 These routes use `OPENROUTER_API_KEY` and OpenRouter billing. The `meta/...` namespace is distinct from the official
-provider's bare `muse-spark-1.2` and `muse-spark-1.1` IDs.
+provider's bare `muse-spark-1.3` and `muse-spark-1.1` IDs.
 
 ## Persisting configuration
 
