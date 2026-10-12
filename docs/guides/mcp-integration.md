@@ -144,6 +144,12 @@ registry's `list_changed` refresh instead. Full tool definitions (`get_tool_deta
 > servers must expose Server-Sent Events per the transport spec. If an HTTP provider lacks streaming, fall back to a
 > stdio wrapper until the server adopts the reference implementation.
 
+### Local code discovery with Sem
+
+[Sem MCP](sem-mcp.md) provides optional local entity search, caller inspection, and structural diffs.
+The [example configuration](../examples/sem-mcp.toml) pins the server version and requires an explicit repository path.
+It preserves built-in file tools and existing approval controls; validation tools can execute repository commands.
+
 ### Parallel web search without an API key
 
 [Parallel Search MCP](parallel-search-mcp.md) provides opt-in web search and page extraction over Streamable HTTP.
