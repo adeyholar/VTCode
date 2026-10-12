@@ -199,6 +199,10 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
      automatically detects `~/.codex/auth.json` and uses it at runtime when no VT Code-managed session is stored.
      Validate with `vtcode login openai --from-codex`.
   3. **API key** — `vtcode secret add openai` or set `OPENAI_API_KEY`. Use `/secret` to manage stored keys.
+- **Explicit API-key preference:** set `[auth.openai] preferred_method = "api_key"` to use the API key even when a
+  ChatGPT/Codex subscription session exists. This is required for the API-only Decisions probe; use the
+  [combined Decisions/Ultrafast setup](../guides/decisions-probe.md#eligibility). The model picker reports the auth
+  source selected by this preference, rather than whichever credential generic discovery finds first.
 - **Login/logout commands:**
   - CLI: `vtcode login openai`, `vtcode login openai --from-codex`, `vtcode logout openai`
   - TUI: `/login openai`, `/logout openai`, `/auth`
@@ -210,9 +214,11 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
   (`https://api.openai.com/v1`) and the ChatGPT-subscription path (`https://chatgpt.com/backend-api/codex`), so a
   local recording proxy works without code changes or TLS interception. Point it at a proxy for one run to capture the
   full exchange, then replay offline:
+
   ```bash
   OPENAI_BASE_URL=http://127.0.0.1:8931/v1 vtcode ask "say ok"
   ```
+
   VT Code speaks the Responses API: it appends `/responses` to the resolved base URL, so a gateway must serve
   `POST <base>/responses` returning `{"output": [...]}`. A Chat-Completions-only gateway fails with
   `Invalid Responses API format: missing output array`, which means the endpoint was reached but answered in the
@@ -241,8 +247,8 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
   GPT-6 prompt contract, explicit cache breakpoints, and `30m` cache TTL as Astra; sampling and logprobs unsupported.
 - **Service tiers:** `provider.openai.service_tier` accepts `flex`, `priority`, and `ultrafast` (`ultrafast` is
   native-OpenAI-only; see the config field reference). `ultrafast` is the fastest tier: GA for `gpt-6-astra`
-  and `gpt-6.1-sol` (`model = "gpt-6-astra"` + `service_tier = "ultrafast"` on every `response.create`), preview-only for
-  `gpt-5.6-sol` (contact your OpenAI account team). It costs more, starts at low TPM limits (Astra 500k / 1M /
+  and `gpt-6.1-sol` for all API users (`model = "gpt-6-astra"` + `service_tier = "ultrafast"` on every `response.create`).
+  It costs more and has separate TPM limits (Astra 500k / 1M /
   5M; 6.1-sol 1M / 4M / 40M), and supports US/global processing on Astra vs US/EU/global on 6.1-sol. Pair it with
   `provider.openai.websocket_mode = true` to keep one persistent Responses WebSocket + `previous_response_id`
   chain across turns and tool results — HTTP handshake overhead erodes the speedup on agentic tool-call bursts.

@@ -273,6 +273,28 @@ fn append_tool_result_to_instructions(
     instructions_segments.push((InstructionSegmentKind::FoldedHistory, s));
 }
 
+/// Parse a server completion and record its served tier once. Replay parsing
+/// uses `parse_responses_payload` directly and must not emit completion evidence.
+pub(crate) fn parse_responses_completion(
+    response_json: Value,
+    model: String,
+    include_cached_prompt_metrics: bool,
+) -> Result<LLMResponse, LLMError> {
+    let service_tier = response_json
+        .get("service_tier")
+        .and_then(Value::as_str)
+        .filter(|tier| matches!(*tier, "default" | "standard" | "auto" | "flex" | "priority" | "fast" | "ultrafast"))
+        .map(compact_str::CompactString::new);
+    let response = parse_responses_payload(response_json, model, include_cached_prompt_metrics)?;
+    if let Some(service_tier) = service_tier {
+        tracing::info!(
+            service_tier = service_tier.as_str(),
+            "OpenAI Responses completed with server-reported service tier"
+        );
+    }
+    Ok(response)
+}
+
 pub(crate) fn parse_responses_payload(
     response_json: Value,
     model: String,

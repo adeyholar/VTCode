@@ -513,12 +513,21 @@ impl ModelPickerState {
             self.selected_decisions_probe = None;
         }
         let mut selection = selection;
-        if !selection.env_key.trim().is_empty()
-            && let Some(resolved) = self.resolve_selection_credential(&selection)?
-        {
-            let message = existing_credential_message(&selection, &resolved);
-            self.apply_resolved_credential(&mut selection, resolved);
-            renderer.line(MessageStyle::Info, &message)?;
+        if !selection.env_key.trim().is_empty() {
+            if let Some(resolved) = self.resolve_selection_credential(&selection)? {
+                let message = existing_credential_message(&selection, &resolved);
+                self.apply_resolved_credential(&mut selection, resolved);
+                renderer.line(MessageStyle::Info, &message)?;
+            } else if selection.provider_enum == Some(Provider::OpenAI)
+                && self
+                    .settings
+                    .vt_cfg
+                    .as_ref()
+                    .is_some_and(|cfg| cfg.auth.openai.preferred_method == vtcode_config::OpenAIPreferredMethod::ApiKey)
+            {
+                selection.requires_api_key = true;
+                selection.uses_chatgpt_auth = false;
+            }
         }
 
         if selection.requires_api_key && self.pending_api_key.is_some() {
@@ -745,12 +754,47 @@ impl ModelPickerState {
         &self,
         selection: &SelectionDetail,
     ) -> Result<Option<vtcode_config::api_keys::ResolvedCredential>> {
-        vtcode_config::api_keys::resolve_credential_with_mode(
+        let mut resolved = vtcode_config::api_keys::resolve_credential_with_mode(
             &selection.provider_key,
             &selection.env_key,
             self.settings.workspace.as_deref(),
             self.storage_mode(),
-        )
+        )?;
+        if selection.provider_enum == Some(Provider::OpenAI)
+            && selection.env_key.eq_ignore_ascii_case(Provider::OpenAI.default_api_key_env())
+            && let Some(cfg) = self.settings.vt_cfg.as_ref()
+        {
+            // Generic key discovery can prefer an API key even when runtime
+            // auth prefers ChatGPT. Resolve the same policy before displaying
+            // the source or offering the API-key-only Decisions follow-up.
+            if cfg.auth.openai.preferred_method == vtcode_config::OpenAIPreferredMethod::ApiKey
+                && resolved.as_ref().and_then(|credential| credential.secret.as_ref()).is_none()
+            {
+                resolved = if let Some(secret) =
+                    vtcode_config::api_keys::load_stored_api_key_with_mode("openai", self.storage_mode())?
+                {
+                    let identity = vtcode_config::api_keys::credential_identity("openai", &selection.env_key)?
+                        .ok_or_else(|| anyhow!("OpenAI credential identity is unavailable"))?;
+                    Some(vtcode_config::api_keys::ResolvedCredential {
+                        identity,
+                        source: vtcode_config::api_keys::CredentialSource::SecureStorage,
+                        secret: Some(secret),
+                        env_var: None,
+                    })
+                } else {
+                    None
+                };
+            }
+            if let Some(credential) = resolved.take() {
+                let auth = vtcode_config::resolve_openai_auth(
+                    &cfg.auth.openai,
+                    self.storage_mode(),
+                    credential.secret.clone(),
+                )?;
+                return Ok(Some(credential_for_openai_auth(credential, auth)));
+            }
+        }
+        Ok(resolved)
     }
 
     fn apply_resolved_credential(
@@ -766,6 +810,21 @@ impl ModelPickerState {
         self.pending_api_key = resolved.secret;
         self.pending_credential_source = Some(resolved.source);
     }
+}
+
+fn credential_for_openai_auth(
+    mut credential: vtcode_config::api_keys::ResolvedCredential,
+    auth: vtcode_config::auth::OpenAIResolvedAuth,
+) -> vtcode_config::api_keys::ResolvedCredential {
+    match auth {
+        vtcode_config::auth::OpenAIResolvedAuth::ApiKey { api_key } => credential.secret = Some(api_key),
+        vtcode_config::auth::OpenAIResolvedAuth::ChatGpt { .. } => {
+            credential.source = vtcode_config::api_keys::CredentialSource::OAuth;
+            credential.secret = None;
+            credential.env_var = None;
+        }
+    }
+    credential
 }
 
 fn existing_credential_message(
@@ -835,3 +894,6 @@ fn configured_openai_base_url(vt_cfg: Option<&VTCodeConfig>) -> Option<String> {
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
 }
+
+#[cfg(test)]
+mod tests;

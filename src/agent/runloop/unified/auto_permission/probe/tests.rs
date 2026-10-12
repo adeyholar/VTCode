@@ -55,6 +55,10 @@ impl uni::LLMProvider for ScriptedProvider {
         request: uni::ChoiceDecisionRequest,
     ) -> Result<uni::ChoiceDecisionResponse, uni::LLMError> {
         assert_eq!(request.name, "tool_output_injection");
+        assert!(
+            !request.instructions.contains("Respond with"),
+            "typed Decisions must not use generation formatting instructions"
+        );
         assert_eq!(request.choices.iter().map(|option| option.value.as_str()).collect::<Vec<_>>(), ["SAFE", "SUSPECT"]);
         self.decisions_inputs.lock().unwrap().push(request.input);
         tokio::time::sleep(self.decisions_delay).await;
@@ -72,6 +76,9 @@ impl uni::LLMProvider for ScriptedProvider {
         })
     }
     async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+        panic!("probe must use isolated auxiliary generation: {}", request.model)
+    }
+    async fn generate_auxiliary(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
         self.generation_requests.lock().unwrap().push(request);
         tokio::time::sleep(self.generation_delay).await;
         let Some(content) = self.generation else {
@@ -93,6 +100,12 @@ impl uni::LLMProvider for ScriptedProvider {
     }
     fn supported_models(&self) -> Vec<String> {
         vec!["gpt-6-luna".into(), "gpt-6-astra".into()]
+    }
+    fn supports_reasoning_effort(&self, _: &str) -> bool {
+        true
+    }
+    fn supported_reasoning_efforts(&self, _: &str) -> &'static [&'static str] {
+        &["low", "medium", "high"]
     }
     fn validate_request(&self, _: &uni::LLMRequest) -> Result<(), uni::LLMError> {
         Ok(())
@@ -161,6 +174,8 @@ async fn decisions_probe_inconclusive_and_http_error_fall_back_to_configured_pro
         let requests = provider.generation_requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].model, "gpt-6-luna");
+        assert_eq!(requests[0].max_tokens, Some(256));
+        assert_eq!(requests[0].reasoning_effort, Some(ReasoningEffortLevel::Low));
         assert_eq!(requests[0].messages[0].content.as_text(), provider.decisions_inputs.lock().unwrap()[0]);
         assert_eq!(stats.total_usage().input_tokens, if error { 311 } else { 448 });
         assert_eq!(stats.total_usage().output_tokens, 2);
@@ -196,6 +211,8 @@ async fn decisions_disabled_and_ineligible_paths_do_not_dispatch_decisions_and_k
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].model, "gpt-6-luna");
         assert_eq!(requests[1].model, "gpt-6-astra");
+        assert_eq!(requests[0].max_tokens, Some(8));
+        assert!(requests[0].reasoning_effort.is_none());
     }
 }
 

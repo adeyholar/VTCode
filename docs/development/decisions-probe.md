@@ -12,6 +12,9 @@ follow-up after selecting a direct OpenAI API-key model at the standard endpoint
 `supports_decisions()` (OpenAI enum, no ChatGPT subscription auth, parsed standard endpoint) without credential lookup
 or dispatch, and persists the choice with the model selection. Existing enabled settings activate this path after
 upgrade. Manual approvals and tool permissions keep their existing behavior; the output classifier is advisory.
+The picker resolves the configured OpenAI auth preference before reporting the credential source or offering this
+follow-up. Generic API-key discovery must not mark an `auto`/ChatGPT runtime as Decisions-eligible. Explicit
+`api_key` preference also checks stored API keys when generic discovery finds an OAuth session first.
 
 ## Implementation Boundaries
 
@@ -19,6 +22,14 @@ upgrade. Manual approvals and tool permissions keep their existing behavior; the
 `ContextWindowProvider` forwards them. Only the built-in OpenAI provider advertises support, after checking API-key
 authentication and a parsed standard HTTPS origin and `/v1` base path. Custom providers and gateways remain unsupported;
 the capability check does not look up credentials or send requests.
+
+`LLMProvider::generate_auxiliary` defaults to ordinary generation for stateless providers and is forwarded by the
+context-window wrapper and custom-provider router. OpenAI overrides it to use HTTP (SSE when required), preserving
+the main WebSocket lane and continuation even on timeout. The Decisions fallback allows 256 output tokens and low
+reasoning when accepted by the selected route; the old effective 16-token allowance could be entirely consumed by
+reasoning without a verdict.
+The ordinary generation-only probe's eight-token request is unchanged. Both paths retain the existing shared deadline.
+Decisions instructions describe the classification alone; typed answers do not need free-text formatting instructions.
 
 `provider/decisions.rs` owns typed text choice requests, answer validation, and the shared
 `is_standard_decisions_endpoint` predicate used by both the runtime eligibility gate and the picker mirror. OpenAI's
@@ -33,7 +44,7 @@ accounting. Session usage includes auxiliary tokens and both attempts' costs; au
 health. A failed/timed-out/cancelled attempt without usage leaves the complete session cost unknown. Decisions pricing
 is endpoint-specific; ordinary `gpt-6-luna` generation keeps the model catalog's generation rates.
 The shared OpenAI Responses builder raises sub-16 output-token allowances to the API minimum of 16, including
-the generation probe's eight-token request. Omitted limits and subscription request shaping remain unchanged.
+the generation-only probe's eight-token request. Omitted limits and subscription request shaping remain unchanged.
 
 Admission reevaluates the current provider and loaded configuration for each tool result. Outside full-auto, probing
 requires inline interactive UI, the enabled toggle, and `supports_decisions()`. Disabled/unsupported, subscription,
@@ -48,6 +59,8 @@ Every completion restores the previous status; cancellation and exit stop the ow
 activity without reviving stale status. Privacy-safe attempt logs inherit session/turn identifiers and `full_auto`
 from the dispatch span and record endpoint, outcome, elapsed milliseconds, and whether usage is known. No evidence,
 credentials, or response bodies are logged.
+Attempt records are INFO level. Config-based tracing applies its level separately to every selected target and includes
+`vtcode_llm` by default, so provider rejection/fallback diagnostics remain visible after the provider crate extraction.
 
 The idle input loop reevaluates live capability and planning after provider/settings changes. A
 session-statistics latch allows one informational suggestion, only on the interactive idle surface while disabled.
@@ -98,8 +111,9 @@ python3 scripts/evals/decisions_probe.py --repeat 3
 
 The generation baseline uses `gpt-6-luna` by default; to compare another configured probe model, supply
 `--generation-model`, `--input-rate`, and `--output-rate` with that model's per-million rates. The runner uses direct
-Responses HTTP with the API's minimum allowance of 16 output tokens and a single baseline request; its generation
-fallback uses the same allowance. See the [Responses request contract](https://developers.openai.com/api/reference/python/resources/responses/methods/create).
+Responses HTTP with the API's minimum allowance of 16 output tokens and a single baseline request; its Decisions
+fallback allows 256 output tokens and low reasoning for the default Luna model. Other evaluator models omit reasoning
+because the runner has no capability catalog. See the [Responses request contract](https://developers.openai.com/api/reference/python/resources/responses/methods/create).
 It does not reproduce provider transport retries or the ordinary
 lightweight-to-main fallback. Runtime request limits and fallback route selection are covered by the Rust regressions.
 Generation costs use conservative uncached input rates; regional/long-context premiums are excluded. See
@@ -115,10 +129,10 @@ An attack entirely beyond the 2,400-character evidence window is a known blind s
 malicious label stays in the missed-injection count, and `visible_expected` records that the bounded evidence is benign.
 Keep both labels when interpreting comparisons; a classifier cannot identify instructions it never receives.
 
-During the initial provider implementation, live evaluation was not run: `OPENAI_API_KEY` was unavailable.
-Classification error rates, provider latency, real fallback frequency, and combined billed cost remain unmeasured.
-Keep support default-off and experimental until live evidence establishes benefits without a classification regression.
-
-The normal-TUI extension attempted a bounded API-key session with full-auto disabled and ordinary permissions intact.
-The configured key was rejected because its OpenAI project was archived, before tool execution. Live Decisions dispatch,
-classification, and status cleanup therefore remain unvalidated; deterministic TUI regressions passed.
+Earlier live attempts were blocked by an unavailable key or an archived OpenAI project. On 2026-10-12, a rebuilt
+interactive Build-mode session executed one requested `printf feature_probe_ok` tool call. Its Decisions probe returned
+`SAFE` in 3,432 ms with known usage; both main Sol responses reported `ultrafast`, with one WebSocket connection.
+Two separate benign Decisions checks returned `SAFE` in 3,532 and 733 ms using the same HTTP client.
+These bounded smoke checks establish dispatch and transport behavior, not classification accuracy or cost savings.
+Classification error rates, real fallback frequency, and a billed cost comparison remain unmeasured. Keep support
+default-off and experimental until labeled live evidence establishes benefits without a classification regression.

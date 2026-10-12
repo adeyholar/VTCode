@@ -139,12 +139,16 @@ pub(crate) fn is_responses_api_unsupported(status: StatusCode, body: &str) -> bo
     let lower = body.to_ascii_lowercase();
 
     (status == StatusCode::NOT_FOUND && lower.trim().is_empty())
-        || lower.contains("not enabled for the responses api")
-        || lower.contains("responses api") && (lower.contains("unsupported") || lower.contains("not supported"))
-        || lower.contains("invalid api parameter")
-        || lower.contains("unsupported parameter")
-        || lower.contains("1210")
-        || lower.contains("invalid_request_error")
+        || [
+            "not enabled for the responses api",
+            "responses api is unsupported",
+            "responses api is not supported",
+            "responses api not supported",
+            "unsupported responses api",
+            "does not support the responses api",
+        ]
+        .iter()
+        .any(|message| lower.contains(message))
 }
 
 /// Detect if an OpenAI API error indicates the sent `service_tier` was
@@ -207,6 +211,30 @@ mod tests {
             "This endpoint is not enabled for the Responses API"
         ));
         assert!(!is_responses_api_unsupported(StatusCode::NOT_FOUND, "model_not_found"));
+        assert!(!is_responses_api_unsupported(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"Unknown parameter: 'output_types'.","type":"invalid_request_error","code":"unknown_parameter","param":"output_types"}}"#,
+        ));
+    }
+
+    #[test]
+    fn responses_api_parameter_errors_do_not_disable_the_endpoint() {
+        for body in [
+            r#"{"error":{"message":"Unsupported parameter: 'max_output_tokens'.","type":"invalid_request_error","param":"max_output_tokens"}}"#,
+            "Invalid API parameter: reasoning.effort",
+            "Responses API rejected an unsupported parameter: reasoning.effort",
+            r#"{"error":{"code":"1210","message":"Invalid request parameter"}}"#,
+        ] {
+            assert!(!is_responses_api_unsupported(StatusCode::BAD_REQUEST, body), "body: {body}");
+        }
+        for body in [
+            "Responses API is unsupported",
+            "Responses API is not supported on this endpoint",
+            "Responses API not supported by this endpoint",
+            "Unsupported Responses API endpoint",
+        ] {
+            assert!(is_responses_api_unsupported(StatusCode::BAD_REQUEST, body));
+        }
     }
 
     #[test]

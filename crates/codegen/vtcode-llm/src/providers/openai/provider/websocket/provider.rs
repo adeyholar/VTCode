@@ -3,7 +3,7 @@
 use super::*;
 
 use super::super::super::errors::is_flex_service_tier_unsupported;
-use super::super::super::responses_api::{build_standard_responses_payload, parse_responses_payload};
+use super::super::super::responses_api::{build_standard_responses_payload, parse_responses_completion};
 use super::super::OpenAIProvider;
 use super::super::generation::payload_uses_flex_service_tier;
 use crate::error_display;
@@ -18,7 +18,7 @@ use tokio::sync::OwnedMutexGuard;
 use tokio::time::{Instant, timeout_at};
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -93,7 +93,7 @@ impl OpenAIProvider {
                 include_cached_prompt_metrics: include_metrics,
             },
             move |value| {
-                let response = parse_responses_payload(value, parse_model.clone(), include_metrics)?;
+                let response = parse_responses_completion(value, parse_model.clone(), include_metrics)?;
                 Ok(Self::normalize_reasoning_output(&parse_model, response))
             },
         );
@@ -269,9 +269,13 @@ impl OpenAIProvider {
                 .await
                 .map_err(|_elapsed| format_network_error("OpenAI WebSocket connection timeout".to_string()))??;
             let ws_request = build_request(&api_key)?;
-            let socket = match timeout_at(connection_deadline, Box::pin(connect_async(ws_request)))
-                .await
-                .map_err(|_elapsed| websocket_deadline_error())?
+            let connector = websocket_tls_connector()?;
+            let socket = match timeout_at(
+                connection_deadline,
+                Box::pin(connect_async_tls_with_config(ws_request, None, false, Some(connector.clone()))),
+            )
+            .await
+            .map_err(|_elapsed| websocket_deadline_error())?
             {
                 Ok((socket, _)) => socket,
                 Err(err) if self.uses_chatgpt_auth() && is_websocket_auth_retryable(&err) => {
@@ -281,12 +285,15 @@ impl OpenAIProvider {
                             format_network_error("OpenAI WebSocket connection timeout".to_string())
                         })??;
                     let retry_request = build_request(&retry_api_key)?;
-                    let (socket, _) = timeout_at(connection_deadline, Box::pin(connect_async(retry_request)))
-                        .await
-                        .map_err(|_elapsed| websocket_deadline_error())?
-                        .map_err(|retry_err| {
-                            format_network_error(format!("Failed to connect OpenAI WebSocket: {retry_err}"))
-                        })?;
+                    let (socket, _) = timeout_at(
+                        connection_deadline,
+                        Box::pin(connect_async_tls_with_config(retry_request, None, false, Some(connector))),
+                    )
+                    .await
+                    .map_err(|_elapsed| websocket_deadline_error())?
+                    .map_err(|retry_err| {
+                        format_network_error(format!("Failed to connect OpenAI WebSocket: {retry_err}"))
+                    })?;
                     socket
                 }
                 Err(err) => {
@@ -294,6 +301,7 @@ impl OpenAIProvider {
                 }
             };
             *session_guard = Some(OpenAIResponsesWebSocketSession::new(socket));
+            tracing::info!(transport = "websocket", "OpenAI Responses connection established");
         }
 
         session_guard

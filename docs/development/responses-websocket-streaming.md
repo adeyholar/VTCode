@@ -5,6 +5,19 @@ both normalized and legacy streaming APIs on eligible native OpenAI and compatib
 The option defaults to `false`; unsupported backends retain HTTP transport. WebSocket events always use
 `store = false`.
 
+TLS connections explicitly select Rustls's Ring crypto provider and the bundled WebPKI trust roots.
+This avoids a startup panic when other dependencies enable both Ring and AWS-LC; certificate and
+hostname verification remain enabled, and TLS failures use the normal transport error path.
+With tracing enabled at `info`, connection establishment and the completed response's recognized
+server-reported `service_tier` are recorded without prompt text or credentials. The configured tier
+in the TUI expresses the requested tier; the response log provides evidence of the tier actually served.
+Completion logging happens once at the transport parsing boundary; rebuilding continuation history emits no
+additional completion records.
+Native API requests omit the unsupported `output_types` extension. A generic `invalid_request_error`
+or parameter rejection (including a generic vendor error code) does not prove that Responses is unavailable.
+These errors must retain their original diagnostic and leave the model's route eligible instead of
+downgrading to Chat Completions. WebSocket startup failures are visible at warning level.
+
 ## Lifecycle and cancellation
 
 One response lane serializes generation and streaming on the connection. A lease removes the socket and
@@ -23,6 +36,10 @@ EOF, deadline expiry, cancellation, or early stream drop invalidate the socket a
 The lease stays active through final usage delivery until `Done` is delivered; dropping between those events
 invalidates the connection even when the server has already completed.
 Dropping a future while it waits for the lane leaves the active response alone.
+
+Independent tool-output probe generation uses `LLMProvider::generate_auxiliary` over HTTP, including HTTP SSE
+for streaming-required models. It never leases the main WebSocket or replaces its response ID. Auxiliary completion,
+failure, and cancellation therefore preserve the socket and continuation needed for the next tool result.
 
 Connections have a 30-second timeout. Each WebSocket request has one deadline from
 `timeouts.streaming_ceiling_seconds`, including lane acquisition, connection, warmup, and generation; a zero

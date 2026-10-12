@@ -12,6 +12,19 @@ const WEBSOCKET_AUTH_RETRY_STATUSES: [&str; 2] = ["401", "403"];
 // connection-local state, and every websocket request still sends `store=false`.
 use crate::provider::LLMError;
 
+fn websocket_tls_connector() -> Result<tokio_tungstenite::Connector, LLMError> {
+    // Other dependencies enable both Rustls providers. Select one per connection
+    // instead of relying on ambiguous process-wide provider inference.
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let root_store = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|err| format_network_error(format!("Invalid OpenAI WebSocket TLS configuration: {err}")))?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    Ok(tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(config)))
+}
+
 fn is_websocket_active_response_error(err: &LLMError) -> bool {
     let message = match err {
         LLMError::Provider { message, .. } | LLMError::Network { message, .. } => message,

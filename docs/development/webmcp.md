@@ -261,6 +261,18 @@ The standalone `vtcode webmcp serve` adapter is intentionally headless. It serve
 `turns_available: false`, and rejects `turn.request` because it has no active agent runtime. Multiple configured roots
 are rejected until an explicit root-selection flow is wired through terminal approval.
 
+### TLS provider crash during an agent turn
+
+VT Code 0.175.7 can panic with `Could not automatically determine the process-level CryptoProvider` when
+`provider.openai.websocket_mode = true` starts an outbound model connection. The same connection code and dependency
+versions are present in 0.175.6. This is a model transport defect; changing WebMCP origins, pairing, or reverse-proxy
+TLS settings does not resolve it. The bridge listener itself does not terminate TLS.
+
+The source fix selects the crypto provider explicitly for each model WebSocket connection, including authentication
+retries, while retaining certificate verification. See [Responses WebSocket streaming](responses-websocket-streaming.md).
+Use a binary built with that fix. A locally rebuilt 0.175.7 binary retains the release version number, so `--version`
+alone does not establish whether it contains the fix.
+
 ## Runtime adapters
 
 `RuntimeAdapter` is the seam for an active TUI session. The active adapter routes proposals and reads through the

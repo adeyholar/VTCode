@@ -8808,6 +8808,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rig-core",
  "rustc-hash 2.1.3",
+ "rustls",
  "semver",
  "serde",
  "serde_json",
@@ -8828,6 +8829,7 @@ dependencies = [
  "vtcode-macros",
  "vtcode-safety",
  "vtcode-utility-tool-specs",
+ "webpki-roots 1.0.9",
  "which",
  "wiremock",
 ]

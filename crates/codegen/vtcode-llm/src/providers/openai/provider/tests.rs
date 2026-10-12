@@ -2074,8 +2074,7 @@ fn responses_payload_uses_hosted_shell_when_enabled() {
     assert_eq!(tool["environment"]["file_ids"][0].as_str(), Some("file_123"));
     assert_eq!(tool["environment"]["skills"][0]["type"].as_str(), Some("skill_reference"));
     assert!(tool["environment"]["skills"][0].get("version").is_none());
-    let output_types = payload["output_types"].as_array().expect("output types should be present");
-    assert!(output_types.iter().any(|v| v.as_str() == Some("shell_call")));
+    assert_absent(&payload, "output_types");
 }
 
 #[test]
@@ -3356,6 +3355,57 @@ async fn responses_requests_include_client_request_id_and_debug_metadata() {
             && text.contains("retry_after=15")
             && text.contains("type=invalid_request_error")
     );
+}
+
+#[tokio::test]
+async fn responses_parameter_rejection_preserves_route_for_generation_and_both_streaming_apis() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    for body in [
+        "Unsupported parameter: max_output_tokens",
+        "Invalid API parameter: reasoning.effort",
+        "Responses API rejected an unsupported parameter: reasoning.effort",
+        r#"{"error":{"code":"1210","message":"Invalid request parameter"}}"#,
+    ] {
+        for entrypoint in ["generation", "legacy", "normalized"] {
+            let server = MockServer::start().await;
+            let requests = Arc::new(AtomicUsize::new(0));
+            let seen = Arc::clone(&requests);
+            Mock::given(method("POST"))
+                .and(path("/responses"))
+                .respond_with(move |_: &wiremock::Request| {
+                    if seen.fetch_add(1, Ordering::Relaxed) == 0 {
+                        ResponseTemplate::new(400).set_body_string(body)
+                    } else {
+                        ResponseTemplate::new(200).set_body_json(json!({
+                            "id": "resp_after_parameter_fix",
+                            "output": [{"type": "message", "content": [{"type": "output_text", "text": "Responses still works"}]}]
+                        }))
+                    }
+                })
+                .expect(2)
+                .mount(&server)
+                .await;
+            let provider = test_provider(&server.uri(), models::openai::GPT_6_LUNA);
+            let request = provider::LLMRequest {
+                model: models::openai::GPT_6_LUNA.to_string(),
+                messages: vec![provider::Message::user("bounded fixture".into())].into(),
+                ..Default::default()
+            };
+            let error = match entrypoint {
+                "generation" => provider.generate(request.clone()).await.err(),
+                "legacy" => provider.stream(request.clone()).await.err(),
+                _ => provider.stream_normalized(request.clone()).await.err(),
+            }
+            .expect("parameter rejection must be surfaced");
+            assert!(error.to_string().contains(body), "retain the rejected parameter's diagnostic");
+            let response = provider.generate(request).await.expect("next request must still use Responses");
+            assert_eq!(response.content.as_deref(), Some("Responses still works"));
+            let recorded = server.received_requests().await.expect("recorded requests");
+            assert_eq!(recorded.len(), 2, "a parameter error must not trigger a Chat request");
+            assert!(recorded.iter().all(|request| request.url.path() == "/responses"));
+        }
+    }
 }
 
 // ─── Manual Compaction ───────────────────────────────────────────────────────

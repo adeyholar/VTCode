@@ -77,13 +77,7 @@ pub(crate) fn initialize_default_error_tracing() -> Result<()> {
 
 pub(crate) fn initialize_tracing_from_config(config: &vtcode_core::config::loader::VTCodeConfig) -> Result<()> {
     let debug_cfg = &config.debug;
-    let targets = if debug_cfg.trace_targets.is_empty() {
-        "vtcode_core,vtcode".to_string()
-    } else {
-        debug_cfg.trace_targets.join(",")
-    };
-
-    let filter_str = format!("{}={}", targets, debug_cfg.trace_level.as_str());
+    let filter_str = config_trace_filter(&debug_cfg.trace_targets, debug_cfg.trace_level.as_str());
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&filter_str));
@@ -103,12 +97,7 @@ pub(crate) fn initialize_tracing_from_config(config: &vtcode_core::config::loade
 
     match install_tracing_stack(&log_file, env_filter) {
         Ok(()) => {
-            tracing::info!(
-                "Debug tracing enabled: targets={}, level={}, log_file={}",
-                targets,
-                debug_cfg.trace_level,
-                log_file.display()
-            );
+            tracing::info!("Debug tracing enabled: filter={}, log_file={}", filter_str, log_file.display());
         }
         Err(err) => {
             tracing::warn!(
@@ -120,3 +109,19 @@ pub(crate) fn initialize_tracing_from_config(config: &vtcode_core::config::loade
 
     Ok(())
 }
+
+fn config_trace_filter(targets: &[String], level: &str) -> String {
+    let targets: Vec<&str> = if targets.is_empty() {
+        vec!["vtcode", "vtcode_core", "vtcode_llm"]
+    } else {
+        targets.iter().map(String::as_str).collect()
+    };
+    targets
+        .into_iter()
+        .map(|target| format!("{target}={level}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[cfg(test)]
+mod tests;

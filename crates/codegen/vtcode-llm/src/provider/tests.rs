@@ -28,6 +28,13 @@ async fn decisions_context_window_wrapper_forwards_capability_and_request() {
         async fn generate(&self, _: LLMRequest) -> Result<LLMResponse, LLMError> {
             panic!("generation should not run")
         }
+        async fn generate_auxiliary(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            assert_eq!(request.model, "gpt-6-luna");
+            Err(LLMError::InvalidRequest {
+                message: "auxiliary reached wrapped provider".into(),
+                metadata: None,
+            })
+        }
         fn supported_models(&self) -> Vec<String> {
             vec![]
         }
@@ -47,6 +54,13 @@ async fn decisions_context_window_wrapper_forwards_capability_and_request() {
         .await
         .unwrap();
     assert_eq!(result.answer.unwrap().choice, "SAFE");
+    let error = wrapped
+        .generate_auxiliary(LLMRequest { model: "gpt-6-luna".into(), ..Default::default() })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, LLMError::InvalidRequest { message, .. } if message == "auxiliary reached wrapped provider")
+    );
 }
 
 #[test]

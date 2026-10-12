@@ -301,7 +301,22 @@ class DecisionsProbeEvaluationTests(unittest.TestCase):
                 self.assertEqual(request[2]["model"], "gpt-6-luna")
                 self.assertEqual(request[2]["input"], "bounded evidence")
                 # Independent API-contract oracle; do not read a production constant.
-                self.assertEqual(request[2]["max_output_tokens"], 16)
+                self.assertEqual(request[2]["max_output_tokens"], 256 if decisions else 16)
+                if decisions:
+                    self.assertEqual(request[2]["reasoning"], {"effort": "low"})
+                    instructions = post.call_args_list[0].args[2]["questions"][0]["instructions"]
+                    self.assertNotIn("Respond with", instructions)
+                else:
+                    self.assertNotIn("reasoning", request[2])
+
+    def test_custom_generation_fallback_does_not_assume_reasoning_support(self):
+        with patch.object(probe, "post", return_value=None) as post:
+            probe.generation(
+                "fixture", "evidence", "custom-model", float("inf"), (1, 2), fallback=True
+            )
+        payload = post.call_args.args[2]
+        self.assertEqual(payload["max_output_tokens"], 256)
+        self.assertNotIn("reasoning", payload)
 
     def test_generation_uses_runtime_ascii_token_boundaries(self):
         for text, expected in [

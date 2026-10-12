@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use std::time::Instant;
 use vtcode_commons::model_family::find_family_for_model;
 
-use super::responses_api::parse_responses_payload;
+use super::responses_api::parse_responses_completion;
 use super::streaming::OpenAIStreamTelemetry;
 
 fn strip_reasoning_for_model(model: &str, mut response: provider::LLMResponse) -> provider::LLMResponse {
@@ -733,7 +733,7 @@ pub(crate) fn create_responses_stream(
         };
 
         let final_aggregator_response = aggregator.finalize();
-        let mut response = match parse_responses_payload(response_value.clone(), model.clone(), include_metrics) {
+        let mut response = match parse_responses_completion(response_value.clone(), model.clone(), include_metrics) {
             Ok(response) => response,
             Err(_)
                 if final_response_output_is_empty(&response_value)

@@ -24,6 +24,45 @@ fn websocket_url_is_derived_from_http_base() {
     assert_eq!(ws, "wss://api.openai.com/v1/responses");
 }
 
+#[tokio::test]
+async fn websocket_tls_startup_returns_error_without_crypto_provider_panic() {
+    use tokio::io::AsyncReadExt;
+
+    assert!(
+        rustls::crypto::CryptoProvider::get_default().is_none(),
+        "fixture must start without a global provider"
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind TLS fixture");
+    let address = listener.local_addr().expect("fixture address");
+    let server = tokio::spawn(async move {
+        for _attempt in 0..2 {
+            let (mut socket, _) = listener.accept().await.expect("accept TLS connection");
+            let mut record_type = [0];
+            socket.read_exact(&mut record_type).await.expect("read TLS ClientHello");
+            assert_eq!(record_type[0], 0x16, "client must initiate TLS, never plaintext HTTP");
+            // Close during TLS negotiation; production must surface a network error.
+        }
+    });
+    let provider = websocket_test_provider(format!("https://{address}/v1"));
+    let mut session = None;
+    let request = websocket_test_request();
+    for _attempt in 0..2 {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            provider.ensure_websocket_session(&mut session, &request),
+        )
+        .await
+        .expect("TLS startup must terminate");
+        assert!(matches!(result, Err(LLMError::Network { .. })));
+        assert!(session.is_none(), "failed TLS connection must not be retained");
+        assert!(
+            rustls::crypto::CryptoProvider::get_default().is_none(),
+            "connection must select its provider without changing process-wide TLS policy"
+        );
+    }
+    server.await.expect("TLS fixture task");
+}
+
 #[test]
 fn websocket_beta_header_prefers_v2_protocol() {
     assert_eq!(OPENAI_BETA_RESPONSES_WEBSOCKET_V2, "responses=v2");
@@ -399,6 +438,117 @@ fn websocket_cache_does_not_affect_normal_http_sse_payload() {
     assert_eq!(payload.get("store").and_then(Value::as_bool), Some(false));
 }
 
+#[tokio::test]
+async fn websocket_completion_tier_is_logged_once_without_replay_or_unrecognized_tier_records() {
+    use crate::provider::NormalizedStreamEvent;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tracing::instrument::WithSubscriber;
+    use tracing::{Event, Metadata, Subscriber, span};
+
+    struct TierRecorder(Arc<AtomicUsize>);
+
+    impl Subscriber for TierRecorder {
+        fn enabled(&self, _: &Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
+            span::Id::from_u64(1)
+        }
+        fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+        fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+        fn event(&self, event: &Event<'_>) {
+            if event.metadata().fields().field("service_tier").is_some() {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        fn enter(&self, _: &span::Id) {}
+        fn exit(&self, _: &span::Id) {}
+    }
+
+    let records = Arc::new(AtomicUsize::new(0));
+    tracing::subscriber::with_default(TierRecorder(Arc::clone(&records)), || {
+        for (tier, expected_records) in [("ultrafast", 1), ("untrusted\nfixture-tier", 1), ("priority", 2)] {
+            let completion = json!({
+                "id": "resp_tier_evidence",
+                "service_tier": tier,
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "primary answer"}]}]
+            });
+            let response = super::super::super::responses_api::parse_responses_completion(
+                completion.clone(),
+                "gpt-5.6".into(),
+                false,
+            )
+            .expect("server completion");
+            assert_eq!(response.content.as_deref(), Some("primary answer"));
+            let replay = super::completed_replay_output(&completion, "gpt-5.6").expect("canonical replay");
+            assert_eq!(replay.len(), 1);
+            assert_eq!(
+                records.load(Ordering::Relaxed),
+                expected_records,
+                "replay must not log another completion; unknown tiers must not be logged"
+            );
+        }
+    });
+
+    enum EntryPoint {
+        Generate,
+        Normalized,
+        Legacy,
+    }
+    for (index, entry_point) in [EntryPoint::Generate, EntryPoint::Normalized, EntryPoint::Legacy]
+        .into_iter()
+        .enumerate()
+    {
+        let (base_url, requests, server) =
+            spawn_scripted_websocket_server(vec![vec![ScriptedReply::Events(vec![json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_transport_tier",
+                    "service_tier": "ultrafast",
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": "transport answer"}]}]
+                }
+            })])]])
+            .await
+            .expect("WebSocket fixture");
+        let provider = websocket_test_provider(base_url);
+        let request = websocket_test_request();
+        seed_connected_continuation_cache(&provider, &request, "resp_seed", false).await;
+        let completion = async {
+            match entry_point {
+                EntryPoint::Generate => provider.generate(request).await.expect("generation"),
+                EntryPoint::Normalized => {
+                    let mut stream = provider.stream_normalized(request).await.expect("normalized stream");
+                    loop {
+                        if let NormalizedStreamEvent::Done { response } =
+                            stream.next().await.expect("event").expect("valid event")
+                        {
+                            break *response;
+                        }
+                    }
+                }
+                EntryPoint::Legacy => {
+                    let mut stream = provider.stream(request).await.expect("legacy stream");
+                    loop {
+                        if let crate::provider::LLMStreamEvent::Completed { response } =
+                            stream.next().await.expect("event").expect("valid event")
+                        {
+                            break *response;
+                        }
+                    }
+                }
+            }
+        };
+        let response = tokio::time::timeout(std::time::Duration::from_secs(3), completion)
+            .with_subscriber(TierRecorder(Arc::clone(&records)))
+            .await
+            .expect("completion deadline");
+        assert_eq!(response.content.as_deref(), Some("transport answer"));
+        assert_eq!(requests.lock().expect("requests").len(), 1);
+        assert_eq!(records.load(Ordering::Relaxed), index + 3, "each entry point must record one served tier");
+        server.await.expect("server task");
+    }
+}
+
 async fn seed_connected_continuation_cache(
     provider: &OpenAIProvider,
     request: &LLMRequest,
@@ -411,6 +561,101 @@ async fn seed_connected_continuation_cache(
         .await
         .expect("seed connection");
     seed_continuation_cache(provider, request, response_id, store);
+}
+
+#[tokio::test]
+async fn websocket_auxiliary_http_success_and_timeout_preserve_primary_continuation() {
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+    for auxiliary_model in ["gpt-6-luna", "gpt-5.6-luna"] {
+        for cancelled in [false, true] {
+            let (base_url, recorded, handle) = spawn_scripted_websocket_server(vec![vec![ScriptedReply::Completed {
+                response_id: "resp_followup",
+                text: "primary continued",
+            }]])
+            .await
+            .expect("WebSocket fixture");
+            let server = MockServer::start().await;
+            let completed = json!({
+                "id": "resp_auxiliary", "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "SAFE"}]}]
+            });
+            let response = if auxiliary_model == "gpt-5.6-luna" {
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(format!(
+                        "data: {}\n\n",
+                        json!({"type":"response.completed", "response":completed})
+                    ))
+            } else {
+                ResponseTemplate::new(200).set_body_json(completed)
+            };
+            let response = if cancelled {
+                response.set_delay(std::time::Duration::from_secs(1))
+            } else {
+                response
+            };
+            Mock::given(method("POST"))
+                .and(path("/responses"))
+                .respond_with(response)
+                .expect(1)
+                .mount(&server)
+                .await;
+            let mut provider = websocket_test_provider(base_url);
+            provider.responses_url = format!("{}/responses", server.uri()).into();
+            provider.service_tier = Some(vtcode_config::OpenAIServiceTier::Ultrafast);
+            let primary = LLMRequest {
+                model: "gpt-6.1-sol".into(),
+                ..websocket_test_request()
+            };
+            seed_connected_continuation_cache(&provider, &primary, "resp_primary", false).await;
+            let cached = provider.websocket_continuation_snapshot().expect("primary continuation");
+            let auxiliary = LLMRequest {
+                model: auxiliary_model.into(),
+                messages: vec![ProviderMessage::user("independent probe".into())].into(),
+                max_tokens: Some(256),
+                ..Default::default()
+            };
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_millis(if cancelled { 100 } else { 3000 }),
+                provider.generate_auxiliary(auxiliary),
+            )
+            .await;
+            if cancelled {
+                assert!(outcome.is_err());
+            } else {
+                assert_eq!(
+                    outcome.expect("auxiliary deadline").expect("HTTP auxiliary").content.as_deref(),
+                    Some("SAFE")
+                );
+            }
+            assert_eq!(provider.websocket_continuation_snapshot(), Some(cached));
+            assert!(provider.websocket_session.lock().await.is_some());
+            let followup = LLMRequest {
+                messages: vec![
+                    ProviderMessage::user("hello".into()),
+                    ProviderMessage::user("new primary input".into()),
+                ]
+                .into(),
+                ..primary
+            };
+            let result = tokio::time::timeout(std::time::Duration::from_secs(3), provider.generate(followup))
+                .await
+                .expect("primary deadline")
+                .expect("primary response");
+            assert_eq!(result.content.as_deref(), Some("primary continued"));
+            {
+                let events = recorded.lock().expect("recorded events");
+                assert_eq!(events.len(), 1, "auxiliary must not enter the primary WebSocket or force a warmup");
+                assert_eq!(events[0]["previous_response_id"], "resp_primary");
+                assert_eq!(events[0]["service_tier"], "ultrafast");
+                assert_eq!(events[0]["input"].as_array().expect("incremental input").len(), 1);
+            }
+            handle.await.expect("fixture task");
+        }
+    }
 }
 
 #[tokio::test]

@@ -1,4 +1,3 @@
-<!-- Compact maintainer rules retain the repository instruction line budget. -->
 <!-- markdownlint-disable MD013 -->
 # vtcode-llm
 
@@ -18,7 +17,8 @@
 
 ## Coding Conventions
 
-Responses WebSocket generation and both streaming APIs share one leased socket lane; restore only after validated completion is delivered, not at the preceding usage event. Startup failures use HTTP once; after exposed output, fail without replay. Legacy startup must pass through discarded tool deltas before selecting fallback. Apply model reasoning policy after legacy final assembly and before constructing continuation replay output. A failed tier-less HTTP retry must retain the caller's transport fallback classification. See [lifecycle guide](../../../docs/development/responses-websocket-streaming.md).
+Independent `generate_auxiliary` calls use HTTP without leasing the primary WebSocket or changing its continuation; wrappers must forward the override. Responses WebSocket generation and both streaming APIs share one leased socket lane; restore only after validated completion is delivered, not at the preceding usage event. Startup failures use HTTP once; after exposed output, fail without replay. Legacy startup must pass through discarded tool deltas before selecting fallback. Apply model reasoning policy after legacy final assembly and before constructing continuation replay output. A failed tier-less HTTP retry must retain the caller's transport fallback classification. Only explicit endpoint unavailability may disable Responses; parameter rejections retain their route and diagnostic. See [lifecycle guide](../../../docs/development/responses-websocket-streaming.md).
+WebSocket TLS must use an explicit per-connection Rustls crypto provider: dependency features enable both Ring and AWS-LC, so automatic provider inference can panic. Preserve bundled trust roots and certificate verification. Record served-tier evidence at completion boundaries, never while rebuilding continuation replay.
 Providers in `providers/<name>/mod.rs`. Use `anyhow::Result`, `tracing`, not `println!`. Provider-specific types stay local; shared go in `types.rs` or `provider/`. Keep provider helper import paths stable through the common/shared facades; cross-module implementation helpers use `pub(super)` rather than public exports. OpenResponses streaming wire parsing dispatches by `type`; keep hot SSE fields borrowed and update the wire fields and mapping together when adding events.
 Native Responses `allowed_tools` uses object references derived from the serialized catalogue (type plus name or MCP server label), never bare tool-name strings. `providers/openai/request_builder.rs` owns the native Responses 16-token minimum, including auxiliary requests.
 

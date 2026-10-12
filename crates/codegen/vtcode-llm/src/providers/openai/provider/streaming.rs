@@ -3,7 +3,7 @@ use super::super::errors::{
     fallback_model_if_not_found, format_openai_error, is_model_not_found, is_responses_api_unsupported,
 };
 use super::super::headers;
-use super::super::responses_api::parse_responses_payload;
+use super::super::responses_api::parse_responses_completion;
 use super::super::stream_decoder;
 use super::super::types::ResponsesApiState;
 use super::OpenAIProvider;
@@ -72,7 +72,7 @@ impl OpenAIProvider {
         if self.websocket_mode_enabled(&request.model) {
             match self.stream_via_responses_websocket(&request, false).await {
                 Ok(stream) => return Ok(stream),
-                Err(err) => tracing::debug!(error = %err, "OpenAI WebSocket startup failed; using HTTP SSE"),
+                Err(err) => tracing::warn!(error = %err, "OpenAI WebSocket startup failed; using HTTP SSE"),
             }
         }
 
@@ -133,7 +133,15 @@ impl OpenAIProvider {
 
     pub(crate) async fn stream_request(
         &self,
+        request: provider::LLMRequest,
+    ) -> Result<provider::LLMStream, provider::LLMError> {
+        self.stream_request_with_websocket(request, true).await
+    }
+
+    pub(super) async fn stream_request_with_websocket(
+        &self,
         mut request: provider::LLMRequest,
+        use_websocket: bool,
     ) -> Result<provider::LLMStream, provider::LLMError> {
         crate::providers::common::ensure_model(&mut request, &self.model);
         if !self.supports_parallel_tool_config(&request.model) {
@@ -148,10 +156,10 @@ impl OpenAIProvider {
             return self.stream_chat_completions(&request).await;
         }
 
-        if self.websocket_mode_enabled(&request.model) {
+        if use_websocket && self.websocket_mode_enabled(&request.model) {
             match self.stream_legacy_via_responses_websocket(&request).await {
                 Ok(stream) => return Ok(stream),
-                Err(err) => tracing::debug!(error = %err, "OpenAI WebSocket startup failed; using HTTP SSE"),
+                Err(err) => tracing::warn!(error = %err, "OpenAI WebSocket startup failed; using HTTP SSE"),
             }
         }
 
@@ -250,7 +258,7 @@ impl OpenAIProvider {
                 include_cached_prompt_metrics: include_metrics,
             },
             move |value| {
-                let response = parse_responses_payload(value, parse_model.clone(), include_metrics)?;
+                let response = parse_responses_completion(value, parse_model.clone(), include_metrics)?;
                 Ok(Self::normalize_reasoning_output(&parse_model, response))
             },
         )

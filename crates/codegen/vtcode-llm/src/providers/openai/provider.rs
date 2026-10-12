@@ -39,7 +39,7 @@ use super::backend_setup::{OpenAIBackendSetup, OpenAIRequestAuth};
 use super::harmony;
 use super::request_builder;
 use super::response_parser;
-use super::responses_api::parse_responses_payload;
+use super::responses_api::parse_responses_completion;
 use super::types::{MAX_COMPLETION_TOKENS_FIELD, OpenAIResponsesPayload, ResponsesApiState};
 
 mod decisions;
@@ -732,7 +732,7 @@ impl OpenAIProvider {
             supports_reasoning: self.supports_reasoning(&request.model),
             is_responses_api_model: Self::is_responses_api_model(&request.model),
             include_max_output_tokens: is_native_openai,
-            include_output_types: backend_defaults.include_output_types,
+            include_output_types: !is_native_openai && backend_defaults.include_output_types,
             include_sampling_parameters: backend_defaults.include_sampling_parameters,
             force_response_store_false: true,
             include_assistant_phase: is_native_openai,
@@ -773,7 +773,7 @@ impl OpenAIProvider {
         model: String,
     ) -> Result<provider::LLMResponse, provider::LLMError> {
         let include_metrics = self.prompt_cache_enabled && self.prompt_cache_settings.surface_metrics;
-        let response = parse_responses_payload(response_json, model.clone(), include_metrics)?;
+        let response = parse_responses_completion(response_json, model.clone(), include_metrics)?;
         Ok(Self::normalize_reasoning_output(&model, response))
     }
 }

@@ -387,6 +387,12 @@ pub trait LLMProvider: Send + Sync {
     /// Generate completion
     async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError>;
 
+    /// Generate an independent auxiliary result without replacing the primary
+    /// conversation's transport state. Stateless providers can use `generate`.
+    async fn generate_auxiliary(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+        self.generate(request).await
+    }
+
     /// Stream completion (optional)
     async fn stream(&self, request: LLMRequest) -> Result<LLMStream, LLMError> {
         // Default implementation falls back to non-streaming
@@ -580,6 +586,10 @@ impl LLMProvider for ContextWindowProvider {
 
     async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
         self.inner.generate(request).await
+    }
+
+    async fn generate_auxiliary(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+        self.inner.generate_auxiliary(request).await
     }
 
     async fn stream(&self, request: LLMRequest) -> Result<LLMStream, LLMError> {

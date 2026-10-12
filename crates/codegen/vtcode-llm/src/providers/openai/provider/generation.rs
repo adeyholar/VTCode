@@ -59,14 +59,14 @@ fn is_ultrafast_service_tier(value: &str) -> bool {
 }
 
 /// Shared tier-rejection warn so Responses and Chat Completions stay in sync.
-/// Ultrafast carries extra access guidance (GA vs preview, residency).
+/// Ultrafast carries guidance for checking the requested model and project.
 pub(super) fn log_service_tier_rejection(api: &str, model: &str, client_request_id: &str, tier: &str) {
     if is_ultrafast_service_tier(tier) {
         tracing::warn!(
             model = %model,
             client_request_id = %client_request_id,
             tier = %tier,
-            "OpenAI {api} request rejected service_tier=ultrafast; retrying without it (ultrafast is GA for gpt-6-astra/gpt-6.1-sol, preview-only for gpt-5.6-sol — contact your OpenAI account team for access; Astra US/global only, 6.1-sol US/EU/global)"
+            "OpenAI {api} request rejected service_tier=ultrafast; retrying without it (check the requested model, project settings, and organization limits; ultrafast is broadly available for gpt-6-astra/gpt-6.1-sol)"
         );
     } else {
         tracing::warn!(
@@ -127,8 +127,7 @@ async fn collect_streamed_response(stream: provider::LLMStream) -> Result<provid
 }
 
 impl OpenAIProvider {
-    /// Check if `service_tier=flex` is known to be unsupported for this model.
-    /// Returns `true` if the model was previously rejected with flex tier.
+    /// Check whether a service tier was previously rejected for this model.
     fn is_flex_unsupported_for_model(&self, model: &str) -> bool {
         self.service_tier_unsupported_cache
             .lock()
@@ -138,14 +137,14 @@ impl OpenAIProvider {
             .unwrap_or(false)
     }
 
-    /// Mark `service_tier=flex` as unsupported for this model so future
-    /// requests skip it entirely, avoiding the wasted first request + retry.
+    /// Cache a model's service-tier rejection so future requests omit the tier,
+    /// avoiding the wasted first request and retry.
     pub(super) fn mark_flex_unsupported_for_model(&self, model: &str) {
         self.service_tier_unsupported_cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(model.to_string(), true);
-        tracing::info!(model = %model, "cached service_tier=flex unsupported for model");
+        tracing::info!(model = %model, "cached service tier rejection for model");
     }
 
     /// Strip `service_tier` from the payload if it was previously rejected
@@ -156,7 +155,7 @@ impl OpenAIProvider {
         if self.is_flex_unsupported_for_model(model) && payload_uses_flex_service_tier(payload) {
             tracing::debug!(
                 model = %model,
-                "skipping service_tier=flex (previously unsupported)"
+                "omitting service tier previously rejected for model"
             );
             Cow::Owned(payload_without_service_tier(payload))
         } else {
@@ -331,6 +330,14 @@ impl OpenAIProvider {
         &self,
         request: provider::LLMRequest,
     ) -> Result<provider::LLMResponse, provider::LLMError> {
+        self.generate_request_with_websocket(request, true).await
+    }
+
+    pub(super) async fn generate_request_with_websocket(
+        &self,
+        request: provider::LLMRequest,
+        use_websocket: bool,
+    ) -> Result<provider::LLMResponse, provider::LLMError> {
         let mut request = request;
 
         crate::providers::common::ensure_model(&mut request, &self.model);
@@ -344,7 +351,7 @@ impl OpenAIProvider {
         // mirroring `collect_single_response` behavior.
         if self.is_chatgpt_backend() || Self::requires_streaming_responses(&request.model) {
             request.stream = true;
-            let stream = self.stream_request(request).await?;
+            let stream = self.stream_request_with_websocket(request, use_websocket).await?;
             return collect_streamed_response(stream).await;
         }
 
@@ -362,7 +369,7 @@ impl OpenAIProvider {
         let responses_state = self.responses_api_state(&request.model);
         let attempt_responses = should_attempt_responses_api(responses_state);
         if attempt_responses {
-            if self.websocket_mode_enabled(&request.model) {
+            if use_websocket && self.websocket_mode_enabled(&request.model) {
                 if let Ok(response) = self.generate_via_responses_websocket(&request).await {
                     return Ok(response);
                 }

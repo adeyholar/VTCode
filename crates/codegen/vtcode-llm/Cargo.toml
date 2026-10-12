@@ -26,6 +26,7 @@ openai-harmony = "0.0.8"
 once_cell = { workspace = true }
 parking_lot = "0.12"
 reqwest = { workspace = true, features = ["http2"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rig = { workspace = true }
 rustc-hash = { workspace = true }
 semver = { workspace = true }
@@ -48,6 +49,7 @@ vtcode-utility-tool-specs = { workspace = true }
 anstyle = { workspace = true }
 lru = "0.18"
 which = "8.0.2"
+webpki-roots = "1.0"
 shell-words = { workspace = true }
 regex = { workspace = true }
 dirs = { workspace = true }

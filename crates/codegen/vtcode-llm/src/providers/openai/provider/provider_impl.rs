@@ -139,6 +139,13 @@ impl provider::LLMProvider for OpenAIProvider {
         self.generate_request(request).await
     }
 
+    async fn generate_auxiliary(
+        &self,
+        request: provider::LLMRequest,
+    ) -> Result<provider::LLMResponse, provider::LLMError> {
+        self.generate_request_with_websocket(request, false).await
+    }
+
     async fn compact_history(
         &self,
         model: &str,
