@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.176.0 - 2026-10-12
+
+### Highlights
+#### Features
+
+- Add Muse Wonder 1.0 and Wonder Full 1.0 models to Meta AI provider (af050104) 
+### Other Changes
 ## 0.175.8 - 2026-10-12
 
 ### Highlights
