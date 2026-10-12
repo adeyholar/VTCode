@@ -2,6 +2,16 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.175.8 - 2026-10-12
+
+### Highlights
+#### Documentation
+
+- Add optional Sem code discovery (4622eee7) (@rs545837)
+### Other Changes
+#### Other
+
+- Update README (a711da14) 
 ## 0.175.7 - 2026-10-12
 
 ### Highlights
