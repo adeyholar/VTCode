@@ -5,19 +5,10 @@ All notable changes to vtcode will be documented in this file.
 ## 0.175.7 - 2026-10-12
 
 ### Highlights
-
-*No highlighted changes*
-
 ### Other Changes
-
 #### Other
 
-- Update docs (2bae0f57b) (@vinhnx)
-
-### Contributors
-
-@vinhnx
-
+- Update docs (2bae0f57) (@vinhnx)
 ## 0.175.6 - 2026-10-11
 
 ### Highlights
