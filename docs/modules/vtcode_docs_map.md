@@ -689,6 +689,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Security Guide?", "How does Overview work?", "How does Security
     Architecture work?"
 
+- **File**: `docs/guides/sem-mcp.md`
+  - **Content**: Sem local code discovery
+  - **Topics**: Setup, Try a bounded review, Execution and privacy, Troubleshooting and removal
+  - **User Questions**: "What can you tell me about Sem local code discovery?", "How does Setup work?", "How does Try a
+    bounded review work?"
+
 - **File**: `docs/guides/tui-library.md`
   - **Content**: TUI Library Guide
   - **Topics**: What It Provides, Current Architecture, Usage, Host Traits
