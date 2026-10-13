@@ -1,3 +1,4 @@
+use crate::tui::utils::transcript::trim_transcript_token_bounds;
 use std::borrow::Cow;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -948,52 +949,6 @@ fn build_transcript_link_match(
         .or_else(|| resolve_transcript_file_target(candidate, workspace_root).map(TranscriptLinkTarget::File))?;
 
     Some(DetectedLinkMatch { start, end, target })
-}
-
-fn trim_transcript_token_bounds(token: &str) -> (usize, usize) {
-    let mut start = 0usize;
-    let mut end = token.len();
-
-    while start < end {
-        let Some(ch) = token[start..end].chars().next() else {
-            break;
-        };
-        if matches!(ch, '(' | '[' | '{' | '<' | '"' | '\'' | '`') {
-            start += ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    while start < end {
-        let Some(ch) = token[start..end].chars().next_back() else {
-            break;
-        };
-        if matches!(ch, ')' | ']' | '}' | '>' | '"' | '\'' | '`' | ',' | ';' | '.' | '!' | '?') {
-            // Preserve trailing ')' when it looks like a location suffix e.g. file.rs(10,5)
-            if ch == ')' && location_paren_suffix_start(&token[start..end]).is_some() {
-                break;
-            }
-            end -= ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    (start, end)
-}
-
-/// Return the byte offset of a trailing parenthesized location suffix like `(10)` or `(10,5)`.
-fn location_paren_suffix_start(token: &str) -> Option<usize> {
-    let paren_start = token.rfind('(')?;
-    let inner = token[paren_start + 1..].strip_suffix(')')?;
-    // Accept `(digits)` or `(digits,digits)` — reject empty or malformed like `(,)` `(10,,5)`
-    let valid = !inner.is_empty()
-        && !inner.starts_with(',')
-        && !inner.ends_with(',')
-        && !inner.contains(",,")
-        && inner.chars().all(|c| c.is_ascii_digit() || c == ',');
-    valid.then_some(paren_start)
 }
 
 fn resolve_transcript_file_target(token: &str, workspace_root: Option<&Path>) -> Option<EditorTarget> {

@@ -1069,62 +1069,19 @@ pub fn inject_latest_memory_envelope(workspace_root: &Path, session_id: &str, hi
 }
 
 pub fn write_memory_envelope_to_path(path: &Path, envelope: &SessionMemoryEnvelope) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create memory envelope directory {}", parent.display()))?;
-    }
-    let serialized = serde_json::to_string_pretty(envelope)?;
-    let temporary_path = memory_envelope_temporary_path(path);
-    fs::write(&temporary_path, serialized).with_context(|| format!("write memory envelope {}", path.display()))?;
-    replace_memory_envelope_file(&temporary_path, path)
-        .with_context(|| format!("replace memory envelope {}", path.display()))?;
-    Ok(())
+    let serialized = serde_json::to_vec_pretty(envelope).context("serialize memory envelope")?;
+    vtcode_commons::VtCodePaths::write_private_file_atomic(path, &serialized)
+        .with_context(|| format!("write memory envelope {}", path.display()))
 }
 
-/// Atomically replace an envelope from an async context. The temporary file is
-/// created beside the destination so rename remains atomic on the same volume.
+/// Write an envelope through the shared private-file policy on a blocking worker.
+/// The synced, exclusive temporary file is created beside the destination and
+/// renamed over it without first removing the last committed envelope.
 pub async fn write_memory_envelope_to_path_async(path: &Path, envelope: &SessionMemoryEnvelope) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        async_fs::create_dir_all(parent)
-            .await
-            .with_context(|| format!("create memory envelope directory {}", parent.display()))?;
-    }
-    let serialized = serde_json::to_string_pretty(envelope)?;
-    let temporary_path = memory_envelope_temporary_path(path);
-    async_fs::write(&temporary_path, serialized)
+    let serialized = serde_json::to_vec_pretty(envelope).context("serialize memory envelope")?;
+    vtcode_commons::fs::write_private_file_atomic(path, &serialized)
         .await
-        .with_context(|| format!("write memory envelope {}", path.display()))?;
-    replace_memory_envelope_file_async(&temporary_path, path)
-        .await
-        .with_context(|| format!("replace memory envelope {}", path.display()))?;
-    Ok(())
-}
-
-fn memory_envelope_temporary_path(path: &Path) -> PathBuf {
-    let suffix = format!("{}.tmp-{}", std::process::id(), Utc::now().timestamp_nanos_opt().unwrap_or_default());
-    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("session.memory.json");
-    path.with_file_name(format!("{file_name}.{suffix}"))
-}
-
-fn replace_memory_envelope_file(temporary_path: &Path, destination: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    match fs::remove_file(destination) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-
-    fs::rename(temporary_path, destination)
-}
-
-async fn replace_memory_envelope_file_async(temporary_path: &Path, destination: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    match async_fs::remove_file(destination).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-
-    async_fs::rename(temporary_path, destination).await
+        .with_context(|| format!("write memory envelope {}", path.display()))
 }
 
 pub fn has_latest_memory_envelope(workspace_root: &Path, session_id: &str) -> bool {
@@ -1499,6 +1456,9 @@ pub fn effective_compaction_threshold(
         .map_or(DEFAULT_OUTPUT_RESERVE_TOKENS, |value| value as usize);
     effective_compaction_threshold_with_reserve(vt_cfg, provider, model, reserve)
 }
+
+#[cfg(test)]
+mod persistence_tests;
 
 #[cfg(test)]
 mod tests {

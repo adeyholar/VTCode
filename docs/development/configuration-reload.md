@@ -2,6 +2,17 @@
 
 This guide describes the implementation contract for configuration changes made while VT Code is running.
 
+## Loader and persistence ownership
+
+`vtcode-config/src/loader/manager.rs` owns layer loading, configuration precedence, repository security validation,
+legacy repository-file repair, and workspace lifecycle-hook collection. Its private `manager::persistence` module
+implements the existing `ConfigManager` save methods and sparse serialization without adding public APIs.
+
+Persistence preserves TOML comments and foreign keys, removes known defaults and explicitly cleared optional fields,
+and strips protected provider settings on repository-controlled writes. Existing files are read without following
+symlinks and published through the shared atomic private-file writer. Cache invalidation and the manager's config
+snapshot update still occur only after a successful save. Lifecycle-hook provenance stays with the loader.
+
 ## Shared reset service
 
 `vtcode_core::config::ConfigService::reset` is the single reset path for the CLI and settings palette. It resolves the

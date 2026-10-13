@@ -374,12 +374,12 @@ jobs:
           cargo nextest run --locked --config-file .github/nextest.toml
           --target x86_64-pc-windows-msvc --profile ci-windows-ui
           -p vtcode-ui -E 'test(thinking) | test(reduce_motion) | test(screen_reader) | test(tool_output_viewer) | test(queue_inputs) | test(input_navigation) | test(slash_palette) | test(events::tests)'
-      - name: Windows terminal setup and detection regressions
+      - name: Windows terminal and private-file persistence regressions
         shell: bash
         run: >-
           cargo nextest run --locked --config-file .github/nextest.toml
           --target x86_64-pc-windows-msvc --profile ci-windows-terminal
-          -p vtcode-core -p vtcode-commons -E 'test(terminal_setup) | test(terminal_detection)'
+          -p vtcode-core -p vtcode-commons -E 'test(terminal_setup) | test(terminal_detection) | test(memory_envelope::persistence_tests) | test(private_file_writer)'
 
   test:
     name: "Cargo nextest"

@@ -3,6 +3,7 @@
 //! Wraps text while keeping URLs and file paths as atomic units to preserve
 //! terminal link detection and transcript file hit-testing.
 
+use super::text_utils::trim_trailing_wrap_whitespace;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 use regex::Regex;
@@ -168,21 +169,6 @@ fn wrap_mixed_content(
     } else {
         fallback_style
     };
-
-    fn trim_trailing_wrap_whitespace(spans: &mut Vec<Span<'static>>) {
-        while let Some(last) = spans.last_mut() {
-            let trimmed_len = last.content.trim_end_matches(char::is_whitespace).len();
-            if trimmed_len == last.content.len() {
-                break;
-            }
-            if trimmed_len == 0 {
-                spans.pop();
-                continue;
-            }
-            last.content.to_mut().truncate(trimmed_len);
-            break;
-        }
-    }
 
     let ensure_prefix = |current_line: &mut Vec<Span<'static>>, current_width: &mut usize, result: &[Line<'static>]| {
         if use_continuation_prefix && current_line.is_empty() && !result.is_empty() {

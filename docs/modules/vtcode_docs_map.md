@@ -124,9 +124,10 @@ below based on the topic area.
 
 - **File**: `docs/development/configuration-reload.md`
   - **Content**: Configuration reset and live reload
-  - **Topics**: Shared reset service, Runtime reload contract, Settings palette navigation, Verification
-  - **User Questions**: "What can you tell me about Configuration reset and live reload?", "How does Shared reset
-    service work?", "How does Runtime reload contract work?"
+  - **Topics**: Loader and persistence ownership, Shared reset service, Runtime reload contract, Settings palette
+    navigation, Verification
+  - **User Questions**: "What can you tell me about Configuration reset and live reload?", "How does Loader and
+    persistence ownership work?", "How does Shared reset service work?"
 
 - **File**: `docs/development/CGP_ARCHITECTURE.md`
   - **Content**: Context-Generic Programming (CGP) in VT Code
@@ -313,8 +314,9 @@ below based on the topic area.
 
 - **File**: `docs/development/session-persistence.md`
   - **Content**: Session Event Persistence
-  - **Topics**: Audit packs
-  - **User Questions**: "What can you tell me about Session Event Persistence?", "How does Audit packs work?"
+  - **Topics**: Memory-envelope file replacement, Audit packs
+  - **User Questions**: "What can you tell me about Session Event Persistence?", "How does Memory-envelope file
+    replacement work?", "How does Audit packs work?"
 
 - **File**: `docs/development/session-orchestration-ownership.md`
   - **Content**: Session orchestration ownership

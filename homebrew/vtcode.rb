@@ -17,7 +17,7 @@ class Vtcode < Formula
   on_linux do
     if Hardware::CPU.intel?
       url "https://github.com/vinhnx/vtcode/releases/download/#{version}/vtcode-#{version}-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "ab77663ff1efd78bad21ac62a08e8ef885505ea8946895525e958d6e737207b2"
+      sha256 "89ea6fe2e88bdc9e67746dc8a1b8d6934803869425a1b9490e94c496016d89ec"
     elsif Hardware::CPU.arm?
       url "https://github.com/vinhnx/vtcode/releases/download/#{version}/vtcode-#{version}-aarch64-unknown-linux-gnu.tar.gz"
       sha256 "dc02c87e368ed81863d74bfe15e909b90514b15f6ee322f4b5e2cbfb8d86961c"

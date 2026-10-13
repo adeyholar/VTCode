@@ -5,6 +5,7 @@ use super::links::{
 use super::tables::{TableBuffer, render_table};
 use super::{LIST_INDENT_WIDTH, MarkdownLine};
 use crate::tui::ui::theme::ThemeStyles;
+use crate::tui::utils::transcript::trim_transcript_token_bounds;
 use anstyle::Style;
 use pulldown_cmark::{CodeBlockKind, HeadingLevel, Tag, TagEnd};
 use regex::Regex;
@@ -424,39 +425,6 @@ fn build_file_link_match(text: &str, token_start: usize, token_end: usize) -> Op
     Some(FileLinkMatch { start, end, target })
 }
 
-fn trim_transcript_token_bounds(token: &str) -> (usize, usize) {
-    let mut start = 0usize;
-    let mut end = token.len();
-
-    while start < end {
-        let Some(ch) = token[start..end].chars().next() else {
-            break;
-        };
-        if matches!(ch, '(' | '[' | '{' | '<' | '"' | '\'' | '`') {
-            start += ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    while start < end {
-        let Some(ch) = token[start..end].chars().next_back() else {
-            break;
-        };
-        if matches!(ch, ')' | ']' | '}' | '>' | '"' | '\'' | '`' | ',' | ';' | '.' | '!' | '?') {
-            // Preserve trailing ')' when it looks like a location suffix e.g. file.rs(10,5)
-            if ch == ')' && location_paren_suffix_start(&token[start..end]).is_some() {
-                break;
-            }
-            end -= ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    (start, end)
-}
-
 fn looks_like_markdown_path(token: &str) -> bool {
     let token = token.trim();
     if token.is_empty() {
@@ -509,18 +477,6 @@ fn looks_like_markdown_path(token: &str) -> bool {
     }
 
     false
-}
-
-fn location_paren_suffix_start(token: &str) -> Option<usize> {
-    let paren_start = token.rfind('(')?;
-    let inner = token[paren_start + 1..].strip_suffix(')')?;
-    // Accept `(digits)` or `(digits,digits)` — reject empty or malformed like `(,)` `(10,,5)`
-    let valid = !inner.is_empty()
-        && !inner.starts_with(',')
-        && !inner.ends_with(',')
-        && !inner.contains(",,")
-        && inner.chars().all(|c| c.is_ascii_digit() || c == ',');
-    valid.then_some(paren_start)
 }
 
 fn append_text_segment(segment: &str, ctx: &mut MarkdownContext<'_>, style: Style, link_target: Option<String>) {

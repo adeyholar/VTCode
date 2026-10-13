@@ -1090,6 +1090,39 @@ fn save_clears_default_absent_optional_fields_from_existing_file() {
 }
 
 #[test]
+fn save_config_rejects_malformed_existing_file_without_replacement() {
+    let workspace = assert_fs::TempDir::new().expect("workspace");
+    let path = workspace.path().join("vtcode.toml");
+    let original = "[agent\nprovider = \"openai\"\n";
+    fs::write(&path, original).expect("seed malformed config");
+    let error = ConfigManager::save_config_to_path(&path, &VTCodeConfig::default()).expect_err("reject malformed");
+    assert!(format!("{error:#}").contains("Failed to parse existing config"));
+    assert_eq!(fs::read_to_string(&path).expect("read back"), original);
+}
+
+#[cfg(unix)]
+#[test]
+fn save_config_rejects_symlink_without_modifying_destination() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = assert_fs::TempDir::new().expect("workspace");
+    let destination = workspace.path().join("outside.toml");
+    let path = workspace.path().join("vtcode.toml");
+    let original = "# protected destination\n[agent]\nprovider = \"openai\"\n";
+    fs::write(&destination, original).expect("seed destination");
+    symlink(&destination, &path).expect("create symlink");
+    let config = VTCodeConfig::default();
+    for result in [
+        ConfigManager::save_config_to_path(&path, &config),
+        ConfigManager::save_repository_config_to_path(&path, &config),
+    ] {
+        assert!(format!("{:#}", result.expect_err("reject symlink")).contains("symlink"));
+        assert_eq!(fs::read_to_string(&destination).expect("read destination"), original);
+        assert!(fs::symlink_metadata(&path).expect("link metadata").file_type().is_symlink());
+    }
+}
+
+#[test]
 #[serial]
 fn config_defaults_provider_overrides_paths_and_theme() {
     let workspace = assert_fs::TempDir::new().expect("failed to create workspace");

@@ -17,6 +17,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/common.sh"
+# Shared four-target Homebrew formula transformation.
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/homebrew-formula.sh"
 # Legacy updater compatibility bridge helpers (.tar.gz.compat raw exec assets).
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/release-assets.sh"
@@ -370,57 +373,12 @@ trigger_docs_rs_rebuild() {
 	done
 }
 
-update_homebrew_formula_file() {
-	local formula_path=$1
-	local version=$2
-	local x86_64_macos_sha=$3
-	local aarch64_macos_sha=$4
-	local aarch64_linux_sha=${5:-}
-
-	FORMULA_PATH="$formula_path" \
-		FORMULA_VERSION="$version" \
-		FORMULA_X86_64_MACOS_SHA="$x86_64_macos_sha" \
-		FORMULA_AARCH64_MACOS_SHA="$aarch64_macos_sha" \
-		FORMULA_AARCH64_LINUX_SHA="$aarch64_linux_sha" \
-		python3 <<'PYTHON_SCRIPT'
-import os
-import re
-from pathlib import Path
-
-formula_path = Path(os.environ["FORMULA_PATH"])
-version = os.environ["FORMULA_VERSION"]
-x86_64_macos_sha = os.environ["FORMULA_X86_64_MACOS_SHA"]
-aarch64_macos_sha = os.environ["FORMULA_AARCH64_MACOS_SHA"]
-aarch64_linux_sha = os.environ.get("FORMULA_AARCH64_LINUX_SHA", "")
-
-content = formula_path.read_text()
-content = re.sub(r'version\s+"[^"]*"', f'version "{version}"', content)
-content = re.sub(
-    r'(aarch64-apple-darwin\.tar\.gz"\s+sha256\s+")([^"]*)(")',
-    lambda match: f'{match.group(1)}{aarch64_macos_sha}{match.group(3)}',
-    content,
-)
-content = re.sub(
-    r'(x86_64-apple-darwin\.tar\.gz"\s+sha256\s+")([^"]*)(")',
-    lambda match: f'{match.group(1)}{x86_64_macos_sha}{match.group(3)}',
-    content,
-)
-if aarch64_linux_sha:
-    content = re.sub(
-        r'(aarch64-unknown-linux-gnu\.tar\.gz"\s+sha256\s+")([^"]*)(")',
-        lambda match: f'{match.group(1)}{aarch64_linux_sha}{match.group(3)}',
-        content,
-    )
-
-formula_path.write_text(content)
-PYTHON_SCRIPT
-}
-
 publish_homebrew_tap() {
 	local version=$1
 	local x86_64_macos_sha=${2:-}
 	local aarch64_macos_sha=${3:-}
 	local aarch64_linux_sha=${4:-}
+	local x86_64_linux_sha=${5:-}
 	local formula_path="homebrew/vtcode.rb"
 
 	# If checksums were not passed as arguments, try dist/ then GitHub release
@@ -433,9 +391,12 @@ publish_homebrew_tap() {
 	if [[ -z "$aarch64_linux_sha" ]]; then
 		aarch64_linux_sha=$(cat "dist/vtcode-$version-aarch64-unknown-linux-gnu.sha256" 2>/dev/null | awk '{print $1}' || echo "")
 	fi
+	if [[ -z "$x86_64_linux_sha" ]]; then
+		x86_64_linux_sha=$(cat "dist/vtcode-$version-x86_64-unknown-linux-gnu.sha256" 2>/dev/null | awk '{print $1}' || echo "")
+	fi
 
 	# Last resort: download .sha256 files from the GitHub release
-	if [[ -z "$x86_64_macos_sha" || -z "$aarch64_macos_sha" ]]; then
+	if [[ -z "$x86_64_macos_sha" || -z "$aarch64_macos_sha" || -z "$aarch64_linux_sha" || -z "$x86_64_linux_sha" ]]; then
 		print_info "Fetching checksums from GitHub release $version..."
 		local sha_tmp
 		sha_tmp=$(mktemp -d)
@@ -449,17 +410,20 @@ publish_homebrew_tap() {
 			if [[ -z "$aarch64_linux_sha" ]]; then
 				aarch64_linux_sha=$(cat "$sha_tmp/vtcode-$version-aarch64-unknown-linux-gnu.sha256" 2>/dev/null | awk '{print $1}' || echo "")
 			fi
+			if [[ -z "$x86_64_linux_sha" ]]; then
+				x86_64_linux_sha=$(cat "$sha_tmp/vtcode-$version-x86_64-unknown-linux-gnu.sha256" 2>/dev/null | awk '{print $1}' || echo "")
+			fi
 		fi
 		rm -rf "$sha_tmp"
 	fi
 
-	if [[ -z "$x86_64_macos_sha" || -z "$aarch64_macos_sha" ]]; then
-		print_error "Missing macOS checksums, cannot publish Homebrew tap"
+	if [[ -z "$x86_64_macos_sha" || -z "$aarch64_macos_sha" || -z "$aarch64_linux_sha" || -z "$x86_64_linux_sha" ]]; then
+		print_error "Missing Homebrew target checksums, cannot publish Homebrew tap"
 		return 1
 	fi
 
 	print_info "Updating local Homebrew formula at $formula_path..."
-	if ! update_homebrew_formula_file "$formula_path" "$version" "$x86_64_macos_sha" "$aarch64_macos_sha" "$aarch64_linux_sha"; then
+	if ! update_homebrew_formula_file "$formula_path" "$version" "$x86_64_macos_sha" "$aarch64_macos_sha" "$aarch64_linux_sha" "$x86_64_linux_sha"; then
 		print_error "Failed to update local Homebrew formula"
 		return 1
 	fi
@@ -1290,6 +1254,7 @@ main() {
 		local release_x86_sha=""
 		local release_arm_sha=""
 		local release_arm_linux_sha=""
+		local release_x86_linux_sha=""
 		if [[ -f "$binaries_dir/vtcode-$released_version-x86_64-apple-darwin.sha256" ]]; then
 			release_x86_sha=$(awk '{print $1}' "$binaries_dir/vtcode-$released_version-x86_64-apple-darwin.sha256")
 		fi
@@ -1299,6 +1264,9 @@ main() {
 		if [[ -f "$binaries_dir/vtcode-$released_version-aarch64-unknown-linux-gnu.sha256" ]]; then
 			release_arm_linux_sha=$(awk '{print $1}' "$binaries_dir/vtcode-$released_version-aarch64-unknown-linux-gnu.sha256")
 		fi
+		if [[ -f "$binaries_dir/vtcode-$released_version-x86_64-unknown-linux-gnu.sha256" ]]; then
+			release_x86_linux_sha=$(awk '{print $1}' "$binaries_dir/vtcode-$released_version-x86_64-unknown-linux-gnu.sha256")
+		fi
 
 		# Cleanup
 		rm -rf "$binaries_dir"
@@ -1307,7 +1275,7 @@ main() {
 	# 5. Publish Homebrew tap
 	if [[ "$skip_binaries" == 'false' ]]; then
 		print_info "Step 5: Publishing Homebrew formula to vinhnx/homebrew-tap..."
-		publish_homebrew_tap "$released_version" "${release_x86_sha:-}" "${release_arm_sha:-}" "${release_arm_linux_sha:-}"
+		publish_homebrew_tap "$released_version" "${release_x86_sha:-}" "${release_arm_sha:-}" "${release_arm_linux_sha:-}" "${release_x86_linux_sha:-}"
 	fi
 
 	# 6. Handle docs.rs rebuild

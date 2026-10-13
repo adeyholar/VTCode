@@ -19,6 +19,7 @@ pub use background::{
     background_record_id, build_background_subagent_command, extract_tail_lines, load_archive_preview,
     subagent_display_label,
 };
+pub(crate) use config::inline_mcp_provider;
 pub use config::{
     ResolvedAgentRuntimeView, build_child_config, compose_subagent_instructions, filter_child_tools,
     normalize_background_child_max_turns, normalize_child_max_turns, prepare_child_runtime_config,

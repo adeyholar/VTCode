@@ -8,15 +8,15 @@ use vtcode_config::constants::{defaults::DEFAULT_PRIMARY_AGENT_NAME, tools};
 use vtcode_config::core::permissions::AgentPermissionsConfig;
 use vtcode_config::core::tools::ToolPolicy;
 use vtcode_config::{
-    DiscoveredSubagents, HookGroupConfig, HooksConfig, McpProviderConfig, SubagentMcpServer, SubagentMemoryScope,
-    SubagentSource, SubagentSpec, builtin_primary_build_agent,
+    DiscoveredSubagents, HookGroupConfig, HooksConfig, SubagentMcpServer, SubagentMemoryScope, SubagentSource,
+    SubagentSpec, builtin_primary_build_agent,
 };
 
 use crate::config::{ReasoningEffortLevel, VTCodeConfig};
 use crate::llm::provider::ToolDefinition;
 use crate::permissions::{PermissionRequest, ResolvedPermissionDecision, evaluate_effective_permissions};
 use crate::prompts::PromptContext;
-use crate::subagents::ResolvedAgentRuntimeView;
+use crate::subagents::{ResolvedAgentRuntimeView, inline_mcp_provider};
 use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -434,22 +434,6 @@ fn merge_active_primary_hooks(config: &mut HooksConfig, hooks: Option<&HooksConf
 
 fn append_hook_groups(target: &mut Vec<HookGroupConfig>, source: &[HookGroupConfig]) {
     target.extend(source.iter().cloned());
-}
-
-fn inline_mcp_provider(name: &str, value: &serde_json::Value) -> Option<McpProviderConfig> {
-    let object = value.as_object()?;
-    let mut payload = serde_json::Map::with_capacity(object.len().saturating_add(1));
-    payload.insert("name".to_string(), serde_json::Value::String(name.to_string()));
-    for (key, value) in object {
-        if key == "type" {
-            continue;
-        }
-        payload.insert(key.clone(), value.clone());
-    }
-    if payload.contains_key("command") && !payload.contains_key("args") {
-        payload.insert("args".to_string(), serde_json::Value::Array(Vec::new()));
-    }
-    serde_json::from_value(serde_json::Value::Object(payload)).ok()
 }
 
 #[cfg(test)]
@@ -1025,6 +1009,10 @@ mod tests {
         assert_eq!(runtime.mcp.providers.len(), 2);
         assert_eq!(runtime.mcp.providers[0].name, "global");
         assert_eq!(runtime.mcp.providers[1].name, "local");
+        let providers = serde_json::to_value(&runtime.mcp.providers).expect("serialize providers");
+        assert_eq!(providers[0]["command"], "global-mcp");
+        assert_eq!(providers[1]["command"], "local-mcp");
+        assert_eq!(providers[1]["args"], json!([]));
     }
 
     #[test]

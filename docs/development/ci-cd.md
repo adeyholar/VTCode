@@ -20,7 +20,7 @@ The project uses several GitHub Actions workflows to ensure code quality and aut
 - **Format Check (rustfmt)**: Ensures code is properly formatted
 - **Lint Check (clippy)**: Runs comprehensive linting with `-D warnings`
 - **Test**: Runs `cargo nextest run` on Ubuntu and focused harness regressions using the same Cargo `ci` profile
-- **Windows**: Workspace compilation and Clippy, plus focused UI, input, terminal-setup, and detection regressions
+- **Windows**: Workspace compilation and Clippy, plus focused UI, input, terminal, and private-file persistence regressions
 - **Security Audit**: Workflow policy, `cargo audit`, and license-notice checks
 - **Documentation**: Markdown linting, documentation placement, and core link checks
 - **Scheduled/manual checks**: Cross-platform compilation and an advisory nightly smoke check
@@ -127,6 +127,15 @@ baseline/candidate comparisons.
 `release.sh` also runs a cold-start spot check (fresh `/tmp` copy → `--version` timing) after the macOS aarch64 build to
 catch sub-1s regressions before shipping. All build commands use `--locked` to ensure the Cargo.lock matches Cargo.toml
 so the size-optimized profiles are actually applied.
+
+Homebrew formula transformations are shared by the three release scripts through `scripts/homebrew-formula.sh`.
+All four digests (Intel/ARM macOS and Intel/ARM GNU Linux) must be present and valid before the formula version changes.
+The helper also rejects missing or duplicate formula entries before writing. Callers retain ownership of checksum
+retrieval, commits, and tap publication. Run the fixture checks without publishing:
+
+```bash
+python3 scripts/tests/test_homebrew_formula.py
+```
 
 ### 4. Coverage (`coverage.yml`)
 

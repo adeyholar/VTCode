@@ -20,6 +20,27 @@ harness are derived under `<session>/derived/`.
 Retention defaults to 50 sessions or 30 days. It operates after session closure/startup on a blocking task, preserves
 active/current sessions, skips symlinks, and removes only validated direct children of the sessions root.
 
+## Memory-envelope file replacement
+
+The compaction memory envelope is a derived continuity artifact. Its synchronous and asynchronous writers use the
+shared private-file policy: create an exclusive temporary file beside the destination, write and sync its contents,
+then rename it over the existing file. The async entry point runs filesystem work on a blocking worker. Windows uses
+the same replacement operation; the destination is never deleted first. Temporary files are cleaned after failed
+publication, and failures retain the last committed destination.
+
+Envelope writes reject symlinked destinations and unsafe parent paths, preserve the pretty-printed JSON format, and
+use private file permissions on Unix. Bare relative file names remain valid. The canonical `ThreadEvent` stream and
+session retention policy retain their existing ownership.
+
+Focused checks:
+
+```bash
+cargo nextest run --locked -p vtcode-core -p vtcode-commons -E 'test(memory_envelope) or test(private_file_writer)'
+```
+
+Windows CI includes these persistence tests, including a locked-destination failure regression. Native Windows
+execution is required to verify that platform-specific failure path; a macOS or Linux run excludes it.
+
 ## Audit packs
 
 `vtcode session-store pack <session>` produces a digest-verified snapshot of a session's store: every file (canonical

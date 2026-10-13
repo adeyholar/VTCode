@@ -10,7 +10,7 @@
 | --- | --- |
 | Design system | `design/` — color conversion, style bridging, layout, diff, panel primitives |
 | Theme registry | `theme/` — ThemeStyles, runtime state, syntax theme resolution |
-| TUI framework | `tui/` — session, widgets, runner, markdown rendering, config |
+| TUI framework | `tui/` — session, widgets, runner, markdown rendering, config; `utils/transcript.rs` shared token boundaries; `session/text_utils.rs` shared wrapping whitespace cleanup |
 | Vim editing | `vim/` — modal prompt-editing engine (crate-internal) |
 
 ## Rules

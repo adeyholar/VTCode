@@ -8,6 +8,21 @@ use unicode_width::UnicodeWidthStr;
 
 pub use vtcode_commons::ansi::strip_ansi_codes;
 
+pub(super) fn trim_trailing_wrap_whitespace(spans: &mut Vec<Span<'static>>) {
+    while let Some(last) = spans.last_mut() {
+        let trimmed_len = last.content.trim_end_matches(char::is_whitespace).len();
+        if trimmed_len == last.content.len() {
+            break;
+        }
+        if trimmed_len == 0 {
+            spans.pop();
+            continue;
+        }
+        last.content.to_mut().truncate(trimmed_len);
+        break;
+    }
+}
+
 /// Terminal display width of `text` in cells.
 ///
 /// This is `unicode-width` plus the halfwidth-voiced-sound-mark correction
@@ -175,21 +190,6 @@ fn wrap_line_internal(
         }
 
         spans.push(Span::styled(text.to_owned(), *style));
-    }
-
-    fn trim_trailing_wrap_whitespace(spans: &mut Vec<Span<'static>>) {
-        while let Some(last) = spans.last_mut() {
-            let trimmed_len = last.content.trim_end_matches(char::is_whitespace).len();
-            if trimmed_len == last.content.len() {
-                break;
-            }
-            if trimmed_len == 0 {
-                spans.pop();
-                continue;
-            }
-            last.content.to_mut().truncate(trimmed_len);
-            break;
-        }
     }
 
     let continuation_width = UnicodeWidthStr::width(continuation_prefix);
@@ -749,6 +749,25 @@ pub fn justify_plain_text(text: &str, max_width: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trailing_wrap_whitespace_keeps_unicode_and_source_style() {
+        let style = Style::default().fg(Color::Red);
+        let mut spans = vec![
+            Span::styled("日本\u{2003}".to_string(), style),
+            Span::styled(" \t".to_string(), Style::default().fg(Color::Blue)),
+        ];
+        trim_trailing_wrap_whitespace(&mut spans);
+        assert_eq!(spans, vec![Span::styled("日本".to_string(), style)]);
+        trim_trailing_wrap_whitespace(&mut spans);
+        assert_eq!(spans, vec![Span::styled("日本".to_string(), style)]);
+
+        let mut whitespace = vec![Span::raw("\u{2003}\t".to_string())];
+        trim_trailing_wrap_whitespace(&mut whitespace);
+        assert!(whitespace.is_empty());
+        trim_trailing_wrap_whitespace(&mut whitespace);
+        assert!(whitespace.is_empty());
+    }
 
     #[test]
     fn wrap_ascii_fits_single_row() {
