@@ -71,6 +71,15 @@ fn open_tty_writer() -> Option<std::fs::File> {
     OpenOptions::new().write(true).open("/dev/tty").ok()
 }
 
+/// Only alternate-screen sessions saved a cursor position at startup.
+fn emit_cursor_restore_sequence(writer: &mut impl Write, clear_alternate: bool) -> io::Result<()> {
+    if clear_alternate {
+        execute!(writer, SetCursorStyle::DefaultUserShape, Show, RestorePosition)
+    } else {
+        execute!(writer, SetCursorStyle::DefaultUserShape, Show)
+    }
+}
+
 fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
     let mut first_error: Option<io::Error> = None;
     let profile_restore = state::take_iterm2_profile_to_restore();
@@ -85,11 +94,7 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
     // never saved, so restoring would yank the cursor from the end of the
     // transcript back to the frame start and force the exit summary onto a
     // viewport-height jump (blank gap) — leave it where the TUI left it.
-    if clear_alternate {
-        if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show, RestorePosition) {
-            first_error.get_or_insert_with(|| io::Error::other(error.to_string()));
-        }
-    } else if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show) {
+    if let Err(error) = emit_cursor_restore_sequence(&mut stderr, clear_alternate) {
         first_error.get_or_insert_with(|| io::Error::other(error.to_string()));
     }
     // Clear the terminal title on the canonical stream as well: the emergency
@@ -104,11 +109,7 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
 
     if let Some(mut tty) = open_tty_writer() {
         let _ = emit_restore_sequence(&mut tty, clear_alternate);
-        if clear_alternate {
-            let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show, RestorePosition);
-        } else {
-            let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show);
-        }
+        let _ = emit_cursor_restore_sequence(&mut tty, clear_alternate);
         let _ = tty.flush();
         let _ = write!(tty, "\x1b]22;default\x07");
         let _ = write!(tty, "\x1b]0;default\x07");
@@ -324,6 +325,25 @@ fn restore_terminal_state(keep_raw_mode: bool) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn cursor_restore_keeps_inline_position_and_restores_alternate_position() {
+        for alternate in [false, true] {
+            let mut bytes = Vec::new();
+            emit_cursor_restore_sequence(&mut bytes, alternate).unwrap();
+            let text = String::from_utf8(bytes).unwrap();
+            assert!(text.contains("\x1b[0 q"), "default cursor style: {text:?}");
+            assert!(text.contains("\x1b[?25h"), "show cursor: {text:?}");
+            assert_eq!(
+                text.matches("\x1b8").count(),
+                usize::from(alternate),
+                "restore only a saved alternate-screen cursor: {text:?}"
+            );
+            if alternate {
+                assert!(text.ends_with("\x1b8"), "show cursor before restoring position: {text:?}");
+            }
+        }
+    }
 
     #[test]
     fn test_restore_terminal_no_panic_when_not_initialized() {

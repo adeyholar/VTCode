@@ -1,6 +1,6 @@
 use anstyle::{Reset, Style as AnsiStyle};
 use std::borrow::Cow;
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::time::Duration;
 use vtcode_commons::color_policy::color_output_enabled;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
@@ -208,8 +208,14 @@ fn push_row(out: &mut String, content: String) {
     out.push('\n');
 }
 
-/// Writes the postamble in one syscall so no concurrent exit path (emergency
-/// double-Ctrl+C cleanup) can interleave between rows.
+/// Emit the complete block without adding cursor movement or geometry probes.
+fn write_postamble_to(writer: &mut impl Write, postamble: &str) -> io::Result<()> {
+    writer.write_all(postamble.as_bytes())?;
+    writer.flush()
+}
+
+/// Keep the stdout lock across the complete block so exit paths cannot
+/// interleave between rows.
 fn write_postamble(postamble: &str) {
     let mut stdout = io::stdout().lock();
     // Print at the restored cursor position: the canonical restore leaves an
@@ -218,7 +224,7 @@ fn write_postamble(postamble: &str) {
     // (CUP to the last row) would scroll a viewport-height run of blanks into
     // the scrollback — the huge blank gap reported on exit — so no cursor
     // anchor belongs here.
-    if let Err(error) = stdout.write_all(postamble.as_bytes()).and_then(|()| stdout.flush()) {
+    if let Err(error) = write_postamble_to(&mut stdout, postamble) {
         tracing::warn!(%error, "failed to write the exit postamble");
     }
     // Last defense before the process exits: anything that arrived while the
@@ -744,12 +750,50 @@ mod tests {
             ..stats_test_data(Duration::from_secs(30), 1_000, 100, 0, 0, None, 0, 0)
         };
         let postamble = colored_postamble(&data);
+        let mut bytes = Vec::new();
+        write_postamble_to(&mut bytes, &postamble).unwrap();
+        assert_eq!(bytes, postamble.as_bytes(), "writer must emit the supplied block without a cursor anchor");
+        let postamble = String::from_utf8(bytes).unwrap();
 
         assert!(!postamble.contains("\x1b[r"), "scroll-region reset must not ship: {postamble:?}");
         assert!(!postamble.contains(";1H"), "viewport-bottom CUP must not ship: {postamble:?}");
         assert!(postamble.contains("Interrupted — session exited"), "notice row: {postamble:?}");
         assert!(postamble.contains("> VT Code (0.0.0)"), "title row: {postamble:?}");
         assert!(postamble.contains("Session 30s"), "stats row: {postamble:?}");
+    }
+
+    #[test]
+    fn postamble_writer_propagates_write_and_flush_errors() {
+        struct FailingWriter {
+            fail_write: bool,
+            flushed: bool,
+        }
+        impl Write for FailingWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.fail_write {
+                    Err(io::Error::from(io::ErrorKind::BrokenPipe))
+                } else {
+                    Ok(bytes.len())
+                }
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushed = true;
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            }
+        }
+        for fail_write in [false, true] {
+            let mut writer = FailingWriter { fail_write, flushed: false };
+            let error = write_postamble_to(&mut writer, "\rExit summary\n").unwrap_err();
+            assert_eq!(writer.flushed, !fail_write);
+            assert_eq!(
+                error.kind(),
+                if fail_write {
+                    io::ErrorKind::BrokenPipe
+                } else {
+                    io::ErrorKind::PermissionDenied
+                }
+            );
+        }
     }
 
     #[test]
