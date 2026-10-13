@@ -65,6 +65,49 @@ impl Session {
         self.hovered_transcript_file_link = None;
     }
 
+    fn transcript_link_styles(&self) -> TranscriptLinkStyles {
+        let link = self.styles.transcript_link_style().add_modifier(Modifier::UNDERLINED);
+        TranscriptLinkStyles { link, hovered: link.add_modifier(Modifier::BOLD) }
+    }
+
+    fn reset_transcript_link_targets(&mut self) {
+        self.transcript_file_link_targets.clear();
+        self.hovered_transcript_file_link = None;
+    }
+
+    fn store_transcript_link_targets(&mut self, targets: Vec<TranscriptFileLinkTarget>) {
+        self.transcript_file_link_targets = targets;
+        self.hovered_transcript_file_link = self.mouse_hovered_transcript_file_link_index();
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Single shared row helper keeps borrowed/visible paths in sync."
+    )]
+    fn decorate_one_transcript_row(
+        line: Line<'static>,
+        explicit_links: &[RenderedTranscriptLink],
+        row_idx: usize,
+        area: Rect,
+        workspace_root: Option<&Path>,
+        last_mouse_position: Option<(u16, u16)>,
+        detect_raw_links: bool,
+        styles: TranscriptLinkStyles,
+        targets: &mut Vec<TranscriptFileLinkTarget>,
+    ) -> Line<'static> {
+        decorate_transcript_line(
+            line,
+            explicit_links,
+            row_idx,
+            area,
+            workspace_root,
+            last_mouse_position,
+            detect_raw_links,
+            styles,
+            targets,
+        )
+    }
+
     #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn decorate_borrowed_cached_transcript_links(
         &mut self,
@@ -86,36 +129,31 @@ impl Session {
         detect_raw_links: bool,
     ) -> Vec<Line<'static>> {
         if !detect_raw_links && lines.iter().all(|line| line.explicit_links.is_empty()) {
-            self.transcript_file_link_targets.clear();
-            self.hovered_transcript_file_link = None;
+            self.reset_transcript_link_targets();
             return lines.iter().map(|line| line.line.clone()).collect();
         }
 
+        let styles = self.transcript_link_styles();
         let workspace_root = self.workspace_root.as_deref();
-        let link_style = self.styles.transcript_link_style().add_modifier(Modifier::UNDERLINED);
-        let styles = TranscriptLinkStyles {
-            link: link_style,
-            hovered: link_style.add_modifier(Modifier::BOLD),
-        };
+        let last_mouse_position = self.last_mouse_position;
         let mut targets = Vec::new();
         let mut decorated = Vec::with_capacity(lines.len());
 
         for (row_idx, transcript_line) in lines.iter().enumerate() {
-            decorated.push(decorate_transcript_line(
+            decorated.push(Self::decorate_one_transcript_row(
                 transcript_line.line.clone(),
                 &transcript_line.explicit_links,
                 row_idx,
                 area,
                 workspace_root,
-                self.last_mouse_position,
+                last_mouse_position,
                 detect_raw_links,
                 styles,
                 &mut targets,
             ));
         }
 
-        self.transcript_file_link_targets = targets;
-        self.hovered_transcript_file_link = self.mouse_hovered_transcript_file_link_index();
+        self.store_transcript_link_targets(targets);
 
         decorated
     }
@@ -144,37 +182,32 @@ impl Session {
         detect_raw_links: bool,
     ) -> Vec<Line<'static>> {
         if !detect_raw_links && lines.iter().all(|line| line.explicit_links.is_empty()) {
-            self.transcript_file_link_targets.clear();
-            self.hovered_transcript_file_link = None;
+            self.reset_transcript_link_targets();
             return lines.into_iter().map(|line| line.line).collect();
         }
 
+        let styles = self.transcript_link_styles();
         let workspace_root = self.workspace_root.as_deref();
-        let link_style = self.styles.transcript_link_style().add_modifier(Modifier::UNDERLINED);
-        let styles = TranscriptLinkStyles {
-            link: link_style,
-            hovered: link_style.add_modifier(Modifier::BOLD),
-        };
+        let last_mouse_position = self.last_mouse_position;
         let mut targets = Vec::new();
         let mut decorated = Vec::with_capacity(lines.len());
 
         for (row_idx, transcript_line) in lines.into_iter().enumerate() {
             let TranscriptLine { line, explicit_links } = transcript_line;
-            decorated.push(decorate_transcript_line(
+            decorated.push(Self::decorate_one_transcript_row(
                 line,
                 &explicit_links,
                 row_idx,
                 area,
                 workspace_root,
-                self.last_mouse_position,
+                last_mouse_position,
                 detect_raw_links,
                 styles,
                 &mut targets,
             ));
         }
 
-        self.transcript_file_link_targets = targets;
-        self.hovered_transcript_file_link = self.mouse_hovered_transcript_file_link_index();
+        self.store_transcript_link_targets(targets);
 
         decorated
     }
@@ -1108,6 +1141,72 @@ mod tests {
 
         assert_eq!(decorated, vec![Line::from("plain text only")]);
         assert!(session.transcript_file_link_targets.is_empty());
+    }
+
+    #[test]
+    fn borrowed_and_visible_decoration_agree_on_mixed_links() {
+        use crate::tui::ui::tui::types::InlineLinkTarget;
+
+        // Asymmetric rows: explicit link first, raw URL last, plain middle —
+        // row index feeds target areas, so order matters for the oracle.
+        let root = tempfile::tempdir().expect("link workspace");
+        fs::create_dir(root.path().join("src")).unwrap();
+        fs::write(root.path().join("src/app.rs"), "fixture").unwrap();
+        fs::write(root.path().join("Cargo.toml"), "fixture").unwrap();
+        let area = Rect::new(0, 0, 60, 5);
+        let explicit_text = "see explicit docs";
+        let explicit_target = "https://example.com/explicit";
+        let explicit_start = explicit_text.find("explicit").expect("explicit offset");
+        let lines = vec![
+            TranscriptLine {
+                line: Line::from(explicit_text),
+                explicit_links: vec![RenderedTranscriptLink {
+                    start: explicit_start,
+                    end: explicit_start + "explicit".len(),
+                    start_col: explicit_start,
+                    width: "explicit".len(),
+                    target: InlineLinkTarget::Url(explicit_target.to_string()),
+                }],
+            },
+            TranscriptLine {
+                line: Line::from("plain text only"),
+                explicit_links: Vec::new(),
+            },
+            TranscriptLine {
+                line: Line::from("open src/app.rs and https://example.com/raw"),
+                explicit_links: Vec::new(),
+            },
+        ];
+
+        let mut borrowed_session = Session::new(InlineTheme::default(), None, 60);
+        borrowed_session.set_workspace_root(Some(root.path().to_path_buf()));
+        let borrowed = borrowed_session.decorate_borrowed_transcript_links(&lines, area);
+        let borrowed_targets = borrowed_session.transcript_file_link_targets.clone();
+
+        let mut owned_session = Session::new(InlineTheme::default(), None, 60);
+        owned_session.set_workspace_root(Some(root.path().to_path_buf()));
+        let owned = owned_session.decorate_visible_transcript_links(lines.clone(), area);
+        let owned_targets = owned_session.transcript_file_link_targets.clone();
+
+        assert_eq!(borrowed, owned);
+        assert_eq!(borrowed_targets, owned_targets);
+        // Independently derived: explicit URL + raw file + raw URL = 3 targets
+        // across rows 0 and 2; plain row 1 contributes none.
+        assert_eq!(borrowed_targets.len(), 3);
+        assert_eq!(borrowed_targets[0].area.y, area.y);
+        assert_eq!(borrowed_targets[1].area.y, area.y + 2);
+        assert_eq!(borrowed_targets[2].area.y, area.y + 2);
+
+        // Cached (no raw detection) fast path: explicit survives, raw links vanish.
+        let mut cached_borrowed = Session::new(InlineTheme::default(), None, 60);
+        cached_borrowed.set_workspace_root(Some(root.path().to_path_buf()));
+        let cached_borrowed_lines = cached_borrowed.decorate_borrowed_cached_transcript_links(&lines, area);
+        let mut cached_owned = Session::new(InlineTheme::default(), None, 60);
+        cached_owned.set_workspace_root(Some(root.path().to_path_buf()));
+        let cached_owned_lines = cached_owned.decorate_visible_cached_transcript_links(lines, area);
+        assert_eq!(cached_borrowed_lines, cached_owned_lines);
+        assert_eq!(cached_borrowed.transcript_file_link_targets, cached_owned.transcript_file_link_targets);
+        assert_eq!(cached_borrowed.transcript_file_link_targets.len(), 1);
     }
 
     #[test]

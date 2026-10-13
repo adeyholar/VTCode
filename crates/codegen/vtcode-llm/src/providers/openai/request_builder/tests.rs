@@ -1,7 +1,5 @@
-use super::{
-    ChatRequestContext, ResponsesRequestContext, augment_openai_instructions, build_chat_request,
-    build_responses_request,
-};
+use super::history::augment_openai_instructions;
+use super::{ChatRequestContext, ResponsesRequestContext, build_chat_request, build_responses_request};
 use crate::provider;
 use serde_json::{Value, json};
 use vtcode_config::constants::models;
