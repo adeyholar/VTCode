@@ -118,19 +118,27 @@ fn add_system_cli_tools(outcome: &mut SkillLoadOutcome) {
 
 fn dedup_and_sort(outcome: &mut SkillLoadOutcome) {
     let mut seen: HashSet<String> = HashSet::new();
+    let mut seen_paths: HashSet<PathBuf> = HashSet::new();
     let mut shadowed: Vec<String> = Vec::new();
     outcome.skills.retain(|skill| {
+        // Same physical file discovered via overlapping roots (symlinks,
+        // canonicalization aliases) is not a conflict; drop silently.
+        let canonical = dunce::canonicalize(&skill.path).unwrap_or_else(|_| skill.path.clone());
+        if !seen_paths.insert(canonical) {
+            return false;
+        }
         if seen.insert(skill.name.clone()) {
             return true;
         }
         // Agent Skills interop: same-name skills must not silently replace one
-        // another. First discovery wins (project roots precede user roots);
-        // warn so the shadowing is visible instead of silent.
+        // another. First discovery wins (project roots precede user roots).
+        // Shadowing is expected (e.g. repo `.agents/skills` over an installed
+        // user plugin with the same name), so this stays at debug level.
         shadowed.push(format!("{} ({})", skill.name, skill.path.display()));
         false
     });
     if !shadowed.is_empty() {
-        tracing::warn!(
+        tracing::debug!(
             shadowed = ?shadowed,
             "duplicate skill names shadowed by earlier discovery; only the first occurrence is loaded"
         );

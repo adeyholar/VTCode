@@ -702,3 +702,58 @@ fn discovers_plugin_mcp_providers() {
     assert!(names.contains(&"mcp-plugin.remote"), "expected mcp-plugin.remote, got: {:?}", names);
     assert_eq!(providers.len(), 2);
 }
+
+#[test]
+fn dedup_keeps_first_skill_on_name_conflict() {
+    use crate::skills::model::{SkillLoadOutcome, SkillMetadata, SkillScope};
+    use std::path::PathBuf;
+
+    let mut outcome = SkillLoadOutcome::default();
+    outcome.skills.push(SkillMetadata {
+        name: "shared-skill".to_string(),
+        description: "repo copy wins".to_string(),
+        short_description: None,
+        path: PathBuf::from("/repo/.agents/skills/shared-skill/SKILL.md"),
+        scope: SkillScope::Repo,
+        manifest: None,
+    });
+    outcome.skills.push(SkillMetadata {
+        name: "shared-skill".to_string(),
+        description: "user plugin shadowed".to_string(),
+        short_description: None,
+        path: PathBuf::from("/home/user/.agents/plugins/some-plugin/skills/shared-skill/SKILL.md"),
+        scope: SkillScope::User,
+        manifest: None,
+    });
+
+    dedup_and_sort(&mut outcome);
+
+    assert_eq!(outcome.skills.len(), 1);
+    assert_eq!(outcome.skills[0].description, "repo copy wins");
+}
+
+#[test]
+fn dedup_drops_same_file_discovered_twice() {
+    use crate::skills::model::{SkillLoadOutcome, SkillMetadata, SkillScope};
+
+    let temp = tempdir().expect("tempdir");
+    let skill_dir = temp.path().join("dup-skill");
+    write_skill(&skill_dir, "dup-skill", "Same file via overlapping roots");
+    let skill_md = skill_dir.join("SKILL.md");
+
+    let mut outcome = SkillLoadOutcome::default();
+    for scope in [SkillScope::Repo, SkillScope::User] {
+        outcome.skills.push(SkillMetadata {
+            name: "dup-skill".to_string(),
+            description: "same file".to_string(),
+            short_description: None,
+            path: skill_md.clone(),
+            scope,
+            manifest: None,
+        });
+    }
+
+    dedup_and_sort(&mut outcome);
+
+    assert_eq!(outcome.skills.len(), 1, "same canonical path must collapse to one entry");
+}
