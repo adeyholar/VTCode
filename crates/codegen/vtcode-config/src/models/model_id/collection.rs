@@ -18,6 +18,7 @@ impl ModelId {
         let mut models = vec![
             // Gemini models
             ModelId::Gemini38Flash,
+            ModelId::Gemini4Argon,
             // OpenAI models
             ModelId::GPT6Astra,
             ModelId::GPT6Sol,
@@ -70,6 +71,7 @@ impl ModelId {
             ModelId::MergeGatewayOpenAIGpt56Sol,
             ModelId::MergeGatewayOpenAIGpt56Terra,
             ModelId::MergeGatewayGoogleGemini38Flash,
+            ModelId::MergeGatewayGoogleGemini4Argon,
             ModelId::MergeGatewayAnthropicClaudeHaiku4520251001,
             ModelId::MergeGatewayAnthropicClaudeHaiku55,
             ModelId::MergeGatewayAnthropicClaudeFable51,

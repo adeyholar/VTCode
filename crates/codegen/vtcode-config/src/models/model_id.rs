@@ -25,6 +25,8 @@ pub enum ModelId {
     /// Gemini 3.7 Flash - Flash model with 1M context and tunable thinking levels
     /// Gemini 3.8 Flash - Most intelligent Flash for long-horizon SWE, agents, and enterprise workflows (1M context, 64k output, low/medium/high thinking)
     Gemini38Flash,
+    /// Gemini 4 Argon - Flagship reasoning model for the hardest coding, agentic, math, and science problems (unified 1M context window, 64K sync output, long decode, low/medium/high thinking)
+    Gemini4Argon,
 
     // OpenAI models
     /// GPT-6 Astra - Most capable model for hardest end-to-end work with complex reasoning, coding, computer use, and research
@@ -134,6 +136,8 @@ pub enum ModelId {
     MergeGatewayOpenAIGpt56Terra,
     /// Google Gemini 3.8 Flash through Merge Gateway
     MergeGatewayGoogleGemini38Flash,
+    /// Google Gemini 4 Argon through Merge Gateway
+    MergeGatewayGoogleGemini4Argon,
     /// Anthropic Claude Haiku 4.5 through Merge Gateway
     MergeGatewayAnthropicClaudeHaiku4520251001,
     /// Anthropic Claude Haiku 5.5 through Merge Gateway

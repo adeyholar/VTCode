@@ -10,6 +10,49 @@
     "doc": "https://ai.google.dev/gemini-api/docs/models",
     "default_model": "gemini-3.7-flash",
     "models": {
+      "gemini-4-argon": {
+        "id": "gemini-4-argon",
+        "name": "Gemini 4 Argon",
+        "description": "Flagship reasoning model for the hardest coding, agentic, math, and science problems with a unified 1M context window, long decode up to 1M output tokens, and tunable thinking (low, medium, high)",
+        "version": "stable",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "output_tokens": 65536,
+        "capabilities": {
+          "caching": true,
+          "code_execution": true,
+          "batch_api": true,
+          "structured_output": true,
+          "search_grounding": true,
+          "url_context": true,
+          "thinking": true
+        },
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "cost": {
+          "input": 2e-6,
+          "output": 1e-5,
+          "cache_read": 1e-7
+        },
+        "is_pro": true
+      },
+
       "gemini-3.1-flash-lite-preview": {
         "id": "gemini-3.1-flash-lite-preview",
         "name": "Gemini 3.1 Flash-Lite Preview",
@@ -4331,6 +4374,38 @@
           "function_calling": true,
           "structured_output": false
         }
+      },
+      "google/gemini-4-argon": {
+        "id": "google/gemini-4-argon",
+        "name": "Gemini 4 Argon (Merge Gateway)",
+        "description": "Google Gemini 4 Argon flagship reasoning model served through Merge Gateway native Responses API.",
+        "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "output_tokens": 65536,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": false
+        },
+        "is_pro": true
       },
       "anthropic/claude-fable-5-1": {
         "id": "anthropic/claude-fable-5-1",

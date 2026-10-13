@@ -316,6 +316,8 @@ impl ModelId {
             self,
             ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
+                | ModelId::Gemini4Argon
+                | ModelId::MergeGatewayGoogleGemini4Argon
                 | ModelId::GPT6Astra
                 | ModelId::GPT6Sol
                 | ModelId::GPT61Sol
@@ -430,6 +432,8 @@ impl ModelId {
             | ModelId::MergeGatewayZaiGlm53Flashx => "5.3",
             ModelId::Gemini38Flash => "3.8",
             ModelId::MergeGatewayGoogleGemini38Flash => "3.8",
+            ModelId::Gemini4Argon => "4",
+            ModelId::MergeGatewayGoogleGemini4Argon => "4",
             ModelId::OpenCodeGoGlm53 => "5.3",
             ModelId::OpenCodeGoGpt56Luna => "5.6-luna",
             ModelId::OpenCodeGoKimiK3 => "k3",

@@ -1241,6 +1241,7 @@ impl LLMProvider for MergeGatewayProvider {
                 | models::merge_gateway::GOOGLE_GEMINI_3_6_FLASH
                 | models::merge_gateway::GOOGLE_GEMINI_3_7_FLASH
                 | models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH
+                | models::merge_gateway::GOOGLE_GEMINI_4_ARGON
                 | models::merge_gateway::MOONSHOT_KIMI_K3
                 | models::merge_gateway::ZAI_GLM_5_3_FLASH
                 | models::merge_gateway::OPENAI_GPT_5_5

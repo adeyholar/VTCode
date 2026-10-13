@@ -164,13 +164,18 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
 ## Google Gemini
 
 - **Official docs:** [Gemini API models](https://ai.google.dev/gemini-api/docs/models) ·
+  [Gemini 4 Argon](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon) ·
   [Gemini 3.7 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash)
 - **Provider key:** `gemini` (env: `GEMINI_API_KEY` or `GOOGLE_API_KEY`)
 - **Default model:** `gemini-3-flash-preview`
 - **Curated models:**
-  - `gemini-3.7-flash` — latest flash model, 1M context, tunable thinking (low/medium/high)
+  - `gemini-4-argon` — flagship reasoning model, unified 1M context window (input, thinking, and output share one
+    window), 64K sync output, tunable thinking (low/medium/high, medium default). Explicit `cachedContents` is not
+    supported; implicit caching applies automatically. Sampling parameters (`temperature`, `top_p`, `top_k`) are
+    ignored.
+  - `gemini-3.8-flash` — most intelligent Flash for long-horizon SWE and agents, 1M context, tunable thinking
+    (low/medium/high)
   - `gemini-3.6-flash` — flash model with improved reasoning and efficiency, 1M context
-  - `gemini-3.5-flash-lite` — cost-optimized lightweight flash model, 1M context
 - **Features:** Streaming, tool calls, structured output, image/video/audio input, context caching, code execution, and
   configurable reasoning effort
 - Configuration details are covered in the main
@@ -362,7 +367,7 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
 - **Default model:** `default_routing`
 - **Curated picker models:** `openai/gpt-5.5`, `anthropic/claude-opus-5`, `anthropic/claude-opus-5-5`,
   `anthropic/claude-sonnet-5`, `anthropic/claude-sonnet-5-5`, `google/gemini-3.6-flash`, `google/gemini-3.7-flash`,
-  `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`,
+  `google/gemini-4-argon`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`,
   `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `zai/glm-5.3-flash`,
   `zai/glm-5.3-flashx`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, `openai/gpt-6-astra`,
   `openai/gpt-6-sol`, `openai/gpt-6.1-sol`, `openai/gpt-6-luna`, and `mistral/mistral-large-4-0`

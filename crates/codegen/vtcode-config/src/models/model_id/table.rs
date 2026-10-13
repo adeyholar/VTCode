@@ -91,6 +91,13 @@ model_id_table! {
         display: "Gemini 3.8 Flash",
         description: "Most intelligent Flash for long-horizon SWE, autonomous agents, and complex enterprise workflows with 1M context and tunable thinking (low, medium, high)",
     },
+    Gemini4Argon {
+        provider: Gemini,
+        id: models::GEMINI_4_ARGON,
+        parse: [models::GEMINI_4_ARGON],
+        display: "Gemini 4 Argon",
+        description: "Flagship reasoning model for the hardest coding, agentic, math, and science problems with a unified 1M context window, long decode up to 1M output tokens, and tunable thinking (low, medium, high)",
+    },
     // OpenAI models
     GPT6Astra {
         provider: OpenAI,
@@ -454,6 +461,13 @@ model_id_table! {
         parse: [models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH],
         display: "Gemini 3.8 Flash (Merge Gateway)",
         description: "Google Gemini 3.8 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayGoogleGemini4Argon {
+        provider: MergeGateway,
+        id: models::merge_gateway::GOOGLE_GEMINI_4_ARGON,
+        parse: [models::merge_gateway::GOOGLE_GEMINI_4_ARGON],
+        display: "Gemini 4 Argon (Merge Gateway)",
+        description: "Google Gemini 4 Argon flagship reasoning model accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
     MergeGatewayAnthropicClaudeHaiku4520251001 {
         provider: MergeGateway,

@@ -275,11 +275,12 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaNemotron3Super120bA12b));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 27);
+    assert_eq!(merge_gateway_models.len(), 28);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayXiaomimimoMimoV26Pro));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayXiaomimimoMimoV26Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini38Flash));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini4Argon));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayAnthropicClaudeFable51));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDeepseekFlash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt56Terra));
@@ -431,6 +432,11 @@ fn test_generated_model_capability_lookup() {
         model_catalog_entry("merge-gateway", models::merge_gateway::GOOGLE_GEMINI_3_8_FLASH).expect("Gemini metadata");
     assert_eq!(merge_gateway_gemini.context_window, 1_000_000);
     assert!(merge_gateway_gemini.vision);
+    let merge_gateway_argon =
+        model_catalog_entry("merge-gateway", models::merge_gateway::GOOGLE_GEMINI_4_ARGON).expect("Argon metadata");
+    assert_eq!(merge_gateway_argon.context_window, 1_048_576);
+    assert!(merge_gateway_argon.vision);
+    assert!(merge_gateway_argon.is_pro);
     let merge_gateway_gpt =
         model_catalog_entry("merge-gateway", models::merge_gateway::OPENAI_GPT_5_6_SOL).expect("GPT metadata");
     assert_eq!(merge_gateway_gpt.context_window, 1_100_000);

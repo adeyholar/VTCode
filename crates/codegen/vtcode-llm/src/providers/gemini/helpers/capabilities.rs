@@ -29,8 +29,8 @@ impl GeminiProvider {
     pub fn max_input_tokens(model: &str) -> usize {
         if model.contains("gemini-3.1") {
             1_048_576 // 1M tokens for Gemini 3.1 models
-        } else if model.contains("3") || model.contains("1.5-pro") {
-            2_097_152 // 2M tokens for Gemini 1.5 Pro and 3.x models
+        } else if model.contains("3") || model.contains("4") || model.contains("1.5-pro") {
+            2_097_152 // 2M tokens for Gemini 1.5 Pro, 3.x, and 4.x models
         } else {
             1_048_576 // 1M tokens for other current models
         }
@@ -38,8 +38,8 @@ impl GeminiProvider {
 
     /// Get maximum output token limit for a model
     pub fn max_output_tokens(model: &str) -> usize {
-        if model.contains("3") {
-            65_536 // 65K tokens for Gemini 3 models
+        if model.contains("3") || model.contains("4") {
+            65_536 // 65K tokens for Gemini 3 and 4 models
         } else {
             8_192 // Conservative default
         }
@@ -85,10 +85,14 @@ impl GeminiProvider {
     /// Get supported thinking levels for a model
     /// Reference: <https://ai.google.dev/gemini-api/docs/gemini-3>
     /// Gemini 3.8 Flash: low, medium (default), high — `minimal` is not supported and will error.
+    /// Gemini 4 Argon: low, medium (default), high.
     pub(crate) fn supported_thinking_levels(model: &str) -> Vec<&'static str> {
         if model.contains("gemini-3-flash-preview") {
             // Preview supports all levels including minimal
             vec!["minimal", "low", "medium", "high"]
+        } else if model.contains("gemini-4-argon") {
+            // Gemini 4 Argon supports low/medium/high (medium default)
+            vec!["low", "medium", "high"]
         } else if model.contains("gemini-3") && model.contains("flash") {
             // Stable Flash models (3.6, 3.7, 3.8) support low/medium/high (medium default)
             vec!["low", "medium", "high"]

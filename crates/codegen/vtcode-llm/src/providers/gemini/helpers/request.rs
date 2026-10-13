@@ -200,7 +200,10 @@ impl GeminiProvider {
             return true;
         }
 
-        request.model.contains("gemini-3")
+        let uses_interactions_for_built_in_tools = request.model.contains("gemini-3")
+            || request.model.contains("gemini-4")
+            || GeminiProvider::uses_latest_gemini_api(&request.model);
+        uses_interactions_for_built_in_tools
             && request
                 .tools
                 .as_deref()
@@ -609,6 +612,7 @@ fn build_generation_config(provider: &GeminiProvider, request: &LLMRequest) -> G
     {
         let is_gemini3_flash_preview = request.model.contains("gemini-3-flash-preview");
         let is_gemini3_flash = request.model.contains("gemini-3") && request.model.contains("flash");
+        let is_gemini4_argon = request.model.contains("gemini-4-argon");
         let thinking_level = match effort {
             ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => Some("low"),
             ReasoningEffortLevel::Minimal => {
@@ -621,7 +625,8 @@ fn build_generation_config(provider: &GeminiProvider, request: &LLMRequest) -> G
             }
             ReasoningEffortLevel::Low => Some("low"),
             ReasoningEffortLevel::Medium => {
-                if is_gemini3_flash {
+                if is_gemini3_flash || is_gemini4_argon {
+                    // Gemini 3 Flash and Gemini 4 Argon natively support medium
                     Some("medium")
                 } else {
                     Some("high")

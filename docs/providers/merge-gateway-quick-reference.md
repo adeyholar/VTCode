@@ -26,6 +26,7 @@ anthropic/claude-sonnet-5
 anthropic/claude-sonnet-5-5
 google/gemini-3.6-flash
 google/gemini-3.7-flash
+google/gemini-4-argon
 deepseek/deepseek-v4-pro-0813
 deepseek/deepseek-v4-flash-0731
 xai/grok-4.6

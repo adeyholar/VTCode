@@ -1204,6 +1204,61 @@ fn gemini3_flash_extended_thinking_levels() {
 
     let pro_levels = GeminiProvider::supported_thinking_levels("gemini-3-pro");
     assert_eq!(pro_levels, vec!["low", "high"]);
+
+    // Gemini 4 Argon supports low/medium/high (medium default), no minimal
+    let argon_levels = GeminiProvider::supported_thinking_levels(models::google::GEMINI_4_ARGON);
+    assert_eq!(argon_levels, vec!["low", "medium", "high"]);
+}
+
+#[test]
+fn gemini4_argon_medium_thinking_mapping() {
+    use vtcode_config::constants::models;
+    use vtcode_config::types::ReasoningEffortLevel;
+
+    let provider = GeminiProvider::new("test-key".to_string());
+
+    // Argon natively supports medium: it must not fall back to high
+    let request = LLMRequest {
+        messages: vec![Message::user("test".to_string())].into(),
+        model: models::google::GEMINI_4_ARGON.to_string(),
+        reasoning_effort: Some(ReasoningEffortLevel::Medium),
+        ..Default::default()
+    };
+
+    let gemini_request = provider.convert_to_gemini_request(&request).expect("conversion should succeed");
+
+    let generation_config = gemini_request.generation_config.expect("generation_config should be present");
+    let thinking_config = generation_config
+        .thinking_config
+        .as_ref()
+        .expect("thinking_config should be present");
+    assert_eq!(
+        thinking_config.thinking_level.as_deref().unwrap(),
+        "medium",
+        "Gemini 4 Argon should map medium reasoning effort to medium thinking level"
+    );
+}
+
+#[test]
+fn gemini4_argon_output_limit_validation() {
+    use vtcode_config::constants::models;
+
+    let provider = GeminiProvider::new("test-key".to_string());
+
+    // 64K sync output limit applies to Gemini 4 models, not the 8K legacy default
+    let request = LLMRequest {
+        messages: vec![Message::user("test".to_string())].into(),
+        model: models::google::GEMINI_4_ARGON.to_string(),
+        max_tokens: Some(65_536),
+        ..Default::default()
+    };
+    assert!(provider.validate_request(&request).is_ok(), "Gemini 4 Argon should accept max_tokens up to 65536");
+
+    let over_limit = LLMRequest { max_tokens: Some(65_537), ..request };
+    assert!(
+        provider.validate_request(&over_limit).is_err(),
+        "Gemini 4 Argon should reject max_tokens above the 65536 sync limit"
+    );
 }
 
 #[test]
