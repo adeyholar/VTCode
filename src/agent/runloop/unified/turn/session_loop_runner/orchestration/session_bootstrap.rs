@@ -5,6 +5,10 @@ use super::super::archive::{create_session_archive, workspace_archive_label};
 use super::super::support::prepare_resume_bootstrap_without_archive;
 use super::*;
 use crate::agent::runloop::unified::turn::is_internal_harness_follow_up;
+use crate::agent::runloop::unified::webmcp::{
+    TURN_HANDOFF_DIFF_OPEN, TURN_HANDOFF_DIFF_TAG_OPEN, TURN_HANDOFF_PREFIX, TURN_HANDOFF_REQUEST_HEADER,
+    is_turn_handoff,
+};
 use vtcode_core::core::threads::{ThreadBootstrap, prepare_archived_session};
 use vtcode_core::utils::session_archive::SessionArchiveMetadata;
 
@@ -314,8 +318,8 @@ pub(super) async fn load_archived_prompts_for_history(handle: &vtcode_ui::tui::a
 
 /// Map one archived message body to a history-picker entry.
 ///
-/// Returns `None` for empty or harness-generated follow-ups so reverse
-/// history only surfaces genuine user-typed prompts.
+/// Returns `None` for empty, harness-generated, or wrapper-only content so
+/// reverse history only surfaces genuine user-typed prompts.
 fn archived_prompt_content(trimmed: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
@@ -342,6 +346,9 @@ fn archived_prompt_content(trimmed: &str) -> Option<String> {
 ///
 /// - `User request: <original>` vibe-enrichment wrapper (keeps `<original>`,
 ///   see `EnrichedPrompt::to_llm_prompt` in `agent/runloop/prompt.rs`)
+/// - `VT Code WebMCP handoff.` browser-handoff wrapper (keeps the embedded
+///   [`TURN_HANDOFF_REQUEST_HEADER`] request section, see `build_turn_prompt`
+///   in `agent/runloop/unified/webmcp.rs`)
 /// - trailing `[file_reference_metadata]` / `[agent_reference_metadata]`
 ///   blocks appended at submit time (see `build_file_reference_metadata` /
 ///   `append_agent_reference_metadata` in
@@ -352,6 +359,24 @@ fn archived_prompt_content(trimmed: &str) -> Option<String> {
 ///   (enrichment tail in `agent/runloop/prompt.rs`)
 fn clean_archived_user_content(trimmed: &str) -> String {
     let mut text = trimmed;
+
+    // Browser-handoff wrapper: recover the embedded typed request. `is_turn_handoff`
+    // proves the authoritative-diff block is present, so a user-typed line that
+    // merely starts with the prefix still shows verbatim.
+    if text.starts_with(TURN_HANDOFF_PREFIX) && is_turn_handoff(text) {
+        if let Some(start) = text.find(TURN_HANDOFF_REQUEST_HEADER) {
+            let after = &text[start + TURN_HANDOFF_REQUEST_HEADER.len()..];
+            let end = after
+                .find(TURN_HANDOFF_DIFF_OPEN)
+                .or_else(|| after.find(TURN_HANDOFF_DIFF_TAG_OPEN))
+                .unwrap_or(after.len());
+            text = after[..end].trim();
+        } else {
+            // Machine handoff with no recoverable request: drop the wrapper
+            // rather than showing it as reverse history.
+            return String::new();
+        }
+    }
 
     if let Some(rest) = text.strip_prefix("User request: ") {
         // Enriched format is `User request: {original}\n\n<sections>`.
