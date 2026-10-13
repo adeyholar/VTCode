@@ -22,6 +22,16 @@ pub struct CommandPolicyEvaluator {
     cache: Arc<Mutex<PermissionCache>>,
 }
 
+/// Verdict of one per-segment policy evaluation.
+///
+/// `reason` names the rule family that decided, using static strings: the
+/// command itself is never cloned into it (it is already the cache key and
+/// travels as a separate audit field).
+struct PolicyVerdict {
+    allowed: bool,
+    reason: &'static str,
+}
+
 impl CommandPolicyEvaluator {
     pub fn from_config(config: &CommandsConfig) -> Self {
         let allow_prefixes = crate::utils::merge_env_patterns(&config.allow_list, "VTCODE_COMMANDS_ALLOW_LIST");
@@ -113,21 +123,42 @@ impl CommandPolicyEvaluator {
             return false;
         }
 
+        self.evaluate_policy(cmd).allowed
+    }
+
+    /// Evaluate deny/allow rules once per shell segment.
+    ///
+    /// Single source of truth for [`Self::allows_text`] and
+    /// [`Self::evaluate_with_resolution`], so the reported reason can never
+    /// disagree with the verdict. (The old resolution path re-matched the
+    /// whole command string for its reason while the verdict matched per
+    /// segment, so a denied stage in `cargo check | rm x` was reported as a
+    /// regex match instead of the deny-list hit.)
+    fn evaluate_policy(&self, cmd: &str) -> PolicyVerdict {
         let segments = policy_segments(cmd);
 
         // Deny takes precedence. Every shell segment is evaluated so chained,
-        // piped, or list-joined commands cannot ride on an earlier match.
-        if segments.iter().any(|segment| {
-            self.matches_prefix(segment, &self.deny_prefixes)
-                || Self::matches_any(&self.deny_regexes, segment)
-                || Self::matches_any(&self.deny_glob_regexes, segment)
-        }) {
-            return false;
+        // piped, or list-joined commands cannot ride on an earlier match. The
+        // first denying segment names its family; priority matches the
+        // historical reason order (prefix, glob, regex).
+        for segment in &segments {
+            if self.matches_prefix(segment, &self.deny_prefixes) {
+                return PolicyVerdict { allowed: false, reason: "deny_list match" };
+            }
+            if Self::matches_any(&self.deny_glob_regexes, segment) {
+                return PolicyVerdict { allowed: false, reason: "deny_glob match" };
+            }
+            if Self::matches_any(&self.deny_regexes, segment) {
+                return PolicyVerdict { allowed: false, reason: "deny_regex match" };
+            }
         }
 
         // If no allow rules defined, allow by default
         if self.allow_prefixes.is_empty() && self.allow_regexes_empty && self.allow_globs_empty {
-            return true;
+            return PolicyVerdict {
+                allowed: true,
+                reason: "default allow (no allow rules)",
+            };
         }
 
         // Check allow rules: each segment must independently match
@@ -135,12 +166,31 @@ impl CommandPolicyEvaluator {
         // status stricter. It needs no executable grant; every pipeline stage
         // still needs its own grant, and deny rules above include the setup.
         let verifier_setup = crate::tools::tool_intent::activity::pipefail_verifier_pipeline(cmd).is_some();
-        segments.iter().enumerate().all(|(index, segment)| {
+        let allowed = segments.iter().enumerate().all(|(index, segment)| {
             (index == 0 && verifier_setup && segment == "set -o pipefail")
                 || self.matches_prefix(segment, &self.allow_prefixes)
                 || Self::matches_any(&self.allow_regexes, segment)
                 || Self::matches_any(&self.allow_glob_regexes, segment)
-        })
+        });
+        if !allowed {
+            return PolicyVerdict { allowed: false, reason: "no allow rule matched" };
+        }
+
+        // Name the first real stage's family as the representative reason (the
+        // pipefail setup line itself carries no grant). Single-stage commands,
+        // the common case, are exact.
+        let representative = segments
+            .iter()
+            .find(|segment| *segment != "set -o pipefail")
+            .map(String::as_str)
+            .unwrap_or("");
+        if self.matches_prefix(representative, &self.allow_prefixes) {
+            PolicyVerdict { allowed: true, reason: "allow_list match" }
+        } else if Self::matches_any(&self.allow_glob_regexes, representative) {
+            PolicyVerdict { allowed: true, reason: "allow_glob match" }
+        } else {
+            PolicyVerdict { allowed: true, reason: "allow_regex match" }
+        }
     }
 
     /// Enhanced async evaluation with command resolution and caching
@@ -161,36 +211,22 @@ impl CommandPolicyEvaluator {
         // Resolve command to actual path
         let resolved_path = self.resolve_path(cmd);
 
-        // Evaluate policy
-        let allowed = self.allows_text(cmd);
+        // Verdict and reason come from the same per-segment evaluation, so
+        // they cannot disagree and no second whole-command regex pass runs.
+        let verdict = self.evaluate_policy(cmd);
+        let reason = verdict.reason.to_string();
 
-        // Determine reason - use static strings where possible to avoid allocations
-        let reason = if allowed {
-            if self.matches_prefix(cmd, &self.allow_prefixes) {
-                format!("allow_list match: {cmd}")
-            } else if Self::matches_any(&self.allow_glob_regexes, cmd) {
-                "allow_glob match".to_string()
-            } else {
-                "allow_regex match".to_string()
-            }
-        } else if self.matches_prefix(cmd, &self.deny_prefixes) {
-            format!("deny_list match: {cmd}")
-        } else if Self::matches_any(&self.deny_glob_regexes, cmd) {
-            "deny_glob match".to_string()
-        } else {
-            "deny_regex match".to_string()
-        };
+        // Cache the result (the cache stores only the verdict; the reason is
+        // the return value, so no command text is cloned into it).
+        self.cache_decision(cmd, verdict.allowed, &reason);
 
-        // Cache the result
-        self.cache_decision(cmd, allowed, &reason);
-
-        let decision = if allowed {
+        let decision = if verdict.allowed {
             PermissionDecision::Allowed
         } else {
             PermissionDecision::Denied
         };
 
-        (allowed, resolved_path, reason, decision)
+        (verdict.allowed, resolved_path, reason, decision)
     }
 
     fn matches_prefix(&self, value: &str, prefixes: &[String]) -> bool {
@@ -214,12 +250,7 @@ impl CommandPolicyEvaluator {
 fn shell_script_from_argv(command: &[String]) -> Option<String> {
     let program = command.first()?;
     let basename = Path::new(program).file_name()?.to_str()?.to_ascii_lowercase();
-    let shell_kind = match basename.as_str() {
-        "sh" | "bash" | "zsh" | "dash" | "ksh" => ShellInvocationKind::Posix,
-        "cmd" | "cmd.exe" => ShellInvocationKind::Cmd,
-        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => ShellInvocationKind::PowerShell,
-        _ => return None,
-    };
+    let shell_kind = shell_invocation_kind(basename.as_str())?;
 
     let flag_index = command.iter().enumerate().skip(1).find_map(|(index, argument)| {
         let is_command_flag = match shell_kind {
@@ -248,21 +279,7 @@ pub(crate) fn is_shell_argv(command: &[String]) -> bool {
         .first()
         .and_then(|program| Path::new(program).file_name())
         .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            matches!(
-                name.to_ascii_lowercase().as_str(),
-                "sh" | "bash"
-                    | "zsh"
-                    | "dash"
-                    | "ksh"
-                    | "cmd"
-                    | "cmd.exe"
-                    | "powershell"
-                    | "powershell.exe"
-                    | "pwsh"
-                    | "pwsh.exe"
-            )
-        })
+        .is_some_and(|name| shell_invocation_kind(name.to_ascii_lowercase().as_str()).is_some())
 }
 
 #[derive(Clone, Copy)]
@@ -270,6 +287,21 @@ enum ShellInvocationKind {
     Posix,
     Cmd,
     PowerShell,
+}
+
+/// Single source of truth for the shells command policy understands.
+///
+/// Both [`shell_script_from_argv`] and [`is_shell_argv`] branch on this, so a
+/// newly supported shell cannot be added to one path but missed in the other
+/// (which would hide a denied command behind the shell name or reject a safe
+/// command). Input must already be lowercased.
+fn shell_invocation_kind(lowered_basename: &str) -> Option<ShellInvocationKind> {
+    match lowered_basename {
+        "sh" | "bash" | "zsh" | "dash" | "ksh" => Some(ShellInvocationKind::Posix),
+        "cmd" | "cmd.exe" => Some(ShellInvocationKind::Cmd),
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => Some(ShellInvocationKind::PowerShell),
+        _ => None,
+    }
 }
 
 /// Split a command string into its shell segments so prefix/regex policy
@@ -461,5 +493,121 @@ mod tests {
         let evaluator = CommandPolicyEvaluator::from_config(&CommandsConfig::default());
         assert!(evaluator.allows(&["/bin/sh".into(), "-lc".into(), "printf vtcode-terminal".into(),]));
         assert!(!evaluator.allows(&["/bin/sh".into(), "-lc".into(), "rm -rf /".into(),]));
+    }
+
+    #[test]
+    fn shell_argv_and_script_extraction_share_one_shell_table() {
+        // Every supported shell is recognized with and without a `-c` script;
+        // near-miss names (`shim`) and regular programs are not shells.
+        for shell in [
+            "sh",
+            "bash",
+            "zsh",
+            "dash",
+            "ksh",
+            "cmd",
+            "cmd.exe",
+            "powershell",
+            "powershell.exe",
+            "pwsh",
+            "pwsh.exe",
+        ] {
+            assert!(is_shell_argv(&[shell.to_string()]), "{shell}");
+            assert!(is_shell_argv(&[format!("/bin/{shell}")]), "/bin/{shell} should resolve by basename");
+            assert!(is_shell_argv(&[shell.to_ascii_uppercase()]), "{shell} matches case-insensitively");
+        }
+        for program in ["rg", "git", "shim", "bashful", ""] {
+            assert!(!is_shell_argv(&[program.to_string()]), "{program} is not a shell");
+        }
+        // A bare shell names the boundary without carrying a script.
+        assert!(is_shell_argv(&["bash".to_string()]));
+        assert_eq!(shell_script_from_argv(&["bash".to_string()]), None);
+        assert_eq!(
+            shell_script_from_argv(&["/bin/bash".to_string(), "-lc".to_string(), "echo hi".to_string()]),
+            Some("echo hi".to_string())
+        );
+        assert_eq!(shell_script_from_argv(&["rg".to_string(), "foo".to_string()]), None);
+    }
+
+    fn policy_config_with(allow: &[&str], deny: &[&str]) -> CommandsConfig {
+        CommandsConfig {
+            allow_list: allow.iter().map(|rule| (*rule).to_string()).collect(),
+            deny_list: deny.iter().map(|rule| (*rule).to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn evaluate_with_resolution_agrees_with_allows_text() {
+        let evaluator =
+            CommandPolicyEvaluator::from_config(&policy_config_with(&["cargo check", "cargo", "grep"], &["rm"]));
+        for command in [
+            "cargo check",
+            "rm -rf /",
+            "cargo check | grep warning",
+            "cargo check | rm -rf /",
+            "LANG=C cargo check",
+            "set -o pipefail && cargo check | grep warning",
+            "true",
+        ] {
+            let expected = evaluator.allows_text(command);
+            let (allowed, _, _, decision) = evaluator.evaluate_with_resolution(command);
+            assert_eq!(allowed, expected, "{command}");
+            assert!(matches!(decision, PermissionDecision::Allowed | PermissionDecision::Denied), "{command}");
+            // The verdict is cached: a repeat reports the same outcome as a
+            // cache hit without re-evaluating.
+            let (cached_allowed, _, _, cached) = evaluator.evaluate_with_resolution(command);
+            assert_eq!(cached_allowed, expected, "{command}");
+            assert!(matches!(cached, PermissionDecision::Cached), "{command}");
+        }
+    }
+
+    #[test]
+    fn evaluate_with_resolution_names_the_denying_stage() {
+        let evaluator =
+            CommandPolicyEvaluator::from_config(&policy_config_with(&["cargo check", "cargo", "grep"], &["rm"]));
+        // The denied stage is `rm`, even though the whole command starts with
+        // an allowed program: the old whole-string reason reported this as a
+        // regex match instead of the deny-list hit.
+        let (allowed, _, reason, _) = evaluator.evaluate_with_resolution("cargo check | rm -rf /");
+        assert!(!allowed);
+        assert_eq!(reason, "deny_list match");
+        assert!(!reason.contains("cargo check"), "reason must not clone the command");
+    }
+
+    #[test]
+    fn evaluate_with_resolution_reasons_use_static_families() {
+        let prefix = CommandPolicyEvaluator::from_config(&policy_config_with(&["cargo check"], &["rm"]));
+        let (_, _, reason, _) = prefix.evaluate_with_resolution("cargo check");
+        assert_eq!(reason, "allow_list match");
+        let (_, _, reason, _) = prefix.evaluate_with_resolution("rm -rf /");
+        assert_eq!(reason, "deny_list match");
+
+        let mut globbed = CommandsConfig::default();
+        globbed.allow_list.clear();
+        globbed.allow_regex.clear();
+        globbed.allow_glob = vec!["cargo *".to_string()];
+        let globbed = CommandPolicyEvaluator::from_config(&globbed);
+        let (allowed, _, reason, _) = globbed.evaluate_with_resolution("cargo fmt");
+        assert!(allowed);
+        assert_eq!(reason, "allow_glob match");
+
+        let mut regexed = CommandsConfig::default();
+        regexed.allow_list.clear();
+        regexed.allow_glob.clear();
+        regexed.allow_regex = vec!["^cargo\\s+fmt".to_string()];
+        let regexed = CommandPolicyEvaluator::from_config(&regexed);
+        let (allowed, _, reason, _) = regexed.evaluate_with_resolution("cargo fmt");
+        assert!(allowed);
+        assert_eq!(reason, "allow_regex match");
+
+        let mut defaulted = CommandsConfig::default();
+        defaulted.allow_list.clear();
+        defaulted.allow_regex.clear();
+        defaulted.allow_glob.clear();
+        let defaulted = CommandPolicyEvaluator::from_config(&defaulted);
+        let (allowed, _, reason, _) = defaulted.evaluate_with_resolution("anything goes");
+        assert!(allowed);
+        assert_eq!(reason, "default allow (no allow rules)");
     }
 }

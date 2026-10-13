@@ -359,13 +359,43 @@ pub fn contains_dynamic_shell_syntax(command: &str) -> bool {
     crate::command_safety::shell_parser::contains_dynamic_shell_syntax(command)
 }
 
-/// Skip an optional `env` prefix and leading shell environment assignments.
+/// Single-walk result for an `env` / leading-assignment prefix.
 ///
-/// The returned slice starts at the executable that will actually run. Keep
-/// this helper shared by intent and activity classification so both paths
-/// inspect the same command shape.
-pub fn command_words_after_environment_prefix(words: &[String]) -> &[String] {
+/// `stripped_start` is the index of the executable that will actually run;
+/// `has_injection` reports whether the skipped prefix sets a known
+/// config/loader-injection key or uses `env -S` (which re-parses at runtime
+/// and cannot be audited). One walk produces both so safety checks never
+/// re-scan the same prefix twice and the `env`-flag table cannot drift
+/// between the stripping and injection paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EnvPrefixScan {
+    stripped_start: usize,
+    has_injection: bool,
+}
+
+fn is_env_split_string_flag(word: &str) -> bool {
+    word == "-S" || word == "--split-string" || word.starts_with("-S") || word.starts_with("--split-string=")
+}
+
+fn env_flag_consumes_next(word: &str) -> bool {
+    matches!(word, "-u" | "--unset" | "-C" | "--chdir")
+}
+
+/// Walk an optional `env` prefix plus leading `KEY=value` assignments once.
+///
+/// Shared by [`command_words_after_environment_prefix`] (stripping) and
+/// [`environment_prefix_has_injection_keys`] (injection audit) so both paths
+/// inspect the same command shape. Fail-closed notes:
+///
+/// - `env -S`/`--split-string` re-parses the rest at runtime: reported as
+///   injection with an empty remainder, matching both historical paths.
+/// - Words with an empty key (`=foo`) are NOT assignments: scanning stops and
+///   they are kept as the program (unknown, therefore mutating). The old
+///   stripping path skipped them via a broad `contains('=')` test; stopping is
+///   strictly fail-closed and the injection path is unchanged.
+fn scan_environment_prefix(words: &[String]) -> EnvPrefixScan {
     let mut start = 0;
+    let mut has_injection = false;
     loop {
         if words.get(start).is_some_and(|word| word == "env") {
             start += 1;
@@ -374,22 +404,27 @@ pub fn command_words_after_environment_prefix(words: &[String]) -> &[String] {
                     start += 1;
                     break;
                 }
-                let is_split_string = word == "-S"
-                    || word == "--split-string"
-                    || word.starts_with("-S")
-                    || word.starts_with("--split-string=");
-                let consumes_next = matches!(word.as_str(), "-u" | "--unset" | "-C" | "--chdir");
-                start += 1;
-                if is_split_string {
-                    return &words[words.len()..];
+                if is_env_split_string_flag(word) {
+                    // Split-string re-parses the rest at runtime; cannot audit
+                    // assignments. Treat as unsafe with no auditable remainder.
+                    return EnvPrefixScan { stripped_start: words.len(), has_injection: true };
                 }
+                let consumes_next = env_flag_consumes_next(word);
+                start += 1;
                 if consumes_next {
+                    // `-u/--unset` removes a key; `-C/--chdir` takes a path.
                     if words.get(start).is_some() {
                         start += 1;
                     }
                     continue;
                 }
-                if word.starts_with('-') || word.contains('=') {
+                if let Some(key) = env_assignment_key(word) {
+                    if is_env_injection_key(key) {
+                        has_injection = true;
+                    }
+                    continue;
+                }
+                if word.starts_with('-') {
                     continue;
                 }
                 start -= 1;
@@ -397,16 +432,26 @@ pub fn command_words_after_environment_prefix(words: &[String]) -> &[String] {
             }
             continue;
         }
-        if words
-            .get(start)
-            .is_some_and(|word| !word.starts_with('-') && word.contains('='))
-        {
+        if let Some(key) = words.get(start).and_then(|word| env_assignment_key(word)) {
+            if is_env_injection_key(key) {
+                has_injection = true;
+            }
             start += 1;
             continue;
         }
         break;
     }
-    &words[start..]
+    EnvPrefixScan { stripped_start: start, has_injection }
+}
+
+/// Skip an optional `env` prefix and leading shell environment assignments.
+///
+/// The returned slice starts at the executable that will actually run. Keep
+/// this helper shared by intent and activity classification so both paths
+/// inspect the same command shape.
+pub fn command_words_after_environment_prefix(words: &[String]) -> &[String] {
+    let scan = scan_environment_prefix(words);
+    &words[scan.stripped_start..]
 }
 
 /// Exact environment keys that can inject config, load foreign code, or launch
@@ -470,57 +515,7 @@ fn is_env_injection_key(key: &str) -> bool {
 /// Unset (`env -u KEY`) is not an assignment. Unknown keys stay allowed so
 /// ordinary exploration (`LANG=C rg …`) keeps working.
 pub fn environment_prefix_has_injection_keys(words: &[String]) -> bool {
-    let mut start = 0;
-    loop {
-        if words.get(start).is_some_and(|word| word == "env") {
-            start += 1;
-            while let Some(word) = words.get(start) {
-                if word == "--" {
-                    start += 1;
-                    break;
-                }
-                let is_split_string = word == "-S"
-                    || word == "--split-string"
-                    || word.starts_with("-S")
-                    || word.starts_with("--split-string=");
-                let consumes_next = matches!(word.as_str(), "-u" | "--unset" | "-C" | "--chdir");
-                start += 1;
-                if is_split_string {
-                    // Split-string re-parses the rest at runtime; cannot audit
-                    // assignments. Treat as unsafe.
-                    return true;
-                }
-                if consumes_next {
-                    // `-u/--unset` removes a key; `-C/--chdir` takes a path.
-                    if words.get(start).is_some() {
-                        start += 1;
-                    }
-                    continue;
-                }
-                if let Some(key) = env_assignment_key(word) {
-                    if is_env_injection_key(key) {
-                        return true;
-                    }
-                    continue;
-                }
-                if word.starts_with('-') {
-                    continue;
-                }
-                start -= 1;
-                break;
-            }
-            continue;
-        }
-        if let Some(key) = words.get(start).and_then(|word| env_assignment_key(word)) {
-            if is_env_injection_key(key) {
-                return true;
-            }
-            start += 1;
-            continue;
-        }
-        break;
-    }
-    false
+    scan_environment_prefix(words).has_injection
 }
 
 /// Return whether a parsed command uses an option or environment assignment
@@ -532,10 +527,15 @@ pub fn environment_prefix_has_injection_keys(words: &[String]) -> bool {
 /// rules here lets raw argument validation and activity classification share
 /// the same token-aware guard without searching quoted text.
 pub(crate) fn has_unsafe_readonly_options(words: &[String]) -> bool {
-    if environment_prefix_has_injection_keys(words) {
+    // Single prefix walk: the scan yields both the injection verdict and the
+    // stripped executable offset, replacing the historical two-walk sequence
+    // (`environment_prefix_has_injection_keys` then
+    // `command_words_after_environment_prefix`).
+    let scan = scan_environment_prefix(words);
+    if scan.has_injection {
         return true;
     }
-    let command_words = command_words_after_environment_prefix(words);
+    let command_words = &words[scan.stripped_start..];
     let Some(program) = command_words
         .first()
         .and_then(|word| Path::new(word).file_name())
@@ -1156,11 +1156,12 @@ pub fn normalize_shell_args(args: &Value) -> Result<Value, &'static str> {
 mod tests {
     use super::{
         WriteStdinDispatch, command_session_missing_required_args, command_session_requires_command_safety,
-        command_text, command_words, contains_dynamic_shell_syntax, environment_prefix_has_injection_keys,
-        extract_command_text_with_key, has_indexed_command_parts, interactive_input_text,
-        normalize_indexed_command_args, normalize_shell_args, normalized_command_value, parse_indexed_command_parts,
-        raw_command_text, session_id_text, session_id_text_from_payload, working_dir_text,
-        working_dir_text_from_payload, write_stdin_dispatch,
+        command_text, command_words, command_words_after_environment_prefix, contains_dynamic_shell_syntax,
+        environment_prefix_has_injection_keys, extract_command_text_with_key, has_indexed_command_parts,
+        has_unsafe_readonly_options, interactive_input_text, normalize_indexed_command_args, normalize_shell_args,
+        normalized_command_value, parse_indexed_command_parts, raw_command_text, scan_environment_prefix,
+        session_id_text, session_id_text_from_payload, working_dir_text, working_dir_text_from_payload,
+        write_stdin_dispatch,
     };
     use serde_json::{Value, json};
 
@@ -1469,6 +1470,60 @@ mod tests {
         // Unset is not an assignment.
         assert!(!environment_prefix_has_injection_keys(&words("env -u GIT_CONFIG_COUNT git status")));
         assert!(!environment_prefix_has_injection_keys(&words("git status")));
+    }
+
+    #[test]
+    fn env_prefix_single_scan_agrees_with_both_public_helpers() {
+        let words = |command: &str| -> Vec<String> { shell_words::split(command).expect("split command") };
+        for command in [
+            "git status",
+            "env LANG=C.UTF-8 rg foo",
+            "FOO=bar LANG=C git status",
+            "env FOO=bar git status",
+            "env -- FOO=bar git status",
+            "env -u GIT_CONFIG_COUNT git status",
+            "env -C /tmp git status",
+            "env GIT_EXTERNAL_DIFF=evil git diff",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=k GIT_CONFIG_VALUE_0=v git status",
+            "env -S 'GIT_CONFIG_COUNT=1 git status'",
+            "env --split-string='x=1 ls'",
+        ] {
+            let parsed = words(command);
+            let scan = scan_environment_prefix(&parsed);
+            assert_eq!(command_words_after_environment_prefix(&parsed), &parsed[scan.stripped_start..], "{command}");
+            assert_eq!(environment_prefix_has_injection_keys(&parsed), scan.has_injection, "{command}");
+        }
+    }
+
+    #[test]
+    fn env_prefix_empty_key_stays_fail_closed() {
+        let words = |command: &str| -> Vec<String> { shell_words::split(command).expect("split command") };
+        // `=foo` is not a valid assignment: the executable stays `=foo`
+        // (unknown, therefore mutating downstream), never silently stripped.
+        for command in ["=foo rg foo", "env =foo rg foo"] {
+            let parsed = words(command);
+            let stripped = command_words_after_environment_prefix(&parsed);
+            assert_eq!(stripped.first().map(String::as_str), Some("=foo"), "{command}");
+            assert!(!environment_prefix_has_injection_keys(&parsed), "{command}");
+        }
+    }
+
+    #[test]
+    fn env_prefix_split_string_reports_empty_remainder_and_unsafe() {
+        let words = |command: &str| -> Vec<String> { shell_words::split(command).expect("split command") };
+        let parsed = words("env -S 'GIT_CONFIG_COUNT=1 git status'");
+        assert!(command_words_after_environment_prefix(&parsed).is_empty());
+        assert!(environment_prefix_has_injection_keys(&parsed));
+        assert!(has_unsafe_readonly_options(&parsed));
+    }
+
+    #[test]
+    fn has_unsafe_readonly_options_flags_injection_without_second_walk() {
+        let words = |command: &str| -> Vec<String> { shell_words::split(command).expect("split command") };
+        assert!(has_unsafe_readonly_options(&words("env LD_PRELOAD=./evil.so ls")));
+        assert!(has_unsafe_readonly_options(&words("LD_PRELOAD=./evil.so ls")));
+        assert!(!has_unsafe_readonly_options(&words("env LANG=C.UTF-8 rg foo")));
+        assert!(!has_unsafe_readonly_options(&words("git status")));
     }
 
     #[test]

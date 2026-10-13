@@ -91,40 +91,14 @@ impl SandboxPermissions {
         }
     }
 
-    /// Check if this permission requires approval.
-    fn requires_approval(&self) -> bool {
-        matches!(self, Self::RequireEscalated | Self::WithAdditionalPermissions | Self::BypassSandbox)
-    }
-
     /// Check if this permission requests full unsandboxed execution.
     pub fn requires_escalated_permissions(&self) -> bool {
         matches!(self, Self::RequireEscalated | Self::BypassSandbox)
     }
 
-    /// Check if this permission requests any additional privileges.
-    fn requires_additional_permissions(&self) -> bool {
-        !matches!(self, Self::UseDefault)
-    }
-
     /// Check if this permission requests additional sandboxed permissions.
     pub fn uses_additional_permissions(&self) -> bool {
         matches!(self, Self::WithAdditionalPermissions)
-    }
-
-    /// Check if this permission bypasses the sandbox.
-    fn bypasses_sandbox(&self) -> bool {
-        matches!(self, Self::BypassSandbox)
-    }
-
-    /// Merge with another permission, taking the more permissive one.
-    fn merge(&self, other: &Self) -> Self {
-        use SandboxPermissions::*;
-        match (self, other) {
-            (BypassSandbox, _) | (_, BypassSandbox) => BypassSandbox,
-            (RequireEscalated, _) | (_, RequireEscalated) => RequireEscalated,
-            (WithAdditionalPermissions, _) | (_, WithAdditionalPermissions) => WithAdditionalPermissions,
-            (UseDefault, UseDefault) => UseDefault,
-        }
     }
 }
 
@@ -182,34 +156,28 @@ mod tests {
     #[test]
     fn test_default_permissions() {
         let perm = SandboxPermissions::default();
-        assert!(!perm.requires_approval());
-        assert!(!perm.bypasses_sandbox());
+        assert_eq!(perm, SandboxPermissions::UseDefault);
+        assert!(!perm.requires_escalated_permissions());
+        assert!(!perm.uses_additional_permissions());
     }
 
     #[test]
     fn test_escalated_permissions() {
         let perm = SandboxPermissions::RequireEscalated;
-        assert!(perm.requires_approval());
-        assert!(!perm.bypasses_sandbox());
         assert!(perm.requires_escalated_permissions());
     }
 
     #[test]
     fn test_bypass_permissions() {
         let perm = SandboxPermissions::BypassSandbox;
-        assert!(perm.requires_approval());
-        assert!(perm.bypasses_sandbox());
         assert!(perm.requires_escalated_permissions());
     }
 
     #[test]
     fn test_with_additional_permissions() {
         let perm = SandboxPermissions::WithAdditionalPermissions;
-        assert!(perm.requires_approval());
-        assert!(perm.requires_additional_permissions());
         assert!(perm.uses_additional_permissions());
         assert!(!perm.requires_escalated_permissions());
-        assert!(!perm.bypasses_sandbox());
     }
 
     #[test]
@@ -231,16 +199,6 @@ mod tests {
             SandboxPermissions::UseDefault.normalized_for(Some(&AdditionalPermissions::default())),
             SandboxPermissions::UseDefault
         );
-    }
-
-    #[test]
-    fn test_merge_permissions() {
-        use SandboxPermissions::*;
-
-        assert_eq!(UseDefault.merge(&UseDefault), UseDefault);
-        assert_eq!(UseDefault.merge(&WithAdditionalPermissions), WithAdditionalPermissions);
-        assert_eq!(UseDefault.merge(&RequireEscalated), RequireEscalated);
-        assert_eq!(RequireEscalated.merge(&BypassSandbox), BypassSandbox);
     }
 
     fn non_empty_additional() -> AdditionalPermissions {

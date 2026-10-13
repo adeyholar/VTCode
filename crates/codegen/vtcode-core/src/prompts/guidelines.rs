@@ -117,6 +117,7 @@ struct ToolPresence {
     task_tracker: bool,
     start_planning: bool,
     matrix: bool,
+    record_decision: bool,
 }
 
 impl ToolPresence {
@@ -135,6 +136,7 @@ impl ToolPresence {
             task_tracker: false,
             start_planning: false,
             matrix: false,
+            record_decision: false,
         };
         for tool in available_tools {
             match tool.as_str() {
@@ -148,6 +150,7 @@ impl ToolPresence {
                 TOOL_TASK_TRACKER => presence.task_tracker = true,
                 TOOL_START_PLANNING => presence.start_planning = true,
                 "matrix" => presence.matrix = true,
+                "record_decision" => presence.record_decision = true,
                 _ => {}
             }
         }
@@ -176,7 +179,7 @@ pub(crate) fn generate_tool_guidelines_with_capabilities(
             if presence.matrix {
                 lines.push(MATRIX_GUIDANCE.to_owned());
             }
-            if available_tools.iter().any(|name| name == "record_decision") {
+            if presence.record_decision {
                 lines.push(PUBLIC_DECISION_GUIDANCE.to_owned());
             }
             lines.push(OPTIONAL_MARKDOWN_VALIDATION_GUIDANCE.to_owned());
@@ -312,7 +315,7 @@ pub(crate) fn generate_tool_guidelines_for_profile(
         return String::new();
     }
 
-    if available_tools.iter().any(|name| name == "record_decision") {
+    if presence.record_decision {
         lines.push(PUBLIC_DECISION_GUIDANCE.to_owned());
     }
     format!("\n\n## Active Tools\n{}", lines.join("\n"))
@@ -579,7 +582,7 @@ fn generate_runtime_tool_guidelines_for_profile(
     if has_search || has_exec {
         lines.push("- If calls repeat without progress, tighten the plan instead of retrying identically.".to_string());
     }
-    if available_tools.iter().any(|name| name == "record_decision") {
+    if presence.record_decision {
         lines.push(PUBLIC_DECISION_GUIDANCE.to_owned());
     }
 
@@ -1051,6 +1054,16 @@ mod tests {
             default,
             "\n\n## Active Tools\n- `verify: [skip Markdown lint if unavailable]`: report skipped; review diff/links without installing tools. Lint errors remain failures.\n- Capabilities: read-only. Analyze and search, but do not modify files or run shell commands.\n- Use available read-only repository tools for browsing; do not modify files.\n- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations; narrow the range on `line_truncated`."
         );
+    }
+
+    #[test]
+    fn tool_presence_flags_record_decision_in_the_single_pass() {
+        let with = ToolPresence::of(&["matrix".to_string(), "record_decision".to_string()]);
+        assert!(with.matrix);
+        assert!(with.record_decision);
+        let without = ToolPresence::of(&["matrix".to_string()]);
+        assert!(without.matrix);
+        assert!(!without.record_decision);
     }
 
     #[test]
