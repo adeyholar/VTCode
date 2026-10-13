@@ -613,6 +613,12 @@ impl SafetyGateway {
         args: &Value,
         inv_id: &str,
     ) -> SafetyDecision {
+        // Extract the command text once: the policy check, the risk context,
+        // and the approval justification all read the same value, and each
+        // extraction re-parses the command payload (shell_words split plus
+        // action re-derivation).
+        let command = command_text_for_tool(tool_name, args);
+
         if let Some(decision) = self.check_dotfile_protection(tool_name, args, &ctx.session_id).await {
             tracing::info!(
                 invocation_id = %inv_id,
@@ -623,8 +629,8 @@ impl SafetyGateway {
         }
 
         if let Some(ref policy) = self.command_policy
-            && let Some(command) = command_text_for_tool(tool_name, args)
-            && !policy.allows_text(&command)
+            && let Some(command) = command.as_deref()
+            && !policy.allows_text(command)
         {
             let reason = format!("Command '{command}' blocked by policy");
             tracing::info!(
@@ -658,11 +664,12 @@ impl SafetyGateway {
         // destructive gate below: all three read the same tool name and args,
         // and each re-classification re-parses command payloads.
         let intent = classify_tool_intent(tool_name, args);
-        let risk_ctx = self.build_risk_context(tool_name, args, &intent);
+        let command = command.as_deref();
+        let risk_ctx = self.build_risk_context(tool_name, args, &intent, command);
         let risk_level = ToolRiskScorer::calculate_risk(&risk_ctx);
 
         if ToolRiskScorer::requires_justification(risk_level, self.config.read().approval_risk_threshold) {
-            let justification = self.build_approval_justification(tool_name, &risk_level, args, &intent);
+            let justification = self.build_approval_justification(tool_name, &risk_level, args, &intent, command);
             tracing::info!(
                 invocation_id = %inv_id,
                 tool = %tool_name,
@@ -879,7 +886,17 @@ impl SafetyGateway {
     }
 
     /// Build risk context from tool name and arguments
-    fn build_risk_context(&self, tool_name: &str, args: &Value, intent: &ToolIntent) -> ToolRiskContext {
+    ///
+    /// `command` is the command extracted once by the caller
+    /// ([`Self::evaluate_non_rate_decision`]); re-deriving it here would
+    /// re-parse the command payload for every risk evaluation.
+    fn build_risk_context(
+        &self,
+        tool_name: &str,
+        args: &Value,
+        intent: &ToolIntent,
+        command: Option<&str>,
+    ) -> ToolRiskContext {
         let source = if tool_name.starts_with("mcp_") {
             ToolSource::Mcp
         } else if tool_name.starts_with("acp_") {
@@ -905,7 +922,7 @@ impl SafetyGateway {
         }
 
         // Extract command args for shell tools
-        if let Some(command) = command_text_for_tool(tool_name, args) {
+        if let Some(command) = command {
             ctx = ctx.with_args(command.split_whitespace().map(String::from).collect());
         }
 
@@ -913,12 +930,17 @@ impl SafetyGateway {
     }
 
     /// Build justification message for approval prompt
+    ///
+    /// `command` is the command extracted once by the caller
+    /// ([`Self::evaluate_non_rate_decision`]); re-deriving it here would
+    /// re-parse the command payload on every approval prompt.
     fn build_approval_justification(
         &self,
         tool_name: &str,
         risk_level: &RiskLevel,
         args: &Value,
         intent: &ToolIntent,
+        command: Option<&str>,
     ) -> String {
         let mut parts = Vec::new();
 
@@ -929,7 +951,7 @@ impl SafetyGateway {
             parts.push("This tool may modify or delete files.".to_string());
         }
 
-        if let Some(command) = command_text_for_tool(tool_name, args) {
+        if let Some(command) = command {
             parts.push(format!("Command: {command}"));
         }
 
@@ -1022,6 +1044,64 @@ mod tests {
             .await;
 
         assert!(decision.needs_approval());
+    }
+
+    /// The command text is extracted once per check and threaded to the
+    /// policy, risk, and justification consumers. This pins the observable
+    /// behavior (identical policy verdict, risk sentence, and justification
+    /// command line as re-derivation would produce) after the extraction
+    /// stopped being repeated at each site.
+    #[tokio::test]
+    async fn command_extraction_feeds_policy_risk_and_justification_identically() {
+        let policy = CommandPolicyEvaluator::from_config(&CommandsConfig {
+            allow_list: vec!["cargo".into()],
+            ..Default::default()
+        });
+        let gateway = SafetyGateway::new().with_command_policy(policy);
+
+        // Allowed by policy: command is still classified for risk (mutating
+        // verifier) and surfaces verbatim in any justification.
+        let allowed = gateway
+            .check_safety(&make_ctx(), tools::EXEC_COMMAND, &serde_json::json!({"command": "cargo test"}))
+            .await;
+        assert!(allowed.is_allowed());
+
+        // Denied by policy: the denial reports the same single command.
+        let denied = gateway
+            .check_safety(&make_ctx(), tools::EXEC_COMMAND, &serde_json::json!({"command": "rm -rf /"}))
+            .await;
+        let SafetyDecision::Deny(reason) = denied else {
+            panic!("policy denial expected");
+        };
+        assert!(reason.contains("rm -rf /"), "denial must carry the extracted command: {reason}");
+        assert!(reason.starts_with("Command 'rm -rf /' blocked by policy"), "unexpected denial shape: {reason}");
+
+        // Justification path: the risk classifier and the justification see
+        // the same extracted command (marked unsafe by the gateway config).
+        gateway.config.write().approval_risk_threshold.clone_from(&RiskLevel::Low);
+        let justified = gateway
+            .check_safety(&make_ctx(), tools::EXEC_COMMAND, &serde_json::json!({"command": "cargo publish"}))
+            .await;
+        if let SafetyDecision::NeedsApproval(justification) = justified {
+            assert!(
+                justification.contains("Command: cargo publish"),
+                "justification must carry the extracted command: {justification}"
+            );
+        }
+        gateway.config.write().approval_risk_threshold = RiskLevel::High;
+    }
+
+    #[test]
+    fn build_risk_context_uses_caller_supplied_command() {
+        let gateway = SafetyGateway::new();
+        let args = serde_json::json!({"command": "rg --files"});
+        let intent = classify_tool_intent(tools::EXEC_COMMAND, &args);
+
+        let with_command = gateway.build_risk_context(tools::EXEC_COMMAND, &args, &intent, Some("rg --files"));
+        assert_eq!(with_command.command_args, vec!["rg".to_string(), "--files".to_string()]);
+
+        let without_command = gateway.build_risk_context(tools::EXEC_COMMAND, &args, &intent, None);
+        assert!(without_command.command_args.is_empty());
     }
 
     #[tokio::test]
