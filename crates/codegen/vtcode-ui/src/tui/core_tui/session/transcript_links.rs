@@ -1,4 +1,4 @@
-use crate::tui::utils::transcript::trim_transcript_token_bounds;
+use crate::tui::utils::transcript::{has_explicit_path_syntax, trim_transcript_token_bounds};
 use std::borrow::Cow;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -985,29 +985,18 @@ fn resolve_transcript_url(token: &str) -> Option<String> {
 }
 
 fn looks_like_transcript_path(token: &str) -> bool {
-    // Explicit path prefixes
-    token.starts_with("./")
-        || token.starts_with("../")
-        || token.starts_with('/')
-        || token.starts_with("~/")
-        || token.starts_with("file://")
-        // Windows drive letter (e.g. C:\ or C:/)
-        || (token.len() >= 3
-            && token.as_bytes()[0].is_ascii_alphabetic()
-            && token.as_bytes()[1] == b':'
-            && matches!(token.as_bytes()[2], b'\\' | b'/'))
-        // Contains path separator
-        || token.contains('/')
-        || token.contains('\\')
-        // Has a file-like extension: non-empty stem + dot + 1-12 alphanumeric ext.
-        // Called after suffix stripping so `a.rs` (not `a.rs:10`) is the input.
-        // `path.is_file()` is the final filter, so favor recall here.
-        || token.rsplit_once('.').is_some_and(|(stem, ext)| {
-            !stem.is_empty()
-                && !ext.is_empty()
-                && ext.len() <= 12
-                && ext.chars().all(|c| c.is_ascii_alphanumeric())
-        })
+    // Explicit prefixes, drive letters, and separators are shared with the
+    // markdown detector; the extension fallback below favors recall because
+    // `path.is_file()` is the final filter.
+    if has_explicit_path_syntax(token) {
+        return true;
+    }
+    // Has a file-like extension: non-empty stem + dot + 1-12 alphanumeric ext.
+    // Called after suffix stripping so `a.rs` (not `a.rs:10`) is the input.
+    // `path.is_file()` is the final filter, so favor recall here.
+    token.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty() && !ext.is_empty() && ext.len() <= 12 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+    })
 }
 
 #[cfg(test)]

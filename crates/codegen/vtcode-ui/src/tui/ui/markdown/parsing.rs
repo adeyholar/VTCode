@@ -5,7 +5,7 @@ use super::links::{
 use super::tables::{TableBuffer, render_table};
 use super::{LIST_INDENT_WIDTH, MarkdownLine};
 use crate::tui::ui::theme::ThemeStyles;
-use crate::tui::utils::transcript::trim_transcript_token_bounds;
+use crate::tui::utils::transcript::{has_explicit_path_syntax, trim_transcript_token_bounds};
 use anstyle::Style;
 use pulldown_cmark::{CodeBlockKind, HeadingLevel, Tag, TagEnd};
 use regex::Regex;
@@ -438,24 +438,10 @@ fn looks_like_markdown_path(token: &str) -> bool {
         return false;
     }
 
-    if token.starts_with("./")
-        || token.starts_with("../")
-        || token.starts_with('/')
-        || token.starts_with("~/")
-        || token.starts_with("file://")
-    {
-        return true;
-    }
-
-    if token.len() >= 3
-        && token.as_bytes()[0].is_ascii_alphabetic()
-        && token.as_bytes()[1] == b':'
-        && matches!(token.as_bytes()[2], b'\\' | b'/')
-    {
-        return true;
-    }
-
-    if token.contains('/') || token.contains('\\') {
+    // Explicit prefixes, drive letters, and separators are shared with the
+    // transcript detector; URL rejection above stays first so `http://`
+    // never reaches the shared check.
+    if has_explicit_path_syntax(token) {
         return true;
     }
 
