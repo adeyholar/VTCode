@@ -62,7 +62,7 @@ pub fn tracker_adoption_succeeded(tool_name: &str, args: &serde_json::Value, out
 /// not handoffs (outer/in-turn recoverable classifiers treat those as continue).
 pub fn tracker_final_text_is_safety_handoff(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
-    tracker_final_text_is_policy_handoff(text)
+    tracker_final_text_is_policy_handoff_lowercase(&lower)
         || lower.contains("verification is still pending")
         || lower.contains("unverified assistant responses")
         || lower.contains("anti-blind")
@@ -74,6 +74,10 @@ pub fn tracker_final_text_is_safety_handoff(text: &str) -> bool {
 /// Verification wording is handled separately by the turn's recovery gate.
 pub fn tracker_final_text_is_policy_handoff(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
+    tracker_final_text_is_policy_handoff_lowercase(&lower)
+}
+
+fn tracker_final_text_is_policy_handoff_lowercase(lower: &str) -> bool {
     if lower.trim().is_empty() {
         return false;
     }
@@ -342,9 +346,7 @@ pub fn check_for_response_loop(response_text: &str, session_state: &mut AgentSes
         return false;
     }
 
-    // Simplistic check: is this response identical to the last one (ignoring whitespace)?
-    let normalized_current = response_text.split_whitespace().collect::<Vec<_>>().join(" ");
-
+    // Compare word sequences, ignoring whitespace differences.
     let repeated = session_state
         .messages
         .iter()
@@ -353,8 +355,8 @@ pub fn check_for_response_loop(response_text: &str, session_state: &mut AgentSes
         .skip(1)
         .take(2)
         .any(|m| {
-            let normalized_prev = m.content.as_text().split_whitespace().collect::<Vec<_>>().join(" ");
-            normalized_prev == normalized_current
+            let previous_text = m.content.as_text();
+            previous_text.split_whitespace().eq(response_text.split_whitespace())
         });
 
     if repeated {
@@ -370,7 +372,52 @@ pub fn check_for_response_loop(response_text: &str, session_state: &mut AgentSes
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::provider::Message;
+    use crate::llm::provider::{ContentPart, Message};
+
+    #[test]
+    fn handoff_classification_preserves_case_and_policy_precedence() {
+        for text in [
+            "Permission denied after turn budget exhaustion.",
+            "Access denied.",
+            "Safety fuse reached.",
+            "Tool-call safety fuse stopped verification.",
+            "Policy block remains.",
+            "Blocked by policy.",
+            "Requires manual intervention.",
+            "Missing credentials.",
+            "Credentials are missing.",
+            "Denied by policy.",
+            "Denied by workspace tool policy.",
+            "Denied by tool policy.",
+            "Execution denied by policy.",
+            "Blocked by tool policy.",
+        ] {
+            for variant in [text.to_string(), text.to_ascii_uppercase()] {
+                assert!(tracker_final_text_is_policy_handoff(&variant), "policy: {variant}");
+                assert!(tracker_final_text_is_safety_handoff(&variant), "safety: {variant}");
+            }
+        }
+        for text in [
+            "Verification is still pending after turn budget exhaustion.",
+            "Unverified assistant responses remain.",
+            "Anti-blind checkpoint reached.",
+            "Verification gate remains.",
+        ] {
+            let variant = text.to_ascii_uppercase();
+            assert!(!tracker_final_text_is_policy_handoff(&variant), "policy: {variant}");
+            assert!(tracker_final_text_is_safety_handoff(&variant), "safety: {variant}");
+        }
+        for text in [
+            "",
+            " \t\n\u{2003}",
+            "TURN BUDGET EXHAUSTED.",
+            "REVIEWED TOOL POLICY.",
+            "VERIFICATION PASSED.",
+        ] {
+            assert!(!tracker_final_text_is_policy_handoff(text), "policy: {text:?}");
+            assert!(!tracker_final_text_is_safety_handoff(text), "safety: {text:?}");
+        }
+    }
 
     #[test]
     fn policy_handoffs_are_distinct_from_pending_verification_recaps() {
@@ -546,17 +593,181 @@ mod tests {
         let repeated_response = "The task is complete";
         let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
         state.messages_mut().push(Message::assistant(repeated_response.to_string()));
+        let history = state.messages.clone();
+        state.push_warning("Existing warning");
+        state.consecutive_idle_turns = 3;
 
         assert!(!check_for_response_loop(repeated_response, &mut state));
+        assert_eq!(state.warnings, ["Existing warning"]);
+        assert_eq!(state.consecutive_idle_turns, 3);
+        assert!(std::sync::Arc::ptr_eq(&history, &state.messages));
     }
 
     #[test]
     fn response_loop_still_detects_prior_duplicate_assistant_message() {
         let repeated_response = "The task is complete";
-        let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
-        state.messages_mut().push(Message::assistant(repeated_response.to_string()));
-        state.messages_mut().push(Message::assistant(repeated_response.to_string()));
+        for prior_position in 0..2 {
+            let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+            for position in 0..2 {
+                let text = if position == prior_position {
+                    repeated_response
+                } else {
+                    "A different earlier response"
+                };
+                state.messages_mut().push(Message::assistant(text.to_string()));
+            }
+            state.messages_mut().push(Message::assistant(repeated_response.to_string()));
 
-        assert!(check_for_response_loop(repeated_response, &mut state));
+            assert!(check_for_response_loop(repeated_response, &mut state), "prior position {prior_position}");
+        }
+    }
+
+    #[test]
+    fn response_loop_equates_ascii_and_unicode_whitespace() {
+        for response in [
+            "The task is complete",
+            " \tThe\r\ntask\u{000b}is\u{000c}complete  ",
+            "\u{00a0}The\u{2003}task\u{2028}is\u{3000}complete\u{0085}",
+        ] {
+            let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+            state
+                .messages_mut()
+                .push(Message::assistant("The\ttask  is\ncomplete".to_string()));
+            state.messages_mut().push(Message::assistant(response.to_string()));
+
+            assert!(check_for_response_loop(response, &mut state), "response: {response:?}");
+        }
+    }
+
+    #[test]
+    fn response_loop_equates_whitespace_only_responses() {
+        let response = " \t\n\r\u{2003}\u{3000}";
+        let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+        state.messages_mut().push(Message::assistant("\n \t".to_string()));
+        state.messages_mut().push(Message::assistant(response.to_string()));
+
+        assert!(check_for_response_loop(response, &mut state));
+    }
+
+    #[test]
+    fn response_loop_rejects_different_word_sequences_without_mutating_state() {
+        for response in [
+            "The task complete is",
+            "the task is complete",
+            "The task is complete.",
+            "The task is",
+            "The task is complete now",
+            "Thetask is complete",
+            "The\u{200b}task is complete",
+        ] {
+            let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+            state
+                .messages_mut()
+                .push(Message::assistant("The task is complete".to_string()));
+            state.messages_mut().push(Message::assistant(response.to_string()));
+            let history = state.messages.clone();
+            state.push_warning("Existing warning");
+            state.consecutive_idle_turns = 3;
+
+            assert!(!check_for_response_loop(response, &mut state), "response: {response:?}");
+            assert_eq!(state.warnings, ["Existing warning"]);
+            assert_eq!(state.consecutive_idle_turns, 3);
+            assert!(std::sync::Arc::ptr_eq(&history, &state.messages));
+        }
+    }
+
+    #[test]
+    fn response_loop_ignores_duplicates_outside_prior_assistant_window() {
+        let response = "The task is complete";
+        let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+        for text in [
+            response,
+            "Second older response",
+            "Most recent prior response",
+            response,
+        ] {
+            state.messages_mut().push(Message::assistant(text.to_string()));
+        }
+        let history = state.messages.clone();
+
+        assert!(!check_for_response_loop(response, &mut state));
+        assert!(state.warnings.is_empty());
+        assert_eq!(state.consecutive_idle_turns, 0);
+        assert!(std::sync::Arc::ptr_eq(&history, &state.messages));
+    }
+
+    #[test]
+    fn response_loop_filters_interleaved_user_and_tool_messages_before_windowing() {
+        let response = "The task is complete";
+        for prior_response in [response, "An unrelated prior response"] {
+            let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+            state.messages_mut().extend([
+                Message::assistant(prior_response.to_string()),
+                Message::user(response.to_string()),
+                Message::tool_response("older-call".to_string(), response.to_string()),
+                Message::assistant("Another prior response".to_string()),
+                Message::user(response.to_string()),
+                Message::tool_response("recent-call".to_string(), response.to_string()),
+                Message::assistant(response.to_string()),
+                Message::user(response.to_string()),
+                Message::tool_response("latest-call".to_string(), response.to_string()),
+            ]);
+
+            assert_eq!(check_for_response_loop(response, &mut state), prior_response == response);
+        }
+    }
+
+    #[test]
+    fn response_loop_preserves_ten_byte_cutoff() {
+        for response in ["123456789", "éééé", "1234567890", "ééééé"] {
+            let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+            state.messages_mut().push(Message::assistant(response.to_string()));
+            state.messages_mut().push(Message::assistant(response.to_string()));
+
+            let expected = matches!(response, "1234567890" | "ééééé");
+            assert_eq!(check_for_response_loop(response, &mut state), expected, "response: {response:?}");
+            assert_eq!(state.warnings.len(), usize::from(expected));
+            assert_eq!(state.consecutive_idle_turns, usize::from(expected));
+        }
+    }
+
+    #[test]
+    fn response_loop_preserves_multipart_text_concatenation() {
+        for response in ["The task is complete", "The ta sk is complete"] {
+            let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+            state.messages_mut().push(Message::assistant_with_parts(vec![
+                ContentPart::Text { text: "The ta".to_string() },
+                ContentPart::Text { text: "sk\tis complete".to_string() },
+            ]));
+            state.messages_mut().push(Message::assistant(response.to_string()));
+            let history = state.messages.clone();
+
+            assert_eq!(check_for_response_loop(response, &mut state), response == "The task is complete");
+            assert!(std::sync::Arc::ptr_eq(&history, &state.messages));
+        }
+    }
+
+    #[test]
+    fn response_loop_preserves_warning_and_saturating_idle_counter() {
+        let response = "The task is complete";
+        for initial_idle_turns in [3, usize::MAX] {
+            let mut state = AgentSessionState::new("session".to_string(), 8, 4, 128_000);
+            state.messages_mut().push(Message::assistant(response.to_string()));
+            state.messages_mut().push(Message::assistant(response.to_string()));
+            let history = state.messages.clone();
+            state.push_warning("Existing warning");
+            state.consecutive_idle_turns = initial_idle_turns;
+
+            assert!(check_for_response_loop(response, &mut state));
+            assert_eq!(state.consecutive_idle_turns, if initial_idle_turns == 3 { 4 } else { usize::MAX });
+            assert_eq!(
+                state.warnings,
+                [
+                    "Existing warning",
+                    "Repetitive assistant response detected. Breaking potential loop."
+                ]
+            );
+            assert!(std::sync::Arc::ptr_eq(&history, &state.messages));
+        }
     }
 }

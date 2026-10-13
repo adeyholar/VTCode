@@ -175,10 +175,9 @@ fn is_inline_code_execution(command: &[String]) -> bool {
         }
         "php" | "php.exe" => arguments.iter().any(|argument| argument == "-r"),
         "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => arguments.iter().any(|argument| {
-            matches!(
-                argument.to_ascii_lowercase().as_str(),
-                "-command" | "-c" | "-encodedcommand" | "-encoded" | "-enc" | "-e"
-            )
+            ["-command", "-c", "-encodedcommand", "-encoded", "-enc", "-e"]
+                .iter()
+                .any(|option| argument.eq_ignore_ascii_case(option))
         }),
         _ => false,
     }
@@ -194,7 +193,9 @@ fn is_encoded_powershell_invocation(command: &[String]) -> bool {
     }
 
     command.iter().skip(1).any(|argument| {
-        matches!(argument.to_ascii_lowercase().as_str(), "-encodedcommand" | "-encoded" | "-enc" | "-e")
+        ["-encodedcommand", "-encoded", "-enc", "-e"]
+            .iter()
+            .any(|option| argument.eq_ignore_ascii_case(option))
     })
 }
 
@@ -531,6 +532,60 @@ mod tests {
 
     fn vec_str(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn powershell_encoded_options_remain_hard_denials_in_any_ascii_case() {
+        for executable in ["powershell", "PowerShell.exe", "pwsh", "PWSH.EXE", "/usr/bin/pwsh"] {
+            for option in ["-encodedcommand", "-encoded", "-enc", "-e"] {
+                for variant in [option.to_string(), option.to_ascii_uppercase()] {
+                    let command = vec_str(&[executable, "-NoProfile", &variant, "ZQ=="]);
+                    assert!(command_might_be_dangerous(&command), "hard denial: {command:?}");
+                    assert!(command_requires_approval(&command), "approval classification: {command:?}");
+                }
+            }
+        }
+        let wrapped = vec_str(&["env", "MODE=test", "pwsh", "-EnCoDeDcOmMaNd", "ZQ=="]);
+        assert!(command_might_be_dangerous(&wrapped));
+        assert!(command_requires_approval(&wrapped));
+    }
+
+    #[test]
+    fn powershell_inline_options_require_approval_without_hard_denial() {
+        for executable in ["powershell", "powershell.exe", "pwsh", "pwsh.exe"] {
+            for option in ["-command", "-c", "-Command", "-COMMAND", "-C"] {
+                let command = vec_str(&[executable, "-NoProfile", option, "Write-Output ok"]);
+                assert!(!command_might_be_dangerous(&command), "inline code: {command:?}");
+                assert!(command_requires_approval(&command), "approval: {command:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn powershell_option_near_misses_and_non_powershell_programs_stay_distinct() {
+        for option in [
+            "-commands",
+            "-encodedcommandx",
+            "--enc",
+            "enc",
+            "-en",
+            "-e=ZQ==",
+            "-command ",
+            " -command",
+            "-commánd",
+            "-enç",
+        ] {
+            let command = vec_str(&["pwsh", option, "example.ps1"]);
+            assert!(!command_might_be_dangerous(&command), "near miss: {command:?}");
+            assert!(!command_requires_approval(&command), "near miss: {command:?}");
+        }
+        for command in [
+            vec_str(&["pwsh", "-File", "example.ps1"]),
+            vec_str(&["echo", "-ENCODEDCOMMAND", "ZQ=="]),
+        ] {
+            assert!(!command_might_be_dangerous(&command), "ordinary arguments: {command:?}");
+            assert!(!command_requires_approval(&command), "ordinary arguments: {command:?}");
+        }
     }
 
     #[test]

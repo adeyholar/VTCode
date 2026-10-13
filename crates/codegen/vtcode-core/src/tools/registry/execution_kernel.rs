@@ -585,8 +585,8 @@ fn resolve_mcp_proxy_dispatch_target(registry: &ToolRegistry) -> Option<Result<S
 /// widen the harness-dispatchable surface.
 fn resolve_internal_dispatch_tool(registry: &ToolRegistry, name: &str) -> Option<String> {
     super::assembly::public_tool_name_candidates(name)
-        .into_iter()
-        .map(|candidate| candidate.trim().to_ascii_lowercase())
+        .iter()
+        .map(|candidate| candidate.trim())
         .filter(|candidate| !candidate.is_empty())
         .find(|candidate| {
             HARNESS_DISPATCHABLE_INTERNAL_TOOLS
@@ -594,6 +594,7 @@ fn resolve_internal_dispatch_tool(registry: &ToolRegistry, name: &str) -> Option
                 .any(|allowed| allowed.eq_ignore_ascii_case(candidate))
         })
         .and_then(|candidate| {
+            let candidate = candidate.to_ascii_lowercase();
             registry
                 .inventory
                 .registration_for(&candidate)
@@ -797,10 +798,11 @@ mod tests {
     use super::super::ToolExecutionRequest;
     use super::super::assembly::public_tool_name_candidates;
     use super::{
-        ToolRegistry, coerce_string_to_schema_type_in_place, configured_file_operation_max_payload_bytes,
+        DispatchMode, ToolRegistry, coerce_string_to_schema_type_in_place, configured_file_operation_max_payload_bytes,
         enforce_file_operation_payload_limit, is_missing_required_arg, normalize_tool_args,
         parse_file_operation_max_payload_bytes, parse_string_as_schema_type, preflight_validate_call,
-        preflight_validate_resolved_call, public_exec_validation_args,
+        preflight_validate_resolved_call, public_exec_validation_args, resolve_dispatch_target,
+        resolve_internal_dispatch_tool,
     };
     use crate::config::constants::tools as tool_names;
     use crate::tools::command_args::parse_indexed_command_parts;
@@ -813,6 +815,57 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp workspace");
         let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
         (temp, registry)
+    }
+
+    #[tokio::test]
+    async fn internal_dispatch_preserves_normalization_and_candidate_order() {
+        let (_temp, registry) = new_test_registry().await;
+        for name in [
+            "read_file",
+            "  ReAd_FiLe  ",
+            "functions.ReAd_FiLe",
+            "tools.read-file",
+            "READ FILE",
+            "unknown:READ_FILE",
+        ] {
+            assert_eq!(
+                resolve_internal_dispatch_tool(&registry, name).as_deref(),
+                Some(tool_names::READ_FILE),
+                "{name}"
+            );
+            assert_eq!(resolve_dispatch_target(&registry, name, DispatchMode::Harness).unwrap(), tool_names::READ_FILE);
+            assert!(resolve_dispatch_target(&registry, name, DispatchMode::ModelPublic).is_err(), "{name}");
+        }
+        for name in [tool_names::WRITE_FILE, tool_names::EDIT_FILE, tool_names::LIST_FILES] {
+            assert_eq!(resolve_internal_dispatch_tool(&registry, name).as_deref(), Some(name));
+        }
+        assert_eq!(
+            resolve_internal_dispatch_tool(&registry, "read_file<|channel|>WRITE_FILE").as_deref(),
+            Some(tool_names::WRITE_FILE)
+        );
+        assert_eq!(
+            resolve_internal_dispatch_tool(&registry, "read_file<|channel|>write_file:list_files").as_deref(),
+            Some(tool_names::READ_FILE)
+        );
+    }
+
+    #[tokio::test]
+    async fn internal_dispatch_rejects_hidden_tools_outside_allowlist_and_near_misses() {
+        let (_temp, registry) = new_test_registry().await;
+        assert!(registry.inventory.registration_for(tool_names::GET_ERRORS).is_some());
+        for name in [
+            "",
+            " \t\u{2003}",
+            "GET_ERRORS",
+            "functions.get_errors",
+            "read_files",
+            "repo_browser.read_file",
+            "READ_FİLE",
+        ] {
+            assert!(resolve_internal_dispatch_tool(&registry, name).is_none(), "{name:?}");
+            assert!(resolve_dispatch_target(&registry, name, DispatchMode::Harness).is_err(), "{name:?}");
+            assert!(resolve_dispatch_target(&registry, name, DispatchMode::ModelPublic).is_err(), "{name:?}");
+        }
     }
 
     #[test]
