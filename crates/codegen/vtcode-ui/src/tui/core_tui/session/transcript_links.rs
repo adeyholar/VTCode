@@ -1,14 +1,14 @@
-use crate::tui::utils::transcript::{has_explicit_path_syntax, trim_transcript_token_bounds};
+use crate::tui::utils::transcript::{
+    NON_WHITESPACE_TOKEN_PATTERN, QUOTED_PATH_PATTERN, has_explicit_path_syntax, trim_transcript_token_bounds,
+};
 use std::borrow::Cow;
 use std::path::Path;
-use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use regex::Regex;
 use unicode_width::UnicodeWidthStr;
 use vtcode_commons::{EditorTarget, parse_editor_target};
 
@@ -19,15 +19,7 @@ use super::{
     wrapping,
 };
 use crate::tui::ui::tui::types::InlineLinkTarget;
-static NON_WHITESPACE_TOKEN_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\S+").expect("valid transcript token regex"));
 const LINK_OPEN_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
-static QUOTED_PATH_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"`(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^`]+`|"(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^"]+"|'(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^']+'"#,
-    )
-    .expect("valid quoted transcript path regex")
-});
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TranscriptFileLinkTarget {

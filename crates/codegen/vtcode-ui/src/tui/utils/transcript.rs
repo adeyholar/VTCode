@@ -1,6 +1,24 @@
+use regex::Regex;
+use std::sync::LazyLock;
+
 pub(crate) fn display_error(message: &str) {
     tracing::error!("{message}");
 }
+
+/// Shared token scanners for transcript and markdown link detectors.
+///
+/// Both detectors first match quoted paths, then fall back to whitespace
+/// tokens while skipping ranges already claimed by a quoted match. The
+/// patterns are byte-identical by construction; per-match building,
+/// extension policy, and filesystem resolution stay caller-owned.
+pub(crate) static NON_WHITESPACE_TOKEN_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\S+").expect("valid transcript token regex"));
+pub(crate) static QUOTED_PATH_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"`(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^`]+`|"(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^"]+"|'(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^']+'"#,
+    )
+    .expect("valid quoted transcript path regex")
+});
 
 /// Shared explicit path-syntax check for transcript and markdown link detectors.
 ///

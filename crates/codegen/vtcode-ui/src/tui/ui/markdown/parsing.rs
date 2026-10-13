@@ -5,22 +5,13 @@ use super::links::{
 use super::tables::{TableBuffer, render_table};
 use super::{LIST_INDENT_WIDTH, MarkdownLine};
 use crate::tui::ui::theme::ThemeStyles;
-use crate::tui::utils::transcript::{has_explicit_path_syntax, trim_transcript_token_bounds};
+use crate::tui::utils::transcript::{
+    NON_WHITESPACE_TOKEN_PATTERN, QUOTED_PATH_PATTERN, has_explicit_path_syntax, trim_transcript_token_bounds,
+};
 use anstyle::Style;
 use pulldown_cmark::{CodeBlockKind, HeadingLevel, Tag, TagEnd};
-use regex::Regex;
 use std::cmp::max;
-use std::sync::LazyLock;
 use vtcode_commons::parse_editor_target;
-
-static NON_WHITESPACE_TOKEN_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\S+").expect("valid transcript token regex"));
-static QUOTED_PATH_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"`(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^`]+`|"(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^"]+"|'(?:file://|~/|/|\./|\.\./|[A-Za-z]:[\\/]|[A-Za-z0-9._-]+[\\/])[^']+'"#,
-    )
-    .expect("valid quoted transcript path regex")
-});
 
 const COMMON_FILE_EXTENSIONS: &[&str] = &[
     "rs", "toml", "md", "json", "yaml", "yml", "js", "jsx", "ts", "tsx", "py", "go", "java", "kt", "swift", "c", "h",
