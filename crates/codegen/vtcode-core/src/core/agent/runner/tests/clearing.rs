@@ -53,6 +53,14 @@ async fn headless_noop_compaction_preserves_shared_history() {
         let mut state = AgentSessionState::new("noop-sharing".into(), 1, 1, case.capacity);
         state.messages = Arc::new(vec![Message::user("retained source ".repeat(1_000))]);
         state.auto_compact_suppressed = case.suppressed;
+        let miss = crate::exec::events::Usage {
+            input_tokens: 12740,
+            cached_input_tokens: 0,
+            cache_creation_tokens: 5212,
+            output_tokens: 147,
+        };
+        assert!(state.stats.prompt_cache_health.record_turn(&miss).is_none());
+        assert!(state.stats.prompt_cache_health.record_turn(&miss).is_none());
         let projection = runner.project_request_history(&state, "unknown-clearing-model", 0, 2_000);
         assert!(Arc::ptr_eq(&projection, &state.messages));
         let mut recorder = ExecEventRecorder::new("noop-sharing", None, None);
@@ -68,6 +76,7 @@ async fn headless_noop_compaction_preserves_shared_history() {
             )
             .await;
         assert!(!compacted);
+        assert!(state.stats.prompt_cache_health.record_turn(&miss).is_some(), "no-op must preserve the streak");
         assert!(Arc::ptr_eq(&projection, &state.messages), "no-op compaction must not copy shared history");
         assert_eq!(state.auto_compact_suppressed, case.suppressed);
         assert!(provider.requests.lock().is_empty());
@@ -75,6 +84,47 @@ async fn headless_noop_compaction_preserves_shared_history() {
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], ThreadEvent::ThreadStarted(_)));
     }
+}
+
+#[tokio::test]
+async fn headless_successful_compaction_starts_new_cache_health_streak() {
+    let temp = TempDir::new().unwrap();
+    let mut cfg = VTCodeConfig::default();
+    cfg.agent.harness.auto_compaction_enabled = true;
+    cfg.context.max_context_tokens = 32000;
+    let mut runner = Box::pin(make_runner(&temp, cfg, "cache-compaction")).await;
+    runner.provider_client = Box::new(ClearingProvider {
+        name: "queued-test-provider",
+        capacity: 32000,
+        requests: Arc::new(Mutex::new(Vec::new())),
+    });
+    let mut bundle = runner.build_validated_runtime_prompt_bundle(false).await.unwrap();
+    let mut state = AgentSessionState::new("cache-compaction".into(), 1, 1, 32000);
+    state.messages = Arc::new(evidence_history(32000, false));
+    let miss = crate::exec::events::Usage {
+        input_tokens: 12740,
+        cached_input_tokens: 0,
+        cache_creation_tokens: 5212,
+        output_tokens: 147,
+    };
+    assert!(state.stats.prompt_cache_health.record_turn(&miss).is_none());
+    assert!(state.stats.prompt_cache_health.record_turn(&miss).is_none());
+    assert!(
+        runner
+            .maybe_auto_compact(
+                &mut state,
+                &mut ExecEventRecorder::new("cache-compaction", None, None),
+                "unknown-clearing-model",
+                2,
+                30000,
+                2000,
+                &mut bundle.request_envelope
+            )
+            .await
+    );
+    assert!(state.stats.prompt_cache_health.record_turn(&miss).is_none());
+    assert!(state.stats.prompt_cache_health.record_turn(&miss).is_none());
+    assert!(state.stats.prompt_cache_health.record_turn(&miss).is_some());
 }
 
 #[derive(Clone)]

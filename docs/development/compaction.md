@@ -85,14 +85,37 @@ See the [architecture diagram](../ARCHITECTURE.md#request-projection-and-context
 | Anthropic Claude Opus 4.x / Sonnet 4.6+                                 | `NativeInline`     | Threshold-triggered `compact_20260112` edit on a `generate` request with `pause_after_compaction`. Falls back to `Local` when compaction does not fire or the edit is rejected.                                                                                                                                                                                                                                                                                                                                            |
 | Merge Gateway, OpenRouter, Gemini, DeepSeek, MiniMax, local, all others | `Local`            | No native compact endpoint: Merge Gateway documents no `/responses/compact` (its native `/v1/responses` shape differs from OpenAI's); OpenRouter reports compaction unsupported (its `context-compression` plugin is opt-in middle-out truncation, never enabled implicitly). Universal fallback: bounded fork summarized via the provider's one-shot response collector (which transparently consumes a normalized stream for streaming-only routes), rebuilt as summary plus retained recent messages. Works everywhere. |
 
+## Live parent-prefix reuse
+
+Interactive manual, recovery, targeted, and automatic compaction reuse the active request envelope through the shared
+`CompactionParentContext` API already used by the headless runner. The snapshot carries shared system-prompt and ordered
+catalog owners only when the provider and model match; segment clearing, model switches, or a missing envelope leave
+parent context absent. Local and inline requests keep the supplied catalog while disabling tool use. Existing history
+and summary budgets still apply, and native standalone results remain canonical.
+
+## Compaction messages and cache health
+
+Successful compaction reports elapsed time, mode, and before/after context-item counts. Counts include opaque provider
+items and are not token or cost estimates. The completion message explains that cache reuse may be lower on the next
+request. Failures keep history, display a bounded root cause without the duplicate provider JSON body, and retain the
+bounded, secret-redacted error chain in the debug log. Model-switch failures explicitly say that the model changed
+and continuation uses the full history with a resume note.
+
+The shared cache monitor resets only its consecutive low-reuse streak after successful compaction. Manual, recovery,
+and model-switch commits use the same reset; failures and no-ops do not reset it. Session token totals and cumulative
+alerts stay intact. Native OpenAI generation maintains a separate bounded comparison baseline across compaction,
+while replay lineage is cleared normally. See the [prompt caching guide](../tools/PROMPT_CACHING_GUIDE.md#openai-cache-comparison-diagnostics)
+for wire hints, supported backends, comparison evidence, and billing limits.
+
 ## OpenAI standalone request contract
 
 OpenAI standalone compaction uses a synchronous JSON response. Its payload carries `model`, `input`, optional
 `instructions`, and supported service-tier/cache fields (`service_tier`, `prompt_cache_key`, `prompt_cache_options`,
 `prompt_cache_retention`). VT Code does not send generation-only fields: `stream` (even `false`), `max_output_tokens`,
 `store`, `include`, `reasoning`, or `text`. Generation overrides in the shared compaction options do not apply to this
-endpoint. Custom compaction instructions and history system reminders remain available to the compactor, and retained
-messages plus encrypted compaction items are replayed in the next Responses request.
+endpoint. Generation comparison IDs are also omitted from the compact options. Custom compaction instructions and
+history system reminders remain available to the compactor, and retained messages plus encrypted compaction items are
+replayed in the next Responses request.
 
 See the [OpenAI compact API reference](https://developers.openai.com/api/reference/python/resources/responses/methods/compact)
 for the endpoint schema; streaming server-side compaction on `/responses` is a separate request mode.

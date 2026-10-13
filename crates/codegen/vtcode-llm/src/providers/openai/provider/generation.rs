@@ -263,7 +263,15 @@ impl OpenAIProvider {
                 "prompt_cache_retention",
             ] {
                 if let Some(value) = responses_request.get(key) {
-                    map.insert(key.to_string(), value.clone());
+                    let mut value = value.clone();
+                    // Diagnostics compare generation responses; standalone
+                    // compaction has a narrower options schema.
+                    if key == "prompt_cache_options"
+                        && let Some(options) = value.as_object_mut()
+                    {
+                        options.remove("comparison_response_id");
+                    }
+                    map.insert(key.to_string(), value);
                 }
             }
         }

@@ -100,7 +100,10 @@ impl AgentRunner {
             return false;
         }
         let outcome = match auto_compact_messages(input, Arc::make_mut(&mut session_state.messages)).await {
-            Ok(Some(outcome)) => outcome,
+            Ok(Some(outcome)) => {
+                session_state.stats.prompt_cache_health.record_compaction_boundary();
+                outcome
+            }
             Ok(None) => return false,
             Err(error) => {
                 warn!(

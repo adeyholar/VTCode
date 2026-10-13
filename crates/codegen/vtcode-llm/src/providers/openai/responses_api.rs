@@ -13,6 +13,8 @@ use crate::providers::shared::{
 use hashbrown::HashMap;
 use serde_json::{Value, json};
 
+mod cache_diagnostics;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ResponsesToolCallKind {
     Function,
@@ -280,11 +282,26 @@ pub(crate) fn parse_responses_completion(
     model: String,
     include_cached_prompt_metrics: bool,
 ) -> Result<LLMResponse, LLMError> {
+    let cache_diagnostics = cache_diagnostics::parse(&response_json);
     let service_tier = response_json
         .get("service_tier")
         .and_then(Value::as_str)
         .filter(|tier| matches!(*tier, "default" | "standard" | "auto" | "flex" | "priority" | "fast" | "ultrafast"))
         .map(compact_str::CompactString::new);
+    // Streaming can deliver usable deltas with an empty authoritative output.
+    // Its existing fallback reconstructs the answer after this parser rejects
+    // the empty array; cache evidence belongs to the completion envelope and
+    // must be recorded independently of that content reconstruction.
+    if let Some(diagnostics) = cache_diagnostics {
+        tracing::info!(
+            model = %model,
+            cache_comparison_type = diagnostics.kind,
+            cache_miss_reason = diagnostics.reason,
+            cache_missed_tokens = diagnostics.missed_tokens,
+            comparison_reusable_tokens = diagnostics.reusable_tokens,
+            "OpenAI Responses prompt cache comparison"
+        );
+    }
     let response = parse_responses_payload(response_json, model, include_cached_prompt_metrics)?;
     if let Some(service_tier) = service_tier {
         tracing::info!(

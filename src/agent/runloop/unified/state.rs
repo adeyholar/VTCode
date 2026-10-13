@@ -252,7 +252,31 @@ pub(crate) struct RequestSegmentTransition {
 }
 
 impl SessionStats {
+    pub(crate) fn compaction_parent_context(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Option<vtcode_core::compaction::CompactionParentContext> {
+        let identity = self.request_envelope_identity.as_ref()?;
+        if identity.provider != provider || identity.model != model {
+            return None;
+        }
+        let envelope = self.request_envelope.as_ref()?;
+        let tools = envelope.ordered_tools();
+        Some(vtcode_core::compaction::CompactionParentContext {
+            system_prompt: Some(envelope.system_prompt()),
+            tools: (!tools.is_empty()).then_some(tools),
+        })
+    }
+
+    pub(crate) fn record_compaction_boundary(&mut self) {
+        self.prompt_cache_health.record_compaction_boundary();
+    }
+
     pub(crate) fn begin_request_segment(&mut self, boundary_reason: SegmentBoundaryReason) -> RequestSegmentTransition {
+        if boundary_reason == SegmentBoundaryReason::Compaction {
+            self.record_compaction_boundary();
+        }
         let previous_segment_id = self.request_envelope.as_ref().map(|envelope| envelope.segment_id().to_string());
         let previous_prefix_hash = self
             .request_envelope
@@ -1474,6 +1498,31 @@ mod tests {
 
     fn function_tool(name: &str) -> ToolDefinition {
         ToolDefinition::function(name.to_string(), name.to_string(), serde_json::json!({"type": "object"}))
+    }
+
+    #[test]
+    fn compaction_parent_context_reuses_arcs_only_for_matching_identity() {
+        let mut stats = SessionStats::default();
+        assert!(stats.compaction_parent_context("openai", "model-a").is_none());
+        let envelope = stats.request_envelope(
+            "model-a",
+            "openai",
+            "build",
+            "fixed instructions".into(),
+            vec![function_tool("zeta"), function_tool("alpha")],
+            7,
+        );
+        assert!(stats.compaction_parent_context("anthropic", "model-a").is_none());
+        assert!(stats.compaction_parent_context("openai", "model-b").is_none());
+        let parent = stats.compaction_parent_context("openai", "model-a").unwrap();
+        assert!(Arc::ptr_eq(parent.system_prompt.as_ref().unwrap(), &envelope.system_prompt()));
+        assert!(Arc::ptr_eq(parent.tools.as_ref().unwrap(), &envelope.ordered_tools()));
+        stats.begin_request_segment(SegmentBoundaryReason::Compaction);
+        assert!(stats.compaction_parent_context("openai", "model-a").is_none());
+        stats.request_envelope("model-b", "openai", "build", "new instructions".into(), vec![], 7);
+        let parent = stats.compaction_parent_context("openai", "model-b").unwrap();
+        assert_eq!(parent.system_prompt.as_deref(), Some("new instructions"));
+        assert!(parent.tools.is_none());
     }
 
     #[test]

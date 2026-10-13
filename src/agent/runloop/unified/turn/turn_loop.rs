@@ -760,14 +760,16 @@ pub(crate) async fn run_turn_loop(
                         break;
                     }
                     tracing::warn!(
-                        error = %err,
+                        error = %crate::agent::runloop::unified::turn::compaction::format_compaction_error_details(&err),
                         "Post-tool recovery compaction failed; preserving the existing history for the bounded retry"
                     );
-                    let prefix =
-                        crate::agent::runloop::unified::turn::compaction::format_compaction_failed(recovery_elapsed);
+                    let prefix = crate::agent::runloop::unified::turn::compaction::format_compaction_failed(
+                        recovery_elapsed,
+                        &err,
+                    );
                     let _ = ctx.renderer.line(
                         MessageStyle::Warning,
-                        &format!("{prefix} Recovery compaction failed; continuing with full history."),
+                        &format!("{prefix} Continuing with full history for the bounded retry."),
                     );
                 }
             }

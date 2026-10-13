@@ -32,49 +32,61 @@ global `enabled` flag and the provider-level `enabled` flag are `true`.
 ```toml
 [prompt_cache.providers.openai]
 enabled = true
-min_prefix_tokens = 256
-idle_expiration_seconds = 3600
 surface_metrics = true
+prompt_cache_key_mode = "session" # session | off
 ```
 
-- `min_prefix_tokens` — minimum number of prompt tokens before the API is asked to cache the prefix.
-- `idle_expiration_seconds` — how long (in seconds) a cached prefix can remain idle before expiry.
-- `surface_metrics` — when enabled, OpenAI usage responses expose cache-hit statistics surfaced through VT Code’s usage
-  telemetry.
-- `prompt_cache_retention` — optional OpenAI Responses API retention policy for cached prefixes. Supported values are
-  `"in_memory"` and `"24h"`.
-- Default: `None` (opt-in) - VT Code does not set prompt_cache_retention by default; so OpenAI keeps its default
-  `in_memory` behavior unless you opt in explicitly.
-- GPT-5.6-family Responses requests additionally send `prompt_cache_options: {"ttl": "30m"}` by default (currently the
-  only TTL OpenAI accepts for these models), declaring cache intent explicitly instead of relying on the implicit
-  default alone. An explicit catalog TTL or a configured `prompt_cache_retention` takes precedence where applicable.
-- GPT-5.6+ Responses requests mark explicit `prompt_cache_breakpoint` boundaries on stable history (up to 4). Pre-5.6
-  exact matching only had the implicit latest-message breakpoint, so a growing conversation never partial-matched;
-  explicit markers let later turns reuse the stable prefix while the suffix churns. The relocated `[System reminder]`
-  tail never receives a marker (it varies per turn); a single-item request still marks its one stable item so the first
-  request writes. Older models reject the field, so markers are 5.6-family-only. Markers are also first-party-only: VT
-  Code emits them solely on the native api.openai.com backend. Third-party Responses-compatible endpoints (for example
-  Merge Gateway through a base-URL override) reject the field with 400 `invalid_parameter`, and the ChatGPT subscription
-  backend rejects it with 400 `prompt_cache_breakpoint is not supported on this model`; those backends keep the implicit
-  latest-message breakpoint, so caching still works — only the explicit stable-prefix markers are dropped.
-- Responses `instructions` carry only the stable system prefix. Volatile sections (`[Harness Limits]`,
-  `[Runtime Tool Catalog]`, `[Deferred Tools]`, planning notices, `## Environment`) and history `System` messages
-  (compaction summaries, resume notes) move to a trailing `[System reminder]` input item, mirroring the Anthropic wire
-  split. Chat Completions likewise sends stable instructions as the leading system message and volatile sections as a
-  trailing system message. History order is otherwise untouched.
-- Example CLI override to enable 24h retention for Responses model:
+- `enabled` — controls VT Code's explicit cache hints and metrics together with the global flag. Disabling either
+  flag omits OpenAI cache keys, retention options, and explicit breakpoints. OpenAI's automatic server caching can
+  still occur; the local switch cannot disable it.
+- `surface_metrics` — exposes provider usage counters and enables comparisons against the latest successful
+  foreground response on supported native Responses models.
+- `min_prefix_tokens` and `idle_expiration_seconds` are accepted legacy settings; the OpenAI provider does not use
+  them to request caching or set server expiry. GPT-5.6 and later require at least 1,024 visible input tokens in a
+  reusable prefix. Short prompts need no padding; measure total cost before adding context.
+- `prompt_cache_retention` is opt-in for older supported Responses models (`"in_memory"` or `"24h"`). GPT-5.6/GPT-6
+  use `prompt_cache_options.ttl: "30m"` instead; their TTL is not extended by configuring legacy 24h retention.
+- Native GPT-5.6/GPT-6 requests keep implicit caching and use at most **three** explicit write slots. A supplied
+  stable system prompt moves into the first developer `input_text` block with a breakpoint, without duplication.
+  The remaining slots mark recent stable history boundaries. This preserves an instruction anchor when history
+  is compacted. Replay-only fallback instructions keep their existing top-level representation.
+- Volatile runtime sections and history system reminders stay in a trailing user-role `[System reminder]` item
+  with no explicit marker. Older models, ChatGPT subscriptions, and third-party endpoints keep their compatible
+  request shapes without explicit markers. Earlier models can reuse partial prefixes through implicit boundaries.
+- Keys remain stable per session. On GPT-5.6 and later, keys separate cache accounting; older models use them to
+  help routing locality. Use `prompt_cache_key_mode = "off"` when separate accounting is unnecessary.
 
-  ```bash
-  vtcode --model gpt-5 --config prompt_cache.providers.openai.prompt_cache_retention=24h ask "Explain this function"
-  ```
+These rules follow the [OpenAI prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching).
+Cache writes, reads, and uncached input are different billing categories; a cache miss does not mean all input was
+charged at the uncached rate. Compaction can reduce total input cost despite a lower hit rate.
 
-- To list all Response-API-enabled OpenAI models:
+### OpenAI cache comparison diagnostics
 
-  ```bash
-  vtcode models list --provider openai
-  ```
+With global/provider caching and `surface_metrics` enabled, native GPT-5.6/GPT-6 generation requests send
+`prompt_cache_options.comparison_response_id` after the first successful foreground response. The provider retains
+one bounded response ID scoped to the request's cache key. A different key starts without a comparison; auxiliary
+summaries, standalone compaction, failed requests, and streams dropped before completion do not advance the baseline.
+The comparison survives replay-lineage clearing so a post-compaction request can explain a changed history prefix.
+It does not restore conversation content or alter generation.
 
-- Applies only to OpenAI models that use the Responses API; for other models this value is ignored.
+Both HTTP streaming surfaces, non-streaming HTTP, and WebSocket completions log comparison evidence independently
+of final content parsing, including delta-only replies with an empty completed `output`, in
+`OpenAI Responses prompt cache comparison` debug-log entries:
+
+| Field | Meaning |
+| --- | --- |
+| `cache_comparison_type` | `cache_hit`, `cache_miss`, `comparison_response_not_found`, or `unavailable` |
+| `cache_miss_reason` | Provider-classified model, tier, tools, format, effort, verbosity, input, key, or compaction change |
+| `cache_missed_tokens` | Estimated comparison-prefix tokens that were not reused |
+| `comparison_reusable_tokens` | Optional estimated reusable size of the baseline prefix |
+
+Only known status/reason values and numeric counts are logged. Missing, malformed, or expired comparison records do
+not fail generation. `cache_hit` does not imply 100% reuse; use actual usage counters for billing and hit rates.
+See [OpenAI cache diagnostics](https://developers.openai.com/api/docs/guides/prompt-caching/diagnostics).
+
+WebSocket `generate: false` transport warmup is separate from `prompt_cache_options.prewarm`. VT Code does not send
+additional paid cache-prewarm requests. It also keeps reasoning/model changes and catalog segment boundaries
+explicit rather than silently changing requested behavior to improve cache percentages.
 
 ## Prefix Stability Rules
 
@@ -116,17 +128,18 @@ history message on turns that actually need it, so the cached prefix stays stabl
 
 ### Cache-safe compaction forking
 
-When the context window fills, compaction forks the cached call: the request reuses the parent segment's exact system
-prompt, ordered tools, and conversation prefix, with only the compaction instruction appended as the new final turn. The
-summary is then installed and a new immutable segment begins (`thread.compact_boundary` records the before/after prefix
-and catalog hashes). Standalone single-message summarization (no parent prefix) is only a fallback and pays full input
-cost.
+For a live session with a matching provider/model envelope, local compaction carries the parent's exact system prompt
+and ordered tool catalog, with `tool_choice: none`, and appends the compaction instruction to the summary input. Both
+runloops use the existing `CompactionParentContext`: the interactive path forwards it for manual, recovery, targeted,
+and automatic compaction. A stale provider/model envelope is not reused. History bounding or repeated-read reduction
+can shorten or change the conversation portion, so full-prefix cache reuse is not guaranteed.
 
-All local summarization paths fork this way: flat single-pass summaries, hierarchical abstract/detail band requests
-(which reuse the parent system/tools prefix with `tool_choice: none`), and prefire two-pass pass-2 requests. Native
-inline compaction (`compact_20260112`) likewise attaches the parent system/tools prefix with `tool_choice: none`, and
-its local fallbacks forward the parent so a rejected inline attempt does not lose the fork. Provider-native standalone
-compaction (OpenAI `/responses/compact`) is server-side and needs no fork.
+Flat summaries, hierarchical abstract/detail requests, prefire pass-2 requests, and native inline compaction
+(`compact_20260112`) propagate a supplied parent through their existing shared builders. Inline failures retain that
+parent for local fallback. Saved-session forks and requests without a live matching envelope use the existing bounded
+fallback. Provider-native standalone compaction (OpenAI `/responses/compact`) has its own server-side contract.
+The summary is then installed and a new immutable segment begins; `thread.compact_boundary` records the prefix and
+catalog hashes. Compare actual read/write/uncached token costs instead of assuming a summary fork is a cache hit.
 
 ### Tool-free recovery keeps the tool prefix
 
@@ -163,10 +176,15 @@ turn's normalized usage into a shared session health monitor (`core::agent::cach
 Turns without provider cache metrics or below 1,024 input tokens are ignored as noise. Two session-scoped alerts fire at
 most once each, via `tracing::warn` plus the runloop's user-warning channel:
 
-- **Sustained misses** — 3 consecutive measured turns each reusing under 50% of cache. Indicates the session is
-  re-paying full input cost turn after turn. The warning includes the cumulative hit rate (`cached/total input`) over
-  measured turns.
+- **Sustained low reuse** — 3 consecutive measured requests each reusing under 50% of their input. Partial hits
+  count as degraded; the warning does not describe them as full-cost misses. It includes the cumulative hit rate
+  (`cached/total input`) over measured turns.
 - **Low hit rate** — after 8 measured turns, the cumulative hit rate (`cached/total input`) is under 25%.
+
+Successful compaction resets the consecutive streak in both runloops, including manual, recovery, and model-switch
+compaction. Session totals, cumulative hit-rate alerts, and one-shot warning latches remain intact. Failed or no-op
+compaction preserves the streak. Initial cold writes and intentionally compacted history can have low reuse even
+when the client prefix/catalog hashes are unchanged; check comparison evidence before attributing churn to VT Code.
 
 No-op catalog refreshes (version/epoch bump with identical tool bytes and stable prompt) preserve the frozen request
 envelope so the provider prefix stays hot; only provider-visible changes rebuild it.
@@ -221,7 +239,7 @@ suffix stripped). Blank lineage omits both fields.
 
 | Provider path                                          | Session / cache identity                             | Notes                                                                                                                       |
 | ------------------------------------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI native / ChatGPT / OpenResponses                | `prompt_cache_key` = `vtcode:openai:{lineage}`       | Required for multi-turn affinity on pre-5.6 models; optional on 5.6+                                                        |
+| OpenAI native / ChatGPT / OpenResponses                | `prompt_cache_key` = `vtcode:openai:{lineage}`       | Routing hint on earlier models; optional separate cache accounting on GPT-5.6+                                              |
 | Merge Gateway native                                   | `session_id` + `X-Session-Id` (+ `prompt_cache_key`) | Automatic caching on many upstream routes; no explicit `prompt_cache_breakpoint` markers (Merge rejects the field with 400) |
 | OpenRouter                                             | body `session_id` + header `x-session-id`            | Sticky provider routing; body wins over header; **requires global `[prompt_cache] enabled=true`**                           |
 | xAI native Chat Completions                            | header `x-grok-conv-id` + body `prompt_cache_key`    | Per-server cache affinity; **requires global `[prompt_cache] enabled=true`**                                                |
@@ -381,7 +399,7 @@ metrics when available.
 When caching is active, `Usage` structs now include:
 
 - `cached_prompt_tokens` — tokens served from cache (OpenAI, OpenRouter).
-- `cache_creation_tokens` — tokens spent establishing a new cache entry (Anthropic, OpenRouter).
+- `cache_creation_tokens` — tokens spent establishing a new cache entry (including OpenAI `cache_write_tokens`).
 - `cache_read_tokens` — tokens satisfied from an existing cache entry (Anthropic, OpenRouter).
 
 These metrics flow through `vtcode-core::llm::types::Usage` and appear anywhere VT Code reports token accounting.
@@ -407,7 +425,7 @@ The prompt caching system is implemented as a multi-layered architecture:
 1. **Global Configuration Layer**: Managed in `crates/codegen/vtcode-config/src/core/prompt_cache.rs` with global and
    per-provider settings
 2. **Provider Integration Layer**: Each provider has specific cache control implementation in
-   `crates/codegen/vtcode-core/src/llm/providers/`
+   `crates/codegen/vtcode-llm/src/providers/`
 3. **Local Caching Layer**: File-based caching engine in `crates/codegen/vtcode-core/src/core/prompt_caching.rs` for
    optimized prompt storage
 4. **Runtime Integration**: Cache configuration flows through the provider factory to ensure proper initialization

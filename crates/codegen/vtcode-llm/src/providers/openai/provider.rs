@@ -42,6 +42,7 @@ use super::response_parser;
 use super::responses_api::parse_responses_completion;
 use super::types::{MAX_COMPLETION_TOKENS_FIELD, OpenAIResponsesPayload, ResponsesApiState};
 
+mod cache_diagnostics;
 mod decisions;
 mod generation;
 mod streaming;
@@ -80,6 +81,7 @@ pub struct OpenAIProvider {
     context_window_override: Option<usize>,
     responses_api_modes: Mutex<HashMap<String, ResponsesApiState>>,
     prompt_cache_enabled: bool,
+    prompt_cache_hints_enabled: bool,
     prompt_cache_settings: OpenAIPromptCacheSettings,
     model_behavior: Option<ModelConfig>,
     websocket_mode: bool,
@@ -94,6 +96,7 @@ pub struct OpenAIProvider {
     /// Once a model is marked unsupported, subsequent requests skip the flex
     /// tier entirely, avoiding the wasted first request + retry round-trip.
     service_tier_unsupported_cache: Arc<Mutex<HashMap<String, bool>>>,
+    cache_comparison: Arc<Mutex<Option<cache_diagnostics::CacheComparison>>>,
 }
 
 impl OpenAIProvider {
@@ -189,6 +192,7 @@ impl OpenAIProvider {
             supported_models_override: None,
             context_window_override: None,
             prompt_cache_enabled: false,
+            prompt_cache_hints_enabled: true,
             prompt_cache_settings: Default::default(),
             responses_api_modes: Mutex::new(HashMap::new()),
             model_behavior: None,
@@ -205,6 +209,7 @@ impl OpenAIProvider {
                 timeouts.streaming_ceiling_seconds
             }),
             service_tier_unsupported_cache: Arc::new(Mutex::new(HashMap::new())),
+            cache_comparison: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -295,6 +300,9 @@ impl OpenAIProvider {
         openai: Option<OpenAIConfig>,
         model_behavior: Option<ModelConfig>,
     ) -> Self {
+        let prompt_cache_hints_enabled = prompt_cache
+            .as_ref()
+            .is_none_or(|cfg| cfg.enabled && cfg.providers.openai.enabled);
         let (prompt_cache_enabled, prompt_cache_settings) = extract_prompt_cache_settings(
             prompt_cache,
             |providers| &providers.openai,
@@ -363,6 +371,7 @@ impl OpenAIProvider {
             context_window_override: None,
             responses_api_modes: Mutex::new(responses_api_modes),
             prompt_cache_enabled,
+            prompt_cache_hints_enabled,
             prompt_cache_settings,
             model_behavior,
             websocket_mode,
@@ -378,6 +387,7 @@ impl OpenAIProvider {
                 timeouts.streaming_ceiling_seconds
             }),
             service_tier_unsupported_cache: Arc::new(Mutex::new(HashMap::new())),
+            cache_comparison: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -684,7 +694,7 @@ impl OpenAIProvider {
 
     fn convert_to_openai_format(&self, request: &provider::LLMRequest) -> Result<Value, provider::LLMError> {
         let is_native_openai = self.is_native_openai_api();
-        let prompt_cache_key = if is_native_openai {
+        let prompt_cache_key = if self.prompt_cache_hints_enabled && is_native_openai {
             request.prompt_cache_key.as_deref()
         } else {
             None
@@ -711,7 +721,7 @@ impl OpenAIProvider {
         Self::validate_inline_file_inputs(request)?;
 
         let is_native_openai = self.is_native_openai_api();
-        let prompt_cache_key = if is_native_openai || self.is_chatgpt_backend() {
+        let prompt_cache_key = if self.prompt_cache_hints_enabled && (is_native_openai || self.is_chatgpt_backend()) {
             request.prompt_cache_key.as_deref()
         } else {
             None
@@ -737,9 +747,10 @@ impl OpenAIProvider {
             force_response_store_false: true,
             include_assistant_phase: is_native_openai,
             prompt_cache_key,
-            include_prompt_cache_retention: backend_defaults.include_prompt_cache_retention,
+            include_prompt_cache_retention: self.prompt_cache_hints_enabled
+                && backend_defaults.include_prompt_cache_retention,
             prompt_cache_retention: self.prompt_cache_settings.prompt_cache_retention.as_ref().map(|r| r.as_str()),
-            include_explicit_cache_breakpoints: is_native_openai,
+            include_explicit_cache_breakpoints: self.prompt_cache_hints_enabled && is_native_openai,
             default_service_tier,
             default_response_store: self.responses_store,
             default_responses_include: (!self.responses_include.is_empty())
@@ -753,7 +764,11 @@ impl OpenAIProvider {
             safety_identifier: None,
         };
 
-        request_builder::build_responses_request(request, &ctx)
+        let mut payload = request_builder::build_responses_request(request, &ctx)?;
+        if let Some(tracker) = self.cache_comparison_tracker(request) {
+            tracker.add_comparison(&mut payload);
+        }
+        Ok(payload)
     }
 
     fn parse_openai_response(

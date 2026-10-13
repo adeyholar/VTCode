@@ -117,8 +117,8 @@ below based on the topic area.
 
 - **File**: `docs/development/compaction.md`
   - **Content**: Compaction Engine
-  - **Topics**: Request history and local clearing, Headless staging and module ownership, Strategy dispatch, OpenAI
-    standalone request contract, Anthropic context-edit ladder
+  - **Topics**: Request history and local clearing, Headless staging and module ownership, Strategy dispatch, Live
+    parent-prefix reuse, Compaction messages and cache health
   - **User Questions**: "What can you tell me about Compaction Engine?", "How does Request history and local clearing
     work?", "How does Headless staging and module ownership work?"
 

@@ -1912,7 +1912,7 @@ fn responses_payload_applies_gpt_5_6_addendum_only_for_gpt_5_6() {
         .convert_to_openai_responses_format(&request)
         .expect("conversion should succeed");
     let instructions = payload
-        .get("instructions")
+        .pointer("/input/0/content/0/text")
         .and_then(Value::as_str)
         .expect("instructions should exist");
     assert!(instructions.contains("You are a helpful assistant."));
@@ -1954,7 +1954,7 @@ fn responses_payload_applies_gpt_5_6_addendum_with_priority_tier() {
 
     assert_eq!(payload.get("service_tier").and_then(Value::as_str), Some("priority"));
     let instructions = payload
-        .get("instructions")
+        .pointer("/input/0/content/0/text")
         .and_then(Value::as_str)
         .expect("instructions should exist");
     assert!(instructions.contains("## GPT-5.6 OpenAI Addendum"));
@@ -3413,7 +3413,18 @@ async fn responses_parameter_rejection_preserves_route_for_generation_and_both_s
 #[tokio::test]
 async fn standalone_compaction_omits_generation_fields_and_preserves_replay() {
     let server = MockServer::start().await;
-    let provider = test_provider(&native_openai_mock_base_url(&server), models::openai::GPT_5_6_SOL);
+    let mut provider = test_provider(&native_openai_mock_base_url(&server), models::openai::GPT_5_6_SOL);
+    provider.prompt_cache_enabled = true;
+    provider.prompt_cache_settings.surface_metrics = true;
+    let mut baseline = sample_request(models::openai::GPT_5_6_SOL);
+    baseline.prompt_cache_key = Some("lineage-key".into());
+    provider
+        .cache_comparison_tracker(&baseline)
+        .unwrap()
+        .record_completion(&provider::LLMResponse {
+            request_id: Some("resp_generation_baseline".into()),
+            ..Default::default()
+        });
     let compaction_item = json!({
         "id": "cmp_fixture",
         "type": "compaction",
@@ -3429,6 +3440,10 @@ async fn standalone_compaction_omits_generation_fields_and_preserves_replay() {
         .and(path("/responses/compact"))
         .respond_with(move |req: &wiremock::Request| {
             let payload: Value = serde_json::from_slice(&req.body).expect("valid json");
+            assert!(
+                payload.pointer("/prompt_cache_options/comparison_response_id").is_none(),
+                "standalone compaction must omit generation comparisons"
+            );
             // Independently enforce the documented endpoint schema, including
             // absence of stream rather than accepting stream=false.
             let allowed_fields = [
@@ -3535,6 +3550,14 @@ async fn standalone_compaction_omits_generation_fields_and_preserves_replay() {
             .and_then(Value::as_str)
             .is_some_and(|text| text.contains("Preserve decisions.")),
         "history system text rides the trailing reminder so it stays visible to the compactor"
+    );
+    assert_eq!(
+        provider
+            .convert_to_openai_responses_format(&baseline)
+            .unwrap()
+            .pointer("/prompt_cache_options/comparison_response_id"),
+        Some(&json!("resp_generation_baseline")),
+        "compaction must not advance the foreground baseline"
     );
 }
 

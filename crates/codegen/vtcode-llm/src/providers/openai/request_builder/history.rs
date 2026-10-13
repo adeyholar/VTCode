@@ -76,7 +76,7 @@ fn is_explicit_cache_breakpoint_model(model: &str) -> bool {
     // GPT-5.6+ (and GPT-6 family) support explicit `prompt_cache_breakpoint`
     // markers. Older models (GPT-5.5 and earlier) reject `prompt_cache_options`
     // and `prompt_cache_breakpoint` outright, so never emit markers for them.
-    is_gpt56_model(model) || is_gpt6_model(model)
+    super::supports_prompt_cache_options(model)
 }
 
 fn is_eligible_cache_breakpoint_block(block: &Value) -> bool {
@@ -98,7 +98,7 @@ fn is_runtime_reminder_item(item: &Value) -> bool {
     })
 }
 
-fn apply_explicit_cache_breakpoints(input: &mut [Value], model: &str) {
+fn apply_explicit_cache_breakpoints(input: &mut [Value], model: &str, instruction_anchor: bool) {
     if !is_explicit_cache_breakpoint_model(model) || input.is_empty() {
         return;
     }
@@ -106,13 +106,13 @@ fn apply_explicit_cache_breakpoints(input: &mut [Value], model: &str) {
     // Stable-prefix discipline: the newest trailing item is the varying suffix
     // (covered by the implicit breakpoint). Explicit markers go on user-message
     // boundaries inside the stable prefix so growing history keeps earlier
-    // markers byte-stable across turns. Cap at the 4 most recent boundaries to
-    // stay within the per-request write budget; older prefixes remain readable
-    // through the prior requests' writes.
+    // markers byte-stable across turns. Implicit mode uses one of four write slots,
+    // leaving three explicit writes. Reserve one for developer instructions
+    // so that the anchor survives compaction replacing the history.
     let stable_end = input.len().saturating_sub(1);
-    let mut marked = 0u8;
+    let mut marked = u8::from(instruction_anchor);
     for item in input[..stable_end].iter_mut().rev() {
-        if marked >= 4 {
+        if marked >= 3 {
             break;
         }
         if is_runtime_reminder_item(item) {
@@ -124,9 +124,10 @@ fn apply_explicit_cache_breakpoints(input: &mut [Value], model: &str) {
         let Some(block) = content.iter_mut().rev().find(|block| is_eligible_cache_breakpoint_block(block)) else {
             continue;
         };
-        if block.get("prompt_cache_breakpoint").is_none() {
-            block["prompt_cache_breakpoint"] = json!({ "mode": "explicit" });
+        if block.get("prompt_cache_breakpoint").is_some() {
+            continue;
         }
+        block["prompt_cache_breakpoint"] = json!({ "mode": "explicit" });
         marked += 1;
     }
 
@@ -179,15 +180,34 @@ pub(super) fn build_responses_item_history(
         strip_non_native_assistant_phase(&mut responses_payload.input);
     }
 
-    // GPT-5.6+ exact-match caching needs explicit breakpoints on the stable
-    // prefix; the implicit breakpoint alone only covers the latest message.
+    // Explicit breakpoints add chosen stable-prefix writes alongside implicit
+    // caching, which can also look up earlier eligible message boundaries.
     // Gated on the Responses model family (not the TTL flag) so the API-key
     // and ChatGPT backends keep sharing one item/history builder, and on the
     // backend flag so third-party endpoints never receive markers.
     // Older models reject the field outright, enforced inside the helper, and
     // non-native endpoints never receive markers (they 400 on the field).
     if ctx.is_responses_api_model && ctx.include_explicit_cache_breakpoints {
-        apply_explicit_cache_breakpoints(&mut responses_payload.input, &request.model);
+        // Top-level instructions cannot carry a breakpoint. Relocate the
+        // supplied stable system prompt at the wire boundary only; replay-only
+        // fallback instructions keep their existing representation.
+        let instruction_anchor = is_explicit_cache_breakpoint_model(&request.model)
+            && request.system_prompt.is_some()
+            && responses_payload
+                .instructions
+                .as_ref()
+                .is_some_and(|text| !text.trim().is_empty());
+        if instruction_anchor && let Some(instructions) = responses_payload.instructions.take() {
+            responses_payload.input.insert(
+                0,
+                json!({
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": instructions,
+                        "prompt_cache_breakpoint": {"mode": "explicit"}}]
+                }),
+            );
+        }
+        apply_explicit_cache_breakpoints(&mut responses_payload.input, &request.model, instruction_anchor);
     }
 
     Ok(responses_payload)

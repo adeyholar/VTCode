@@ -212,38 +212,19 @@ fn push_row(out: &mut String, content: String) {
 /// double-Ctrl+C cleanup) can interleave between rows.
 fn write_postamble(postamble: &str) {
     let mut stdout = io::stdout().lock();
-    // The canonical restore returns the cursor to wherever the inline frame
-    // happened to be painted. A real terminal can map that position into the
-    // scrollback, where output scrolls out of view and the summary silently
-    // disappears. Anchor the block to the last row of the viewport so every
-    // row lands on screen; a scroll-region reset keeps a leftover DECSTBM from
-    // confining it to a sub-region.
-    let payload = format!("{}{}", viewport_bottom_anchor(), postamble);
-    if let Err(error) = stdout.write_all(payload.as_bytes()).and_then(|()| stdout.flush()) {
+    // Print at the restored cursor position: the canonical restore leaves an
+    // alternate-screen session at the pre-TUI cursor and an inline session at
+    // the end of its transcript, both visible. Jumping to the viewport bottom
+    // (CUP to the last row) would scroll a viewport-height run of blanks into
+    // the scrollback — the huge blank gap reported on exit — so no cursor
+    // anchor belongs here.
+    if let Err(error) = stdout.write_all(postamble.as_bytes()).and_then(|()| stdout.flush()) {
         tracing::warn!(%error, "failed to write the exit postamble");
     }
     // Last defense before the process exits: anything that arrived while the
     // remaining teardown (git snapshot, runtime drop) ran is consumed here so
     // it cannot be echoed by the tty or read by the shell as stray input.
     vtcode_ui::tui::panic_hook::drain_pending_terminal_input();
-}
-
-/// Cursor anchor that guarantees the next row is visible: reset the scroll
-/// region, then move to the last row of the viewport.
-fn viewport_bottom_anchor() -> String {
-    match crossterm::terminal::size() {
-        Ok((_, rows)) => anchor_for_rows(rows),
-        // Unknown geometry: fall back to a fresh row at the current cursor.
-        _ => "\r\n".to_string(),
-    }
-}
-
-/// Pure anchor builder (testable without a live terminal).
-fn anchor_for_rows(rows: u16) -> String {
-    if rows == 0 {
-        return "\r\n".to_string();
-    }
-    format!("\x1b[r\x1b[{rows};1H")
 }
 
 fn render_final_response(response: &str) {
@@ -752,14 +733,23 @@ mod tests {
     }
 
     #[test]
-    fn viewport_anchor_resets_scroll_region_and_targets_the_last_row() {
-        // A real terminal can map the restored inline-frame cursor into the
-        // scrollback, hiding the summary; the anchor pins it to the last row.
-        let anchor = anchor_for_rows(40);
-        assert_eq!(anchor, "\x1b[r\x1b[40;1H");
-        let anchor = anchor_for_rows(1);
-        assert_eq!(anchor, "\x1b[r\x1b[1;1H");
-        assert!(anchor_for_rows(0).starts_with("\r\n"), "unknown geometry must not emit a bad CUP");
+    fn postamble_never_jumps_to_the_viewport_bottom() {
+        // Regression: a cursor-to-last-row anchor (ESC[r + CUP to the last
+        // row) scrolled a viewport-height run of blanks into the scrollback —
+        // the huge blank gap reported on exit. The block must print at the
+        // restored cursor with carriage-prefixed rows only.
+        let data = ExitData {
+            session_end_reason: vtcode_core::hooks::SessionEndReason::Exit,
+            resume_identifier: Some("session-x"),
+            ..stats_test_data(Duration::from_secs(30), 1_000, 100, 0, 0, None, 0, 0)
+        };
+        let postamble = colored_postamble(&data);
+
+        assert!(!postamble.contains("\x1b[r"), "scroll-region reset must not ship: {postamble:?}");
+        assert!(!postamble.contains(";1H"), "viewport-bottom CUP must not ship: {postamble:?}");
+        assert!(postamble.contains("Interrupted — session exited"), "notice row: {postamble:?}");
+        assert!(postamble.contains("> VT Code (0.0.0)"), "title row: {postamble:?}");
+        assert!(postamble.contains("Session 30s"), "stats row: {postamble:?}");
     }
 
     #[test]

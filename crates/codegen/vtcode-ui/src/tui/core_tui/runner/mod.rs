@@ -282,8 +282,13 @@ where
     let mut stderr = io::stderr();
     let mut mode_restore_guard =
         TerminalModeRestoreGuard::new(enable_terminal_modes(&mut stderr, &options.fullscreen)?);
-    mode_restore_guard.state_mut().save_cursor_position(&mut stderr);
     if surface.use_alternate() {
+        // Alternate-screen sessions return to the pre-TUI cursor after
+        // leaving the buffer, so save it up front. Inline sessions must keep
+        // the cursor at the end of their transcript: restoring to the startup
+        // position would yank it to the top of the frame and force the exit
+        // summary onto a viewport-height jump (blank gap).
+        mode_restore_guard.state_mut().save_cursor_position(&mut stderr);
         mode_restore_guard.state_mut().enter_alternate_screen(&mut stderr)?;
         // Record the surface so the canonical restore path can skip the
         // full-screen clear: leaving the alternate buffer already restores

@@ -469,14 +469,40 @@ fn gpt55_and_older_get_no_explicit_breakpoint() {
 }
 
 #[test]
-fn gpt56_caps_explicit_breakpoints_at_four() {
+fn gpt56_reserves_implicit_write_slot() {
     let messages = (0..6).map(|i| provider::Message::user(format!("question {i}"))).collect();
     let request = gpt56_request(messages);
 
     let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
 
-    assert_eq!(count_explicit_breakpoints(&payload), 4, "writes are capped at four per request");
+    assert_eq!(count_explicit_breakpoints(&payload), 3, "implicit mode leaves three explicit writes");
     assert!(breakpoint_modes(&payload).iter().all(|mode| mode == "explicit"));
+}
+
+#[test]
+fn developer_anchor_survives_compaction_and_uses_one_explicit_write_slot() {
+    let mut first = gpt56_request((0..7).map(|i| provider::Message::user(format!("history {i}"))).collect());
+    first.system_prompt = Some(std::sync::Arc::from(system_with_dynamics()));
+    let before = build_responses_request(&first, &cache_ctx()).unwrap();
+    let mut compacted = first.clone();
+    compacted.messages = vec![
+        provider::Message::system("New compacted summary".to_string()),
+        provider::Message::user("Continue".to_string()),
+    ]
+    .into();
+    let after = build_responses_request(&compacted, &cache_ctx()).unwrap();
+    assert_eq!(before.pointer("/input/0"), after.pointer("/input/0"));
+    assert_eq!(before.pointer("/input/0/role"), Some(&json!("developer")));
+    assert_eq!(before.pointer("/input/0/content/0/prompt_cache_breakpoint/mode"), Some(&json!("explicit")));
+    assert!(before.get("instructions").is_none(), "instructions must appear only once");
+    assert_eq!(count_explicit_breakpoints(&before), 3, "anchor plus two history writes");
+    assert!(count_explicit_breakpoints(&after) <= 3);
+    assert_eq!(first.messages.len(), 7, "wire projection leaves canonical history untouched");
+    let mut compatible = cache_ctx();
+    compatible.include_explicit_cache_breakpoints = false;
+    let legacy = build_responses_request(&first, &compatible).unwrap();
+    assert!(legacy.get("instructions").is_some());
+    assert_eq!(legacy.pointer("/input/0/role"), Some(&json!("user")));
 }
 
 #[test]
@@ -505,7 +531,10 @@ fn responses_splits_dynamic_suffix_into_trailing_reminder() {
 
     let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
 
-    let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+    let instructions = payload
+        .pointer("/input/0/content/0/text")
+        .and_then(Value::as_str)
+        .expect("developer instructions");
     assert!(instructions.contains("stable instructions"), "stable prefix stays cached");
     assert!(!instructions.contains("[Harness Limits]"), "volatile sections leave instructions");
     assert!(!instructions.contains("Previous conversation summary"), "history system leaves instructions");
@@ -523,7 +552,7 @@ fn responses_splits_dynamic_suffix_into_trailing_reminder() {
 }
 
 #[test]
-fn responses_static_prompts_keep_legacy_shape() {
+fn responses_static_prompts_anchor_developer_instructions() {
     use std::sync::Arc;
 
     let mut request = gpt56_request(vec![provider::Message::user("hello".to_string())]);
@@ -531,10 +560,15 @@ fn responses_static_prompts_keep_legacy_shape() {
 
     let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
 
-    let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+    let instructions = payload
+        .pointer("/input/0/content/0/text")
+        .and_then(Value::as_str)
+        .expect("developer instructions");
     assert!(instructions.contains("stable instructions"));
     let input = payload.get("input").and_then(Value::as_array).expect("input");
-    assert_eq!(input.len(), 1, "no reminder without volatile content");
+    assert_eq!(input.len(), 2, "developer instructions and user input without a reminder");
+    assert!(payload.get("instructions").is_none());
+    assert_eq!(input[0]["role"], json!("developer"));
 }
 
 #[test]
@@ -558,7 +592,7 @@ fn responses_grown_history_keeps_stable_instructions() {
     let a = build_responses_request(&first, &cache_ctx()).expect("first should build");
     let b = build_responses_request(&second, &cache_ctx()).expect("second should build");
 
-    assert_eq!(a.get("instructions"), b.get("instructions"), "stable instructions repeat verbatim");
+    assert_eq!(a.pointer("/input/0"), b.pointer("/input/0"), "developer instructions repeat verbatim");
     let a_input = a.get("input").and_then(Value::as_array).expect("input");
     let b_input = b.get("input").and_then(Value::as_array).expect("input");
     assert_eq!(a_input[0], b_input[0], "stable history item keeps its bytes");
@@ -662,7 +696,10 @@ fn responses_splits_mid_history_system_and_dynamics_without_panicking() {
     request.system_prompt = Some(Arc::from(system_with_dynamics()));
 
     let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
-    let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+    let instructions = payload
+        .pointer("/input/0/content/0/text")
+        .and_then(Value::as_str)
+        .expect("developer instructions");
     assert!(instructions.contains("stable instructions"));
     assert!(!instructions.contains("[Harness Limits]"), "dynamic sections leave instructions");
     assert!(!instructions.contains("resume note"), "mid-history system leaves instructions");
@@ -676,8 +713,9 @@ fn responses_splits_mid_history_system_and_dynamics_without_panicking() {
     assert!(reminder_text.contains("[Harness Limits]"));
     assert!(reminder_text.contains("resume note"));
     // History order before the tail is untouched: assistant then user.
-    assert_eq!(input[0].get("role").and_then(Value::as_str), Some("assistant"));
-    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    assert_eq!(input[0].get("role").and_then(Value::as_str), Some("developer"));
+    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("assistant"));
+    assert_eq!(input[2].get("role").and_then(Value::as_str), Some("user"));
 }
 
 #[test]
@@ -691,7 +729,10 @@ fn responses_all_dynamic_system_prompt_keeps_contract_addendum() {
     request.system_prompt = Some(Arc::from("[Harness Limits]\n- max_tool_calls_per_turn: 5"));
 
     let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
-    let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+    let instructions = payload
+        .pointer("/input/0/content/0/text")
+        .and_then(Value::as_str)
+        .expect("developer instructions");
     assert!(
         instructions.contains("GPT-5.6"),
         "contract addendum must survive an all-dynamic prompt; got: {instructions:?}"

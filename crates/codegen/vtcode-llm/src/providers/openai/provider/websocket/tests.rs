@@ -445,9 +445,12 @@ async fn websocket_completion_tier_is_logged_once_without_replay_or_unrecognized
     use tracing::instrument::WithSubscriber;
     use tracing::{Event, Metadata, Subscriber, span};
 
-    struct TierRecorder(Arc<AtomicUsize>);
+    struct CompletionRecorder {
+        tiers: Arc<AtomicUsize>,
+        cache: Arc<AtomicUsize>,
+    }
 
-    impl Subscriber for TierRecorder {
+    impl Subscriber for CompletionRecorder {
         fn enabled(&self, _: &Metadata<'_>) -> bool {
             true
         }
@@ -458,7 +461,10 @@ async fn websocket_completion_tier_is_logged_once_without_replay_or_unrecognized
         fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
         fn event(&self, event: &Event<'_>) {
             if event.metadata().fields().field("service_tier").is_some() {
-                self.0.fetch_add(1, Ordering::Relaxed);
+                self.tiers.fetch_add(1, Ordering::Relaxed);
+            }
+            if event.metadata().fields().field("cache_comparison_type").is_some() {
+                self.cache.fetch_add(1, Ordering::Relaxed);
             }
         }
         fn enter(&self, _: &span::Id) {}
@@ -466,30 +472,39 @@ async fn websocket_completion_tier_is_logged_once_without_replay_or_unrecognized
     }
 
     let records = Arc::new(AtomicUsize::new(0));
-    tracing::subscriber::with_default(TierRecorder(Arc::clone(&records)), || {
-        for (tier, expected_records) in [("ultrafast", 1), ("untrusted\nfixture-tier", 1), ("priority", 2)] {
-            let completion = json!({
-                "id": "resp_tier_evidence",
-                "service_tier": tier,
-                "output": [{"type": "message", "content": [{"type": "output_text", "text": "primary answer"}]}]
-            });
-            let response = super::super::super::responses_api::parse_responses_completion(
-                completion.clone(),
-                "gpt-5.6".into(),
-                false,
-            )
-            .expect("server completion");
-            assert_eq!(response.content.as_deref(), Some("primary answer"));
-            let replay = super::completed_replay_output(&completion, "gpt-5.6").expect("canonical replay");
-            assert_eq!(replay.len(), 1);
-            assert_eq!(
-                records.load(Ordering::Relaxed),
-                expected_records,
-                "replay must not log another completion; unknown tiers must not be logged"
-            );
-        }
-    });
+    let cache_records = Arc::new(AtomicUsize::new(0));
+    tracing::subscriber::with_default(
+        CompletionRecorder {
+            tiers: Arc::clone(&records),
+            cache: Arc::clone(&cache_records),
+        },
+        || {
+            for (tier, expected_records) in [("ultrafast", 1), ("untrusted\nfixture-tier", 1), ("priority", 2)] {
+                let completion = json!({
+                    "id": "resp_tier_evidence",
+                    "service_tier": tier,
+                    "prompt_cache_diagnostics": {"type": "cache_hit"},
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": "primary answer"}]}]
+                });
+                let response = super::super::super::responses_api::parse_responses_completion(
+                    completion.clone(),
+                    "gpt-5.6".into(),
+                    false,
+                )
+                .expect("server completion");
+                assert_eq!(response.content.as_deref(), Some("primary answer"));
+                let replay = super::completed_replay_output(&completion, "gpt-5.6").expect("canonical replay");
+                assert_eq!(replay.len(), 1);
+                assert_eq!(
+                    records.load(Ordering::Relaxed),
+                    expected_records,
+                    "replay must not log another completion; unknown tiers must not be logged"
+                );
+            }
+        },
+    );
 
+    assert_eq!(cache_records.load(Ordering::Relaxed), 3, "replay does not duplicate cache diagnostics");
     enum EntryPoint {
         Generate,
         Normalized,
@@ -505,14 +520,29 @@ async fn websocket_completion_tier_is_logged_once_without_replay_or_unrecognized
                 "response": {
                     "id": "resp_transport_tier",
                     "service_tier": "ultrafast",
+                    "prompt_cache_diagnostics": {"type": "cache_miss", "reason": "tools_changed", "cache_missed_tokens": 5710},
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": "transport answer"}]}]
                 }
             })])]])
             .await
             .expect("WebSocket fixture");
-        let provider = websocket_test_provider(base_url);
-        let request = websocket_test_request();
+        let mut provider = websocket_test_provider(base_url);
+        // Keep transport local while exercising first-party wire eligibility.
+        provider.backend_setup =
+            crate::providers::openai::backend_setup::OpenAIBackendSetup::api_key("https://api.openai.com/v1".into());
+        provider.prompt_cache_enabled = true;
+        provider.prompt_cache_settings.surface_metrics = true;
+        let mut request = websocket_test_request();
+        request.system_prompt = Some(Arc::from("Stable developer instructions"));
+        provider
+            .cache_comparison_tracker(&request)
+            .unwrap()
+            .record_completion(&crate::provider::LLMResponse {
+                request_id: Some("resp_baseline".into()),
+                ..Default::default()
+            });
         seed_connected_continuation_cache(&provider, &request, "resp_seed", false).await;
+        let baseline_request = request.clone();
         let completion = async {
             match entry_point {
                 EntryPoint::Generate => provider.generate(request).await.expect("generation"),
@@ -539,13 +569,105 @@ async fn websocket_completion_tier_is_logged_once_without_replay_or_unrecognized
             }
         };
         let response = tokio::time::timeout(std::time::Duration::from_secs(3), completion)
-            .with_subscriber(TierRecorder(Arc::clone(&records)))
+            .with_subscriber(CompletionRecorder {
+                tiers: Arc::clone(&records),
+                cache: Arc::clone(&cache_records),
+            })
             .await
             .expect("completion deadline");
         assert_eq!(response.content.as_deref(), Some("transport answer"));
         assert_eq!(requests.lock().expect("requests").len(), 1);
         assert_eq!(records.load(Ordering::Relaxed), index + 3, "each entry point must record one served tier");
+        assert_eq!(cache_records.load(Ordering::Relaxed), index + 4);
+        assert_eq!(
+            requests.lock().unwrap()[0].pointer("/prompt_cache_options/comparison_response_id"),
+            Some(&json!("resp_baseline"))
+        );
+        assert_eq!(
+            provider
+                .convert_to_openai_responses_format(&baseline_request)
+                .unwrap()
+                .pointer("/prompt_cache_options/comparison_response_id"),
+            Some(&json!("resp_transport_tier"))
+        );
         server.await.expect("server task");
+    }
+    // Both stream adapters accept deltas when authoritative output is empty.
+    // Metadata must still be recorded once and the completed ID may advance
+    // diagnostics without becoming a replay-safe WebSocket continuation.
+    for websocket in [false, true] {
+        for legacy in [false, true] {
+            let before = cache_records.load(Ordering::Relaxed);
+            let mut completed = completion("resp_empty_output", json!([]));
+            completed["response"]["prompt_cache_diagnostics"] = json!({
+                "type": "cache_miss", "reason": "context_compacted", "cache_missed_tokens": 6003
+            });
+            let events = vec![text_delta("delta-only reply"), completed];
+            let (mut provider, ws_server) = if websocket {
+                let (base, _, server) =
+                    spawn_scripted_websocket_server(vec![vec![ScriptedReply::Events(events.clone())]])
+                        .await
+                        .expect("WebSocket fixture");
+                let mut provider = websocket_test_provider(base);
+                provider.backend_setup = crate::providers::openai::backend_setup::OpenAIBackendSetup::api_key(
+                    "https://api.openai.com/v1".into(),
+                );
+                seed_connected_continuation_cache(&provider, &websocket_test_request(), "resp_seed", false).await;
+                (provider, Some(server))
+            } else {
+                (websocket_test_provider("https://api.openai.com/v1".into()), None)
+            };
+            let http = wiremock::MockServer::start().await;
+            if !websocket {
+                provider.websocket_mode = false;
+                provider.responses_url = Arc::from(format!("{}/responses", http.uri()));
+                let body = events.iter().map(|event| format!("data: {event}\n\n")).collect::<String>();
+                wiremock::Mock::given(wiremock::matchers::method("POST"))
+                    .and(wiremock::matchers::path("/responses"))
+                    .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+                    .mount(&http)
+                    .await;
+            }
+            provider.prompt_cache_enabled = true;
+            provider.prompt_cache_settings.surface_metrics = true;
+            let response = async {
+                if legacy {
+                    let mut stream = provider.stream(websocket_test_request()).await.unwrap();
+                    loop {
+                        if let crate::provider::LLMStreamEvent::Completed { response } =
+                            stream.next().await.unwrap().unwrap()
+                        {
+                            break *response;
+                        }
+                    }
+                } else {
+                    final_normalized(provider.stream_normalized(websocket_test_request()).await.unwrap()).await
+                }
+            }
+            .with_subscriber(CompletionRecorder {
+                tiers: Arc::clone(&records),
+                cache: Arc::clone(&cache_records),
+            })
+            .await;
+            assert_eq!(response.content.as_deref(), Some("delta-only reply"));
+            assert_eq!(response.request_id.as_deref(), Some("resp_empty_output"));
+            assert_eq!(
+                cache_records.load(Ordering::Relaxed),
+                before + 1,
+                "empty final output retains cache evidence exactly once"
+            );
+            assert_eq!(
+                provider
+                    .convert_to_openai_responses_format(&websocket_test_request())
+                    .unwrap()
+                    .pointer("/prompt_cache_options/comparison_response_id"),
+                Some(&json!("resp_empty_output"))
+            );
+            if let Some(server) = ws_server {
+                assert!(provider.websocket_continuation_snapshot().is_none(), "empty output is not replay-safe");
+                server.await.unwrap();
+            }
+        }
     }
 }
 

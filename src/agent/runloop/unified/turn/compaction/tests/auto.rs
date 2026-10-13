@@ -1,6 +1,98 @@
 use super::*;
 
 #[tokio::test]
+async fn interactive_compaction_forks_matching_parent_prompt_and_ordered_tools() {
+    use vtcode_core::exec::events::CompactionTrigger;
+    use vtcode_core::llm::provider::{ToolChoice, ToolDefinition};
+    struct RecordingParentProvider(Arc<RwLock<Vec<LLMRequest>>>);
+    #[async_trait]
+    impl LLMProvider for RecordingParentProvider {
+        fn name(&self) -> &str {
+            "stub-roomy"
+        }
+        fn effective_context_size(&self, _: &str) -> usize {
+            128000
+        }
+        fn supported_models(&self) -> Vec<String> {
+            vec!["stub-model".to_string()]
+        }
+        fn validate_request(&self, _: &LLMRequest) -> Result<(), LLMError> {
+            Ok(())
+        }
+        async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+            self.0.write().await.push(request);
+            Ok(LLMResponse::new("stub-model", "summary of completed checks"))
+        }
+    }
+    for trigger in [
+        CompactionTrigger::Manual,
+        CompactionTrigger::Recovery,
+        CompactionTrigger::Auto,
+    ] {
+        let temp = tempdir().unwrap();
+        let requests = Arc::new(RwLock::new(Vec::new()));
+        let provider = RecordingParentProvider(Arc::clone(&requests));
+        let mut cfg = VTCodeConfig::default();
+        cfg.agent.harness.auto_compaction_enabled = true;
+        cfg.agent.harness.auto_compaction_threshold_tokens = Some(700);
+        let mut history = tool_heavy_history(ROOMY_HISTORY_CYCLES);
+        let mut stats = SessionStats::default();
+        let prompt = "stable system\n\n[Runtime Context]\n- turn: 4";
+        let alpha = ToolDefinition::function(
+            "alpha".into(),
+            "Inspect a file".into(),
+            json!({"type":"object", "properties":{"path":{"type":"string"}}}),
+        );
+        let zeta = ToolDefinition::function(
+            "zeta".into(),
+            "Compute a bound".into(),
+            json!({"type":"object", "properties":{"limit":{"type":"integer"}}}),
+        );
+        let envelope = stats.request_envelope(
+            "stub-model",
+            "stub-roomy",
+            "build",
+            prompt.into(),
+            vec![zeta.clone(), alpha.clone()],
+            7,
+        );
+        let mut manager = test_context_manager();
+        manager.update_token_usage(&Some(Usage {
+            prompt_tokens: 900,
+            completion_tokens: 10,
+            total_tokens: 910,
+            ..Default::default()
+        }));
+        let context = CompactionContext::new(
+            &provider,
+            "stub-model",
+            "parent-session",
+            "parent-thread",
+            temp.path(),
+            Some(&cfg),
+            None,
+            None,
+        );
+        let state = CompactionState::new(&mut history, &mut stats, &mut manager);
+        let outcome = if trigger == CompactionTrigger::Auto {
+            maybe_auto_compact_history(context, state).await
+        } else {
+            compact_history_in_place_with_events(context, state, trigger).await
+        };
+        outcome.unwrap().expect("compaction commits");
+        let requests = requests.read().await;
+        assert!(!requests.is_empty());
+        for request in requests.iter() {
+            assert_eq!(request.system_prompt.as_deref(), Some(prompt), "{trigger:?}");
+            assert_eq!(serde_json::to_value(request.tools.as_deref().unwrap()).unwrap(), json!([alpha, zeta]));
+            assert!(matches!(request.tool_choice, Some(ToolChoice::None)));
+        }
+        assert_eq!(envelope.system_prompt().as_ref(), prompt, "shared parent remains immutable");
+        assert!(stats.compaction_parent_context("stub-roomy", "stub-model").is_none());
+    }
+}
+
+#[tokio::test]
 async fn provider_compaction_error_preserves_existing_history() {
     let temp = tempdir().expect("tempdir");
     let provider = FailingProviderCompactionProvider;
@@ -28,6 +120,51 @@ async fn provider_compaction_error_preserves_existing_history() {
 
     assert!(!err.to_string().is_empty());
     assert_eq!(history, original_history);
+}
+
+#[tokio::test]
+async fn successful_manual_recovery_and_model_switch_compaction_reset_cache_streak() {
+    use vtcode_core::exec::events::CompactionTrigger;
+    for trigger in [
+        CompactionTrigger::Manual,
+        CompactionTrigger::Recovery,
+        CompactionTrigger::ModelSwitch,
+    ] {
+        let temp = tempdir().unwrap();
+        let mut history = test_history_with_memory_envelope();
+        let mut stats = SessionStats::default();
+        let usage = Some(Usage {
+            prompt_tokens: 12740,
+            completion_tokens: 147,
+            total_tokens: 12887,
+            cached_prompt_tokens: Some(0),
+            cache_creation_tokens: Some(5212),
+            ..Default::default()
+        });
+        assert!(stats.record_cache_turn_health("openai", &usage).is_none());
+        assert!(stats.record_cache_turn_health("openai", &usage).is_none());
+        let mut context = test_context_manager();
+        compact_history_in_place_with_events(
+            CompactionContext::new(
+                &ProviderCompactionProvider,
+                "stub-model",
+                "cache-boundary",
+                "cache-thread",
+                temp.path(),
+                Some(&VTCodeConfig::default()),
+                None,
+                None,
+            ),
+            CompactionState::new(&mut history, &mut stats, &mut context),
+            trigger,
+        )
+        .await
+        .unwrap()
+        .expect("successful compaction");
+        assert!(stats.record_cache_turn_health("openai", &usage).is_none(), "{trigger:?}");
+        assert!(stats.record_cache_turn_health("openai", &usage).is_none());
+        assert!(stats.record_cache_turn_health("openai", &usage).is_some());
+    }
 }
 
 #[tokio::test]

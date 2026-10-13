@@ -33,6 +33,10 @@ use model_policy::{
 /// does not rely on the implicit default alone.
 const DEFAULT_GPT56_PROMPT_CACHE_TTL: &str = "30m";
 
+pub(super) fn supports_prompt_cache_options(model: &str) -> bool {
+    is_gpt56_model(model) || is_gpt6_model(model)
+}
+
 pub(crate) struct ChatRequestContext<'a> {
     pub model: &'a str,
     pub is_native_openai: bool,

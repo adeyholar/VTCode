@@ -249,24 +249,21 @@ pub(crate) async fn finalize_model_selection(
                 outcome.mode.as_str(),
                 compact_elapsed,
             );
-            renderer.line(
-                MessageStyle::Info,
-                &format!("{label} Auto-resume injected; new model continues seamlessly with preserved context."),
-            )?;
+            renderer.line(MessageStyle::Info, &format!("{label} Resume note added for the selected model."))?;
         }
         ModelSwitchCompactionOutcome::AlreadyCompact => {
             renderer.line(
                 MessageStyle::Info,
-                "Model switched; conversation was already compact. Auto-resume injected for seamless continuation.",
+                "Model switched; conversation was already compact. History preserved and resume note added.",
             )?;
         }
         ModelSwitchCompactionOutcome::Failed(err) => {
+            tracing::warn!(error = %crate::agent::runloop::unified::turn::compaction::format_compaction_error_details(&err), "Model-switch context compaction failed");
+            let label =
+                crate::agent::runloop::unified::turn::compaction::format_compaction_failed(compact_elapsed, &err);
             renderer.line(
                 MessageStyle::Error,
-                &format!(
-                    "Model switched, but context compaction failed: {err:#}. \
-                    Continuing with full history plus auto-resume note."
-                ),
+                &format!("Model switched. {label} Continuing with full history and a resume note."),
             )?;
         }
     }

@@ -80,7 +80,16 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
     if let Err(error) = emit_restore_sequence(&mut stderr, clear_alternate) {
         first_error.get_or_insert(error);
     }
-    if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show, RestorePosition) {
+    // Only alternate-screen sessions saved the pre-TUI cursor (see
+    // `run_tui`): restoring it returns to the pre-TUI row. Inline sessions
+    // never saved, so restoring would yank the cursor from the end of the
+    // transcript back to the frame start and force the exit summary onto a
+    // viewport-height jump (blank gap) — leave it where the TUI left it.
+    if clear_alternate {
+        if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show, RestorePosition) {
+            first_error.get_or_insert_with(|| io::Error::other(error.to_string()));
+        }
+    } else if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show) {
         first_error.get_or_insert_with(|| io::Error::other(error.to_string()));
     }
     // Clear the terminal title on the canonical stream as well: the emergency
@@ -95,7 +104,11 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
 
     if let Some(mut tty) = open_tty_writer() {
         let _ = emit_restore_sequence(&mut tty, clear_alternate);
-        let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show, RestorePosition);
+        if clear_alternate {
+            let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show, RestorePosition);
+        } else {
+            let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show);
+        }
         let _ = tty.flush();
         let _ = write!(tty, "\x1b]22;default\x07");
         let _ = write!(tty, "\x1b]0;default\x07");
