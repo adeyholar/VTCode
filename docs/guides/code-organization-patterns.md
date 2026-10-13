@@ -3,7 +3,7 @@
 This guide adapts the Rust code organization patterns from Codex DeepWiki section `8.3` for VT Code's workspace and
 runtime architecture.
 
-It is intentionally pragmatic: use these rules when adding or changing code in `vtcode-core/` and `src/`.
+It is intentionally pragmatic: use these rules when adding or changing code in `vtcode-core/`, `vtcode-llm/`, and `src/`.
 
 ## Scope Rules
 
@@ -108,6 +108,29 @@ When editing large modules:
 - Split files when they mix unrelated concerns
 
 Rule of thumb: if understanding a change requires unrelated sections, split the module.
+
+### Provider Protocol Boundaries
+
+OpenResponses keeps its public provider type and constructors in
+`crates/codegen/vtcode-llm/src/providers/openresponses/provider.rs`. Private children keep protocol-specific work local:
+
+| Child module | Responsibility |
+| --- | --- |
+| `provider/native.rs` | Native request serialization and completed-response parsing |
+| `provider/legacy.rs` | Chat Completions payloads and generation/streaming fallback |
+| `provider/compaction.rs` | Standalone compact requests and canonical replay windows |
+| `provider/provider_impl.rs` | Capabilities and the three native generation/streaming entrypoints |
+
+The entrypoints share `send_native_request` for native HTTP dispatch and bounded error diagnostics. A 404 stays with
+the caller so each entrypoint uses its matching legacy adapter. Other HTTP errors surface without protocol fallback.
+Keep native parsing, legacy decoding, and compaction replay separate; they have distinct wire contracts.
+Methods needed by sibling modules use `pub(super)` rather than expanding the provider's public API.
+
+Verify dispatch boundaries with:
+
+```sh
+cargo nextest run --locked -p vtcode-llm -E 'test(providers::openresponses::)' --no-tests=fail
+```
 
 ## Applied in VT Code
 

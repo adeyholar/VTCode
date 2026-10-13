@@ -117,8 +117,8 @@ below based on the topic area.
 
 - **File**: `docs/development/compaction.md`
   - **Content**: Compaction Engine
-  - **Topics**: Request history and local clearing, Headless staging and module ownership, Strategy dispatch, Anthropic
-    context-edit ladder, Input bounding and overflow retry
+  - **Topics**: Request history and local clearing, Headless staging and module ownership, Strategy dispatch, OpenAI
+    standalone request contract, Anthropic context-edit ladder
   - **User Questions**: "What can you tell me about Compaction Engine?", "How does Request history and local clearing
     work?", "How does Headless staging and module ownership work?"
 
@@ -277,7 +277,8 @@ below based on the topic area.
 
 - **File**: `docs/development/responses-websocket-streaming.md`
   - **Content**: Responses WebSocket streaming
-  - **Topics**: Lifecycle and cancellation, Continuation, Fallback and service tiers, Local verification
+  - **Topics**: Lifecycle and cancellation, Continuation, Fallback and service tiers, Request builder ownership, Local
+    verification
   - **User Questions**: "What can you tell me about Responses WebSocket streaming?", "How does Lifecycle and
     cancellation work?", "How does Continuation work?"
 

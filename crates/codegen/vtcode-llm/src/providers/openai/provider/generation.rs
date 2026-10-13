@@ -226,11 +226,6 @@ impl OpenAIProvider {
         let request = provider::LLMRequest {
             model: resolved_model.clone(),
             messages: std::sync::Arc::new(history.to_vec()),
-            max_tokens: options.max_output_tokens,
-            reasoning_effort: options.reasoning_effort,
-            verbosity: options.verbosity,
-            response_store: options.response_store,
-            responses_include: options.responses_include.clone(),
             service_tier: options.service_tier.clone(),
             prompt_cache_key: options.prompt_cache_key.clone(),
             ..Default::default()
@@ -248,7 +243,6 @@ impl OpenAIProvider {
         let mut compact_payload = json!({
             "model": resolved_model,
             "input": input,
-            "stream": true,
         });
         if let Some(map) = compact_payload.as_object_mut() {
             let merged_instructions = append_manual_compaction_instructions(
@@ -259,13 +253,11 @@ impl OpenAIProvider {
                 map.insert("instructions".to_string(), json!(instructions));
             }
 
+            // Standalone compaction has a narrower schema than Responses
+            // generation; even `stream: false` is an unknown parameter.
+            // https://developers.openai.com/api/reference/resources/responses/methods/compact
             for key in [
-                "max_output_tokens",
                 "service_tier",
-                "store",
-                "include",
-                "reasoning",
-                "text",
                 "prompt_cache_key",
                 "prompt_cache_options",
                 "prompt_cache_retention",

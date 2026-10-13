@@ -2,7 +2,7 @@ use super::*;
 use crate::provider::NormalizedStreamEvent;
 use futures::StreamExt;
 use wiremock::matchers::{body_json, body_partial_json, method, path};
-use wiremock::{Mock, ResponseTemplate};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::providers::test_support::start_mock_server_or_skip;
 
@@ -15,6 +15,176 @@ fn test_provider(base_url: &str) -> OpenResponsesProvider {
         base_url.to_string(),
         TimeoutsConfig::default(),
     )
+}
+
+#[derive(Debug, Clone, Copy)]
+enum NativeEntrypoint {
+    Generate,
+    Stream,
+    NormalizedStream,
+}
+
+const NATIVE_ENTRYPOINTS: [NativeEntrypoint; 3] = [
+    NativeEntrypoint::Generate,
+    NativeEntrypoint::Stream,
+    NativeEntrypoint::NormalizedStream,
+];
+
+async fn collect_entrypoint_text(
+    provider: &OpenResponsesProvider,
+    entrypoint: NativeEntrypoint,
+) -> Result<String, LLMError> {
+    let request = LLMRequest {
+        messages: vec![Message::user("Check dispatch.".to_string())].into(),
+        ..Default::default()
+    };
+    let mut text = String::new();
+    let mut completed = false;
+    match entrypoint {
+        NativeEntrypoint::Generate => {
+            return provider
+                .generate(request)
+                .await
+                .map(|response| response.content.unwrap_or_default());
+        }
+        NativeEntrypoint::Stream => {
+            let mut stream = provider.stream(request).await?;
+            while let Some(event) = stream.next().await {
+                match event? {
+                    LLMStreamEvent::Token { delta } => text.push_str(&delta),
+                    LLMStreamEvent::Completed { response } => {
+                        completed = true;
+                        assert_eq!(response.content.as_deref(), Some(text.as_str()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        NativeEntrypoint::NormalizedStream => {
+            let mut stream = provider.stream_normalized(request).await?;
+            while let Some(event) = stream.next().await {
+                match event? {
+                    NormalizedStreamEvent::TextDelta { delta } => text.push_str(&delta),
+                    NormalizedStreamEvent::Done { .. } => completed = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+    assert!(completed, "{entrypoint:?} must finish before its text is accepted");
+    Ok(text)
+}
+
+#[tokio::test]
+async fn native_dispatch_preserves_auth_default_model_and_stream_mode_for_all_entrypoints() {
+    for entrypoint in NATIVE_ENTRYPOINTS {
+        let server = MockServer::start().await;
+        let mut provider = test_provider(&format!("{}/v1/", server.uri()));
+        provider.api_key = "dispatch-fixture-token".to_string();
+        let streaming = !matches!(entrypoint, NativeEntrypoint::Generate);
+        let output = json!({
+            "id": "resp_dispatch", "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "native reply"}]}]
+        });
+        let response = if streaming {
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(format!(
+                    "data: {}\n\ndata: [DONE]\n\n",
+                    json!({"type": "response.output_text.delta", "item_id": "msg_native", "output_index": 0,
+                        "content_index": 0, "sequence_number": 1, "delta": "native reply"}),
+                ))
+        } else {
+            ResponseTemplate::new(200).set_body_json(output)
+        };
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .and(wiremock::matchers::header("authorization", "Bearer dispatch-fixture-token"))
+            .and(body_partial_json(json!({"model": "gpt-5", "stream": streaming})))
+            .respond_with(response)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let text = collect_entrypoint_text(&provider, entrypoint)
+            .await
+            .expect("native request succeeds");
+        assert_eq!(text, "native reply", "{entrypoint:?}");
+        let requests = server.received_requests().await.expect("recorded requests");
+        assert_eq!(requests.len(), 1, "native success must not send a legacy request");
+    }
+}
+
+#[tokio::test]
+async fn native_dispatch_does_not_fallback_on_other_http_errors_for_any_entrypoint() {
+    for status in [400, 401, 429, 500] {
+        for entrypoint in NATIVE_ENTRYPOINTS {
+            let server = MockServer::start().await;
+            let provider = test_provider(&server.uri());
+            Mock::given(method("POST"))
+                .and(path("/responses"))
+                .respond_with(ResponseTemplate::new(status).set_body_json(json!({
+                    "error": {"message": "native endpoint diagnostic"}
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let error = collect_entrypoint_text(&provider, entrypoint)
+                .await
+                .expect_err("HTTP error surfaces");
+            assert!(matches!(&error, LLMError::Provider { .. }), "retain the existing error variant");
+            let diagnostic = error.to_string();
+            assert!(diagnostic.contains(&format!("HTTP {status}")), "{diagnostic}");
+            assert!(diagnostic.contains("native endpoint diagnostic"), "{diagnostic}");
+            let requests = server.received_requests().await.expect("recorded requests");
+            assert_eq!(requests.len(), 1, "{entrypoint:?} must not replay status {status}");
+            assert_eq!(requests[0].url.path(), "/responses");
+        }
+    }
+}
+
+#[tokio::test]
+async fn native_dispatch_404_uses_matching_legacy_adapter_once_for_all_entrypoints() {
+    for entrypoint in NATIVE_ENTRYPOINTS {
+        let server = MockServer::start().await;
+        let provider = test_provider(&server.uri());
+        let streaming = !matches!(entrypoint, NativeEntrypoint::Generate);
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let response = if streaming {
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"legacy recovery\"}}]}\n\ndata: [DONE]\n\n",
+                )
+        } else {
+            ResponseTemplate::new(200).set_body_json(json!({
+                "id": "legacy_dispatch",
+                "choices": [{"finish_reason": "stop", "message": {"content": "legacy recovery"}}]
+            }))
+        };
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(json!({"model": "gpt-5", "stream": streaming})))
+            .respond_with(response)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let text = collect_entrypoint_text(&provider, entrypoint)
+            .await
+            .expect("legacy adapter succeeds");
+        assert_eq!(text, "legacy recovery", "{entrypoint:?}");
+        let requests = server.received_requests().await.expect("recorded requests");
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].url.path(), "/responses");
+        assert_eq!(requests[1].url.path(), "/chat/completions");
+    }
 }
 
 #[test]

@@ -85,6 +85,18 @@ See the [architecture diagram](../ARCHITECTURE.md#request-projection-and-context
 | Anthropic Claude Opus 4.x / Sonnet 4.6+                                 | `NativeInline`     | Threshold-triggered `compact_20260112` edit on a `generate` request with `pause_after_compaction`. Falls back to `Local` when compaction does not fire or the edit is rejected.                                                                                                                                                                                                                                                                                                                                            |
 | Merge Gateway, OpenRouter, Gemini, DeepSeek, MiniMax, local, all others | `Local`            | No native compact endpoint: Merge Gateway documents no `/responses/compact` (its native `/v1/responses` shape differs from OpenAI's); OpenRouter reports compaction unsupported (its `context-compression` plugin is opt-in middle-out truncation, never enabled implicitly). Universal fallback: bounded fork summarized via the provider's one-shot response collector (which transparently consumes a normalized stream for streaming-only routes), rebuilt as summary plus retained recent messages. Works everywhere. |
 
+## OpenAI standalone request contract
+
+OpenAI standalone compaction uses a synchronous JSON response. Its payload carries `model`, `input`, optional
+`instructions`, and supported service-tier/cache fields (`service_tier`, `prompt_cache_key`, `prompt_cache_options`,
+`prompt_cache_retention`). VT Code does not send generation-only fields: `stream` (even `false`), `max_output_tokens`,
+`store`, `include`, `reasoning`, or `text`. Generation overrides in the shared compaction options do not apply to this
+endpoint. Custom compaction instructions and history system reminders remain available to the compactor, and retained
+messages plus encrypted compaction items are replayed in the next Responses request.
+
+See the [OpenAI compact API reference](https://developers.openai.com/api/reference/python/resources/responses/methods/compact)
+for the endpoint schema; streaming server-side compaction on `/responses` is a separate request mode.
+
 ## Anthropic context-edit ladder
 
 On the `NativeInline` path VT Code sends the documented edit ladder in order — `clear_thinking_20251015` (keep 2

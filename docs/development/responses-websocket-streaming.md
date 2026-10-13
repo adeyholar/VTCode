@@ -83,6 +83,22 @@ turn metadata, and a fresh client request ID. A failed retry uses the existing e
 transport fallback policy: an unsupported Responses endpoint can fall back to Chat Completions when
 allowed, while a required Responses route surfaces the error. The tier retry remains bounded to one attempt.
 
+## Request builder ownership
+
+HTTP and WebSocket transports retain the same request-builder entrypoints. Private modules under
+`crates/codegen/vtcode-llm/src/providers/openai/` separate the wire payload from history and model policy:
+
+| Source | Responsibility |
+| --- | --- |
+| `request_builder.rs` | Shared contexts and Chat Completions/Responses JSON assembly |
+| `request_builder/model_policy.rs` | Model-family predicates, reasoning/verbosity defaults, and sampling policy |
+| `request_builder/history.rs` | Replay instructions, assistant phase filtering, dynamic reminders, and cache breakpoints |
+| `request_builder/tests.rs` | Public-builder regressions for payload, history, and backend boundaries |
+
+Keep policy precedence and backend capability flags explicit. The history builder must preserve opaque compaction
+state and keep volatile reminders outside the stable instruction prefix. Tests remain at their original
+`providers::openai::request_builder::tests` path.
+
 ## Local verification
 
 Scripted local servers assert ordered deltas, exact continuation inputs, request counts, tier forwarding,
@@ -90,7 +106,7 @@ fallback boundaries, cancellation, serialized generation, and ping/deadline beha
 are required.
 
 ```sh
-cargo nextest run --locked -p vtcode-llm -E 'test(websocket) | test(service_tier) | test(responses_stream) | test(responses_adapter) | test(stream_decoder)'
+cargo nextest run --locked -p vtcode-llm -E 'test(websocket) | test(service_tier) | test(responses_stream) | test(responses_adapter) | test(stream_decoder) | test(providers::openai::request_builder::)'
 cargo nextest run --locked -p vtcode-config -E 'test(openai_config)'
 cargo check --locked -p vtcode-llm -p vtcode-config
 cargo clippy --locked -p vtcode-llm -p vtcode-config --all-targets -- -D warnings

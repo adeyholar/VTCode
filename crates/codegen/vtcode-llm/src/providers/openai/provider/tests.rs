@@ -3411,61 +3411,112 @@ async fn responses_parameter_rejection_preserves_route_for_generation_and_both_s
 // ─── Manual Compaction ───────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn manual_compaction_payload_includes_selected_fields_and_appends_instructions() {
-    let Some(server) = start_mock_server_or_skip().await else {
-        return;
-    };
+async fn standalone_compaction_omits_generation_fields_and_preserves_replay() {
+    let server = MockServer::start().await;
     let provider = test_provider(&native_openai_mock_base_url(&server), models::openai::GPT_5_6_SOL);
-    let captured = Arc::new(Mutex::new(None::<Value>));
-    let captured_for_mock = Arc::clone(&captured);
+    let compaction_item = json!({
+        "id": "cmp_fixture",
+        "type": "compaction",
+        "encrypted_content": "opaque-compacted-state"
+    });
+    let retained_item = json!({
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "Summarize."}]
+    });
+    let returned_items = json!([retained_item, compaction_item]);
+    let returned_items_for_mock = returned_items.clone();
     Mock::given(method("POST"))
         .and(path("/responses/compact"))
         .respond_with(move |req: &wiremock::Request| {
-            *captured_for_mock.lock().expect("not poisoned") =
-                Some(serde_json::from_slice(&req.body).expect("valid json"));
+            let payload: Value = serde_json::from_slice(&req.body).expect("valid json");
+            // Independently enforce the documented endpoint schema, including
+            // absence of stream rather than accepting stream=false.
+            let allowed_fields = [
+                "model",
+                "input",
+                "instructions",
+                "previous_response_id",
+                "service_tier",
+                "prompt_cache_key",
+                "prompt_cache_options",
+                "prompt_cache_retention",
+            ];
+            if let Some(key) = payload
+                .as_object()
+                .expect("payload object")
+                .keys()
+                .find(|key| !allowed_fields.contains(&key.as_str()))
+            {
+                return ResponseTemplate::new(400).set_body_json(json!({
+                    "error": {"message": format!("Unknown parameter: '{key}'."),
+                        "type": "invalid_request_error", "param": key, "code": "unknown_parameter"}
+                }));
+            }
             ResponseTemplate::new(200).set_body_json(json!({
-                "id": "resp_compact", "status": "completed",
-                "output": [{"type":"message","role":"assistant","content":[{"type":"output_text","text":"compacted"}]}]
+                "id": "resp_compact", "object": "response.compaction",
+                "output": returned_items_for_mock,
             }))
         })
-        .expect(1)
+        .expect(2)
         .mount(&server)
         .await;
 
-    let compacted = provider
-        .compact_history_with_options(
-            models::openai::GPT_5_6_SOL,
-            &[
-                provider::Message::system("Preserve decisions.".to_string()),
-                provider::Message::user("Summarize.".to_string()),
-            ],
-            &provider::ResponsesCompactionOptions {
-                instructions: Some("Terse.".to_string()),
-                max_output_tokens: Some(321),
-                // GPT-5.6 Sol advertises low as its smallest native effort;
-                // unsupported Minimal requests are rejected before transport.
-                reasoning_effort: Some(vtcode_config::types::ReasoningEffortLevel::Low),
-                verbosity: Some(vtcode_config::types::VerbosityLevel::High),
-                responses_include: Some(vec!["reasoning.encrypted_content".to_string()]),
-                response_store: Some(true),
-                service_tier: Some("priority".to_string()),
-                prompt_cache_key: Some("lineage-key".to_string()),
-            },
-        )
-        .await
-        .expect("compaction should succeed");
-    assert_eq!(compacted.len(), 1);
+    let history = [
+        provider::Message::system("Preserve decisions.".to_string()),
+        provider::Message::user("Summarize.".to_string()),
+    ];
+    let options = provider::ResponsesCompactionOptions {
+        instructions: Some("Terse.".to_string()),
+        max_output_tokens: Some(321),
+        // Generation-only overrides must not be validated or sent here.
+        reasoning_effort: Some(vtcode_config::types::ReasoningEffortLevel::Minimal),
+        verbosity: Some(vtcode_config::types::VerbosityLevel::High),
+        responses_include: Some(vec!["reasoning.encrypted_content".to_string()]),
+        response_store: Some(true),
+        service_tier: Some("priority".to_string()),
+        prompt_cache_key: Some("lineage-key".to_string()),
+    };
+    for manual in [false, true] {
+        let compacted = if manual {
+            provider
+                .compact_history_with_options(models::openai::GPT_5_6_SOL, &history, &options)
+                .await
+        } else {
+            provider.compact_history(models::openai::GPT_5_6_SOL, &history).await
+        }
+        .expect("documented standalone compaction payload should succeed");
+        assert_eq!(compacted.len(), 2);
+        let replay = provider
+            .convert_to_openai_responses_format(&provider::LLMRequest {
+                model: models::openai::GPT_5_6_SOL.to_string(),
+                messages: compacted.into(),
+                ..Default::default()
+            })
+            .expect("compacted history must be replayable");
+        let replay_items = replay["input"].as_array().expect("replay input array");
+        assert_eq!(replay_items.len(), 2);
+        assert_eq!(replay_items[0]["role"], json!("user"));
+        assert_eq!(replay_items[0]["content"][0]["text"], json!("Summarize."));
+        assert_eq!(replay_items[1], returned_items[1], "opaque compaction state must survive unchanged");
+        assert_eq!(history[1].content.as_text(), "Summarize.", "source history remains intact");
+    }
 
-    let p = captured.lock().expect("not poisoned").clone().expect("payload captured");
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert_eq!(requests.len(), 2);
+    let default_payload: Value = serde_json::from_slice(&requests[0].body).expect("valid JSON");
+    let p: Value = serde_json::from_slice(&requests[1].body).expect("valid JSON");
+    assert_eq!(default_payload["model"], json!(models::openai::GPT_5_6_SOL));
+    assert!(default_payload.get("service_tier").is_none());
+    assert!(default_payload.get("prompt_cache_key").is_none());
     assert_eq!(p["model"], json!(models::openai::GPT_5_6_SOL));
-    assert_eq!(p["max_output_tokens"], json!(321));
     assert_eq!(p["service_tier"], json!("priority"));
-    assert_eq!(p["store"], json!(false));
-    assert_eq!(p["include"], json!(["reasoning.encrypted_content"]));
-    assert_eq!(p["reasoning"]["effort"], json!("low"));
-    assert_eq!(p["text"]["verbosity"], json!("high"));
     assert_eq!(p["prompt_cache_key"], json!("lineage-key"));
-    assert_eq!(p["stream"], json!(true));
+    assert_eq!(p["prompt_cache_options"]["ttl"], json!("30m"));
+    for payload in [&default_payload, &p] {
+        for key in ["stream", "max_output_tokens", "store", "include", "reasoning", "text"] {
+            assert!(payload.get(key).is_none(), "standalone compaction must omit {key}");
+        }
+    }
     assert!(p.get("previous_response_id").is_none() && p.get("output_types").is_none());
     let instr = p["instructions"].as_str().expect("instructions required");
     assert!(
