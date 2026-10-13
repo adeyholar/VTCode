@@ -295,6 +295,61 @@ fn command_words_are_grep_search(words: &[String]) -> bool {
     matches!(program, Some("rg" | "grep" | "egrep" | "fgrep"))
 }
 
+/// Project markers checked in priority order before the Node tier: each
+/// entry names the files that select its verifier. First tier with any
+/// marker present wins, matching the previous sequential `if` chain.
+const PRE_NODE_VERIFIER_MARKERS: &[(&[&str], &str)] = &[
+    (&["Cargo.toml"], "cargo check --locked"),
+    (&["go.mod"], "go test ./..."),
+    (&["deno.json", "deno.jsonc"], "deno test"),
+    (&["bun.lockb", "bun.lock"], "bun test"),
+];
+
+/// Project markers checked after the Node tier (`package.json` is resolved
+/// separately at its priority position for script sniffing).
+const POST_NODE_VERIFIER_MARKERS: &[(&[&str], &str)] = &[
+    (&["pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"], "pytest -q"),
+    (&["Makefile", "makefile"], "make test"),
+    (&["justfile", "Justfile"], "just test"),
+];
+
+/// First verifier whose tier has any marker file under `workspace_root`.
+fn verifier_for_markers(workspace_root: &Path, markers: &[(&[&str], &str)]) -> Option<String> {
+    markers.iter().find_map(|(files, verifier)| {
+        files
+            .iter()
+            .any(|file| workspace_root.join(file).is_file())
+            .then(|| (*verifier).to_string())
+    })
+}
+
+/// Node verifier with `package.json` script sniffing: `test` runs directly,
+/// other known scripts run via `npm run`, and a missing/unreadable script
+/// map falls back to `npm test` so the directive never names a command that
+/// does not exist. Returns `None` when there is no `package.json`.
+fn default_verifier_for_node_workspace(workspace_root: &Path) -> Option<String> {
+    let package_json = workspace_root.join("package.json");
+    if !package_json.is_file() {
+        return None;
+    }
+    if let Ok(content) = std::fs::read_to_string(&package_json)
+        && let Ok(parsed) = serde_json::from_str::<Value>(&content)
+        && let Some(scripts) = parsed.get("scripts").and_then(Value::as_object)
+    {
+        for (script, command) in [
+            ("test", "npm test"),
+            ("check", "npm run check"),
+            ("lint", "npm run lint"),
+            ("build", "npm run build"),
+        ] {
+            if scripts.contains_key(script) {
+                return Some(command.to_string());
+            }
+        }
+    }
+    Some("npm test".to_string())
+}
+
 /// Detect a project-appropriate default verifier for autonomous recovery.
 ///
 /// Inspects well-known project markers under `workspace_root` and returns a
@@ -311,52 +366,14 @@ fn command_words_are_grep_search(words: &[String]) -> bool {
 /// auto-review) shows that naming the exact command — rather than listing
 /// examples — is what unblocks long-running autonomous work.
 pub fn default_verifier_for_workspace(workspace_root: &Path) -> Option<String> {
-    if workspace_root.join("Cargo.toml").is_file() {
-        return Some("cargo check --locked".to_string());
+    if let Some(verifier) = verifier_for_markers(workspace_root, PRE_NODE_VERIFIER_MARKERS) {
+        return Some(verifier);
     }
-    if workspace_root.join("go.mod").is_file() {
-        return Some("go test ./...".to_string());
-    }
-    if workspace_root.join("deno.json").is_file() || workspace_root.join("deno.jsonc").is_file() {
-        return Some("deno test".to_string());
-    }
-    if workspace_root.join("bun.lockb").is_file() || workspace_root.join("bun.lock").is_file() {
-        return Some("bun test".to_string());
-    }
-    let package_json = workspace_root.join("package.json");
-    if package_json.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&package_json)
-            && let Ok(parsed) = serde_json::from_str::<Value>(&content)
-            && let Some(scripts) = parsed.get("scripts").and_then(Value::as_object)
-        {
-            if scripts.contains_key("test") {
-                return Some("npm test".to_string());
-            }
-            if scripts.contains_key("check") {
-                return Some("npm run check".to_string());
-            }
-            if scripts.contains_key("lint") {
-                return Some("npm run lint".to_string());
-            }
-            if scripts.contains_key("build") {
-                return Some("npm run build".to_string());
-            }
-        }
-        return Some("npm test".to_string());
-    }
-    for marker in ["pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"] {
-        if workspace_root.join(marker).is_file() {
-            return Some("pytest -q".to_string());
-        }
-    }
-    if workspace_root.join("Makefile").is_file() || workspace_root.join("makefile").is_file() {
-        return Some("make test".to_string());
-    }
-    if workspace_root.join("justfile").is_file() || workspace_root.join("Justfile").is_file() {
-        return Some("just test".to_string());
+    if let Some(verifier) = default_verifier_for_node_workspace(workspace_root) {
+        return Some(verifier);
     }
     // No recognised project marker; callers fall back to generic examples.
-    None
+    verifier_for_markers(workspace_root, POST_NODE_VERIFIER_MARKERS)
 }
 
 /// Which shell forms of a verifier clear the anti-blind-editing gate. Shared
@@ -1320,6 +1337,39 @@ mod tests {
         assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("go test ./..."));
         std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"x\"\n").expect("Cargo.toml");
         assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("cargo check --locked"));
+    }
+
+    #[test]
+    fn default_verifier_marker_aliases_and_tier_priority() {
+        // Every table row resolves, including alternate spellings — a
+        // dropped alias in the marker table must fail here, not in a
+        // live session. Each fixture names a different row.
+        for (marker, expected) in [
+            ("Justfile", "just test"),
+            ("makefile", "make test"),
+            ("bun.lock", "bun test"),
+            ("deno.jsonc", "deno test"),
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            std::fs::write(dir.path().join(marker), "x\n").expect(marker);
+            assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some(expected), "{marker}");
+        }
+        // Cross-tier priority: earlier tiers win over later ones.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("bun.lockb"), "x\n").expect("bun.lockb");
+        std::fs::write(dir.path().join("deno.json"), "{}\n").expect("deno.json");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("deno test"));
+        std::fs::write(dir.path().join("go.mod"), "module example\n").expect("go.mod");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("go test ./..."));
+        // The Node tier (script sniffing) sits between Bun and Python.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("pyproject.toml"), "[tool.pytest]\n").expect("pyproject");
+        std::fs::write(dir.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#).expect("package.json");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("npm test"));
+        // Unrecognized scripts keep the `npm test` fallback.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("package.json"), r#"{"scripts":{"start":"serve"}}"#).expect("package.json");
+        assert_eq!(default_verifier_for_workspace(dir.path()).as_deref(), Some("npm test"));
     }
 
     #[test]

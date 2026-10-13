@@ -186,24 +186,35 @@ pub(super) fn parse_shell_command_words(command: &str) -> Option<Vec<Vec<String>
         .collect()
 }
 
+/// Shared head of both read-only classifiers: strip environment prefixes,
+/// resolve the lowercased program name, and apply the option-level guard.
+/// Returns the stripped words plus the program name, or `None` when the
+/// command cannot be classified (fail closed). The parallel-safe classifier
+/// shares this head; its stricter tail (no builds/tests, git allow-list
+/// only) stays separate on purpose.
+///
+/// The guard reads the original `words` (not the stripped view) so
+/// environment-injected options stay visible; keep that argument as-is.
+fn readonly_command_head(words: &[String]) -> Option<(&[String], String)> {
+    let command_words = command_words_after_environment_prefix(words);
+    let first = command_words
+        .first()
+        .and_then(|word| Path::new(word).file_name())
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)?;
+    if has_unsafe_readonly_options(words) {
+        return None;
+    }
+    Some((command_words, first))
+}
+
 /// Returns whether one parsed command is an allow-listed read-only command.
 /// Option-level guards are shared with raw argument validation so activity
 /// accounting cannot accidentally become less strict than tool intent.
 pub(crate) fn command_words_are_readonly(words: &[String]) -> bool {
-    let command_words = command_words_after_environment_prefix(words);
-    let Some(first) = command_words
-        .first()
-        .and_then(|word| Path::new(word).file_name())
-        .and_then(|name| name.to_str())
-        .map(str::to_ascii_lowercase)
-    else {
+    let Some((command_words, first)) = readonly_command_head(words) else {
         return false;
     };
-
-    if has_unsafe_readonly_options(words) {
-        return false;
-    }
-
     if first == "command" {
         return matches!(command_words.get(1).map(String::as_str), Some("-v" | "-V"))
             && command_words.len() > 2
@@ -315,18 +326,9 @@ fn git_subcommand_and_operand(command_words: &[String]) -> Option<(usize, Option
 /// purposes, but are excluded here because they write caches, lockfiles, or
 /// build artifacts and contend on shared package-manager state.
 fn command_words_are_parallel_safe(words: &[String]) -> bool {
-    let command_words = command_words_after_environment_prefix(words);
-    let Some(first) = command_words
-        .first()
-        .and_then(|word| Path::new(word).file_name())
-        .and_then(|name| name.to_str())
-        .map(str::to_ascii_lowercase)
-    else {
+    let Some((command_words, first)) = readonly_command_head(words) else {
         return false;
     };
-    if has_unsafe_readonly_options(words) {
-        return false;
-    }
 
     if is_readonly_base_command(&first) {
         return true;
@@ -474,18 +476,24 @@ pub fn is_spool_file_read_command(tool_name: &str, args: &Value) -> bool {
         return false;
     }
 
-    if !is_readonly_command_session_command(args) {
+    // Parse once: the same segments feed both the read-only gate and the
+    // spool-path scan. Delegating the gate to
+    // `is_readonly_command_session_command` and then parsing again repeats
+    // the extract + sanitize + tree-sitter pipeline on every completed
+    // command output (see `prepare_execution_output`).
+    let Some(raw) = shell_command_text_with_args(args) else {
+        return false;
+    };
+    let Some(commands) = static_shell_command_words(&raw) else {
+        return false;
+    };
+    if !commands.iter().all(|words| command_words_are_readonly(words)) {
         return false;
     }
-
-    shell_command_text_with_args(args)
-        .and_then(|command| static_shell_command_words(&command))
-        .is_some_and(|commands| {
-            commands
-                .iter()
-                .flatten()
-                .any(|word| SpooledOutputReference::recognizes_path(Path::new(word)))
-        })
+    commands
+        .iter()
+        .flatten()
+        .any(|word| SpooledOutputReference::recognizes_path(Path::new(word)))
 }
 
 #[cfg(test)]
@@ -896,6 +904,36 @@ rest=substr(line,3); g=index(rest,"|")+1; guide=substr(rest,g+2); gp=0; gg=guide
     }
 
     #[test]
+    fn shared_command_head_fails_closed_on_env_only_words() {
+        // Asymmetric pair: env assignments alone leave no program to
+        // classify (fail closed), while the same prefix with a program
+        // classifies on both paths. Guards the shared helper's strip
+        // order: prefix strip first, program resolution second.
+        let env_only: Vec<String> = vec!["FOO=bar".to_string()];
+        assert!(!command_words_are_readonly(&env_only));
+        assert!(!command_words_are_parallel_safe(&env_only));
+        assert!(readonly_command_head(&env_only).is_none());
+
+        let env_ls: Vec<String> = vec!["FOO=bar".to_string(), "ls".to_string()];
+        assert!(command_words_are_readonly(&env_ls));
+        assert!(command_words_are_parallel_safe(&env_ls));
+        let (stripped, first) = readonly_command_head(&env_ls).expect("env-prefixed ls classifies");
+        assert_eq!(first, "ls");
+        assert_eq!(stripped, ["ls".to_string()].as_slice());
+    }
+
+    #[test]
+    fn parallel_safe_path_rejects_env_injection_like_readonly() {
+        // The shared head must pass the ORIGINAL words (env prefix
+        // included) to the option guard. Stripped `["ls"]` looks clean;
+        // only the unstripped view carries the injection.
+        let injected: Vec<String> = vec!["LD_PRELOAD=./evil.so".to_string(), "ls".to_string()];
+        assert!(!command_words_are_parallel_safe(&injected));
+        assert!(!command_words_are_readonly(&injected));
+        assert!(readonly_command_head(&injected).is_none());
+    }
+
+    #[test]
     fn stderr_merge_is_not_a_write_redirection() {
         assert!(is_readonly_command_session_command(&run_cmd("cargo check 2>&1 | head -c 4000")));
         // A real file redirection is still rejected.
@@ -936,5 +974,26 @@ rest=substr(line,3); g=index(rest,"|")+1; guide=substr(rest,g+2); gp=0; gg=guide
 
         assert!(!is_spool_file_read_command("mcp_tool", &run_cmd("cat .vtcode/context/tool_outputs/run-1.txt")));
         assert!(is_spool_file_read_command("exec_command", &run_cmd("cat .vtcode/context/tool_outputs/run-1.txt")));
+    }
+
+    #[test]
+    fn spool_file_read_uses_one_parse_for_gate_and_scan() {
+        // Equivalence with the old parse-twice form: env prefixes and
+        // `&&` chains must resolve identically in the gate and the scan.
+        // A dropped `all(readonly)` gate would flip the mutating row to
+        // true (spooling a mutation); a reordered extract would flip the
+        // env-prefixed row to false.
+        assert!(is_spool_file_read_command(
+            "exec_command",
+            &run_cmd("FOO=bar cat .vtcode/context/tool_outputs/run-1.txt")
+        ));
+        assert!(is_spool_file_read_command(
+            "exec_command",
+            &run_cmd("cat .vtcode/context/tool_outputs/run-1.txt && echo done")
+        ));
+        assert!(!is_spool_file_read_command(
+            "exec_command",
+            &run_cmd("cat .vtcode/context/tool_outputs/run-1.txt && rm copied.txt")
+        ));
     }
 }

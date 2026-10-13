@@ -329,32 +329,32 @@ fn file_access_targets(tool_name: &str, args: &Value) -> Vec<FileAccessTarget> {
         tools::APPLY_PATCH => {
             targets.extend(patch_file_access_targets(args));
         }
-        tools::UNIFIED_FILE if file_operation_action_is(args, "write") => {
-            if let Some(path) = primary_path_arg(args) {
-                push_file_access_target(&mut targets, path, AccessType::Write);
-            }
-        }
-        tools::UNIFIED_FILE if file_operation_action_is(args, "edit") => {
-            if let Some(path) = primary_path_arg(args) {
-                push_file_access_target(&mut targets, path, AccessType::Modify);
-            }
-        }
-        tools::UNIFIED_FILE if file_operation_action_is(args, "delete") => {
-            if let Some(path) = primary_path_arg(args) {
-                push_file_access_target(&mut targets, path, AccessType::Delete);
-            }
-        }
-        tools::UNIFIED_FILE if file_operation_action_is(args, "move") => {
-            if let Some(path) = primary_path_arg(args) {
-                push_file_access_target(&mut targets, path, AccessType::Modify);
-            }
-            if let Some(path) = destination_path_arg(args) {
-                push_file_access_target(&mut targets, path, AccessType::Write);
-            }
-        }
-        tools::UNIFIED_FILE if file_operation_action_is(args, "copy") => {
-            if let Some(path) = destination_path_arg(args) {
-                push_file_access_target(&mut targets, path, AccessType::Write);
+        tools::UNIFIED_FILE => {
+            // Single home of the unified-file mapping; mirrors the legacy
+            // file-helper arms above. Keep them in sync.
+            if file_operation_action_is(args, "write") {
+                if let Some(path) = primary_path_arg(args) {
+                    push_file_access_target(&mut targets, path, AccessType::Write);
+                }
+            } else if file_operation_action_is(args, "edit") {
+                if let Some(path) = primary_path_arg(args) {
+                    push_file_access_target(&mut targets, path, AccessType::Modify);
+                }
+            } else if file_operation_action_is(args, "delete") {
+                if let Some(path) = primary_path_arg(args) {
+                    push_file_access_target(&mut targets, path, AccessType::Delete);
+                }
+            } else if file_operation_action_is(args, "move") {
+                if let Some(path) = primary_path_arg(args) {
+                    push_file_access_target(&mut targets, path, AccessType::Modify);
+                }
+                if let Some(path) = destination_path_arg(args) {
+                    push_file_access_target(&mut targets, path, AccessType::Write);
+                }
+            } else if file_operation_action_is(args, "copy") {
+                if let Some(path) = destination_path_arg(args) {
+                    push_file_access_target(&mut targets, path, AccessType::Write);
+                }
             }
         }
         _ => {}
@@ -367,13 +367,8 @@ fn proposed_changes_preview(args: &Value) -> String {
     const PREVIEW_LIMIT: usize = 500;
 
     let preview_text = |label: &str, text: &str| {
-        let preview_len = text.len().min(PREVIEW_LIMIT);
-        format!(
-            "{label} ({} bytes):\n{}{}",
-            text.len(),
-            &text[..preview_len],
-            if text.len() > preview_len { "..." } else { "" }
-        )
+        let prefix = vtcode_commons::formatting::truncate_utf8_prefix(text, PREVIEW_LIMIT);
+        format!("{label} ({} bytes):\n{}{}", text.len(), prefix, if prefix.len() < text.len() { "..." } else { "" })
     };
 
     if let Some(content) = args.get("content").and_then(|value| value.as_str()) {
@@ -382,7 +377,13 @@ fn proposed_changes_preview(args: &Value) -> String {
 
     if let Some(old_str) = args.get("old_str").and_then(|value| value.as_str()) {
         let new_str = args.get("new_str").and_then(|value| value.as_str()).unwrap_or("");
-        return format!("Replace:\n  '{old_str}'\nWith:\n  '{new_str}'");
+        // Bound like the content/patch branches: an unbounded replacement
+        // would bloat the approval prompt and audit log.
+        return format!(
+            "Replace:\n  '{}'\nWith:\n  '{}'",
+            vtcode_commons::formatting::truncate_byte_budget(old_str, PREVIEW_LIMIT, "..."),
+            vtcode_commons::formatting::truncate_byte_budget(new_str, PREVIEW_LIMIT, "...")
+        );
     }
 
     if let Ok(Some(patch_input)) = decode_apply_patch_input(args) {
@@ -1214,6 +1215,55 @@ mod tests {
         assert_eq!(targets[0].access_type, AccessType::Modify);
         assert_eq!(targets[1].path, PathBuf::from(".gitignore"));
         assert_eq!(targets[1].access_type, AccessType::Modify);
+    }
+
+    #[test]
+    fn unified_file_targets_mirror_legacy_file_helpers() {
+        let write = file_access_targets(tools::UNIFIED_FILE, &serde_json::json!({"action": "write", "path": "a.txt"}));
+        assert_eq!(write.len(), 1);
+        assert_eq!(write[0].path, PathBuf::from("a.txt"));
+        assert_eq!(write[0].access_type, AccessType::Write);
+
+        let moved = file_access_targets(
+            tools::UNIFIED_FILE,
+            &serde_json::json!({"action": "move", "path": "a.txt", "destination": "b.txt"}),
+        );
+        assert_eq!(moved.len(), 2);
+        assert_eq!(moved[0].access_type, AccessType::Modify);
+        assert_eq!(moved[1].access_type, AccessType::Write);
+
+        let unknown = file_access_targets(tools::UNIFIED_FILE, &serde_json::json!({"action": "read", "path": "a.txt"}));
+        assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn proposed_changes_preview_bounds_old_and_new_str() {
+        // Short replacements render exactly as before (no truncation
+        // marker); long ones stay bounded with a marker; a multi-byte
+        // char on the 500-byte boundary must not panic.
+        let short = proposed_changes_preview(&serde_json::json!({"old_str": "a", "new_str": "b"}));
+        assert_eq!(short, "Replace:\n  'a'\nWith:\n  'b'");
+
+        let long_old = "a".repeat(600);
+        let bounded = proposed_changes_preview(&serde_json::json!({"old_str": long_old, "new_str": ""}));
+        assert!(bounded.contains("..."));
+        assert!(bounded.len() < 600, "preview must stay bounded: {}", bounded.len());
+
+        let boundary_old = format!("{}{}", "a".repeat(499), "日".repeat(10));
+        let boundary = proposed_changes_preview(&serde_json::json!({"old_str": boundary_old, "new_str": "b"}));
+        assert!(boundary.contains("..."));
+        assert!(boundary.ends_with("With:\n  'b'"));
+    }
+
+    #[test]
+    fn proposed_changes_preview_never_splits_utf8_boundary() {
+        // 500-byte cut lands mid-`日` (3 bytes): the old `&text[..500]`
+        // panicked; the canonical prefix rounds down to the boundary.
+        let content = format!("{}{}", "a".repeat(499), "日".repeat(10));
+        let preview = proposed_changes_preview(&serde_json::json!({"content": content}));
+        assert!(preview.contains("Content ("));
+        assert!(preview.ends_with("..."));
+        assert!(preview.len() < content.len() + 64);
     }
 
     #[tokio::test]

@@ -121,19 +121,37 @@ struct ToolPresence {
 
 impl ToolPresence {
     fn of(available_tools: &[String]) -> Self {
-        let has = |name: &str| available_tools.iter().any(|tool| tool == name);
-        Self {
-            exec: has(TOOL_EXEC_COMMAND),
-            write_stdin: has(TOOL_WRITE_STDIN),
-            code_search: has(TOOL_CODE_SEARCH),
-            read_file: has(TOOL_READ_FILE),
-            list_files: has(TOOL_LIST_FILES),
-            apply_patch: has(TOOL_APPLY_PATCH),
-            request_user_input: has(TOOL_REQUEST_USER_INPUT),
-            task_tracker: has(TOOL_TASK_TRACKER),
-            start_planning: has(TOOL_START_PLANNING),
-            matrix: has("matrix"),
+        // Single pass over the tool list: the old form ran one linear
+        // `any()` scan per flag (10 scans per call, up to 4 calls per
+        // model-aware prompt build). Same membership policy, one walk.
+        let mut presence = Self {
+            exec: false,
+            write_stdin: false,
+            code_search: false,
+            read_file: false,
+            list_files: false,
+            apply_patch: false,
+            request_user_input: false,
+            task_tracker: false,
+            start_planning: false,
+            matrix: false,
+        };
+        for tool in available_tools {
+            match tool.as_str() {
+                TOOL_EXEC_COMMAND => presence.exec = true,
+                TOOL_WRITE_STDIN => presence.write_stdin = true,
+                TOOL_CODE_SEARCH => presence.code_search = true,
+                TOOL_READ_FILE => presence.read_file = true,
+                TOOL_LIST_FILES => presence.list_files = true,
+                TOOL_APPLY_PATCH => presence.apply_patch = true,
+                TOOL_REQUEST_USER_INPUT => presence.request_user_input = true,
+                TOOL_TASK_TRACKER => presence.task_tracker = true,
+                TOOL_START_PLANNING => presence.start_planning = true,
+                "matrix" => presence.matrix = true,
+                _ => {}
+            }
         }
+        presence
     }
 }
 
@@ -275,7 +293,7 @@ pub(crate) fn generate_tool_guidelines_for_profile(
     }
     if has_search {
         lines.push(CODE_SEARCH_FILTER_LINE.to_string());
-        lines.push(code_search_guidance(has_exec, shell_profile));
+        lines.push(code_search_guidance(has_exec));
     }
     if has_apply_patch || has_exec {
         lines.push(
@@ -662,7 +680,7 @@ fn read_only_batching_guidance(has_read_file: bool) -> &'static str {
     }
 }
 
-fn code_search_guidance(has_exec: bool, _shell_profile: ResolvedShellPromptProfile) -> String {
+fn code_search_guidance(has_exec: bool) -> String {
     const BASE: &str = "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`.";
     if has_exec {
         format!("{BASE} Use `exec_command` or a skill for syntax patterns.")
@@ -1346,6 +1364,46 @@ mod tests {
             generate_runtime_tool_guidelines_for_profile(&tools, true, ResolvedShellPromptProfile::UnixLike);
         assert!(guidelines.contains("Keep `task_tracker` updated"));
         assert!(guidelines.contains("blockers and verification open"));
+    }
+
+    #[test]
+    fn tool_presence_of_sets_each_flag_in_one_pass() {
+        let tools = vec![
+            TOOL_EXEC_COMMAND.to_string(),
+            TOOL_WRITE_STDIN.to_string(),
+            TOOL_CODE_SEARCH.to_string(),
+            TOOL_READ_FILE.to_string(),
+            TOOL_LIST_FILES.to_string(),
+            TOOL_APPLY_PATCH.to_string(),
+            TOOL_REQUEST_USER_INPUT.to_string(),
+            TOOL_TASK_TRACKER.to_string(),
+            TOOL_START_PLANNING.to_string(),
+            "matrix".to_string(),
+            "unknown_tool".to_string(),
+        ];
+        let presence = ToolPresence::of(&tools);
+        assert!(presence.exec);
+        assert!(presence.write_stdin);
+        assert!(presence.code_search);
+        assert!(presence.read_file);
+        assert!(presence.list_files);
+        assert!(presence.apply_patch);
+        assert!(presence.request_user_input);
+        assert!(presence.task_tracker);
+        assert!(presence.start_planning);
+        assert!(presence.matrix);
+
+        let empty = ToolPresence::of(&[]);
+        assert!(!empty.exec);
+        assert!(!empty.write_stdin);
+        assert!(!empty.code_search);
+        assert!(!empty.read_file);
+        assert!(!empty.list_files);
+        assert!(!empty.apply_patch);
+        assert!(!empty.request_user_input);
+        assert!(!empty.task_tracker);
+        assert!(!empty.start_planning);
+        assert!(!empty.matrix);
     }
 
     #[test]
