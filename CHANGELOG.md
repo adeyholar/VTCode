@@ -2,6 +2,35 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.177.0 - 2026-10-13
+
+### Highlights
+#### Bug Fixes
+
+- Stop treating bare system binaries as skills and unify CLI discovery (a0f7c28e) 
+- Keep exit summary visible and resumable on degraded teardown (988f30f8) 
+#### Features
+
+- Enhance WebMCP handoff handling and add related tests (c6982974) 
+- Add cursor restore sequence handling and improve postamble writing (185d568e) 
+### Other Changes
+#### Other
+
+- Implement OpenResponsesProvider with compaction, legacy, and native response handling (1606aafc) 
+- Refactor compaction handling and improve diagnostics logging (afe2c636) 
+- Refactor Homebrew formula update process and add tests for formula transformation (81c83155) 
+- Refactor state management: extract Ctrl+C handling, follow-up tracking, prompt caching, and verification logic into separate modules (72327110) 
+#### Refactors
+
+- Streamline public tool resolution and enhance command safety checks (e4a03524) 
+- Extract archived history cleaning helper (39481dc3) 
+- Share explicit path syntax helper (f0f0b724) 
+- Extract request envelope tracking (892fe89d) 
+- Share link-detector token patterns (d80bd2fb) 
+- Streamline read-only command classification and enhance verifier logic (0df5e8c2) 
+- Simplify permission checks and remove unused methods (be82846a) 
+- Extract command text once in safety gateway evaluation (2c324b1c) 
+- Add Gemini 4 Argon model and update related configurations (b82ec6b1) 
 ## 0.176.0 - 2026-10-12
 
 ### Highlights
