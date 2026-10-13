@@ -49,6 +49,21 @@ fn is_fast_session_teardown(reason: SessionEndReason) -> bool {
     matches!(reason, SessionEndReason::Exit | SessionEndReason::Cancelled | SessionEndReason::NewSession)
 }
 
+/// Fallback resume path when the final archive upgrade is skipped (timeout)
+/// or fails.
+///
+/// Progress snapshots persist at the reserved archive path during the
+/// session, so the exit summary can still offer `Resume:` from the last
+/// snapshot instead of dropping the line. Returns `None` when no snapshot
+/// file exists yet (short sessions), preserving today's no-resume behavior
+/// rather than pointing at a session that cannot load.
+async fn fallback_resume_archive_path(reserved_path: PathBuf) -> Option<PathBuf> {
+    match tokio::fs::metadata(&reserved_path).await {
+        Ok(metadata) if metadata.is_file() => Some(reserved_path),
+        _ => None,
+    }
+}
+
 /// Restore terminal to a clean state after session exit
 /// This ensures that raw mode is disabled and the terminal is left in a usable state
 /// even if the TUI didn't exit cleanly (e.g., due to Ctrl+C)
@@ -115,6 +130,12 @@ pub(super) async fn finalize_session(
             } else {
                 ARCHIVE_FINALIZE_TIMEOUT
             };
+            // Reserved path for the resume fallback below: progress snapshots
+            // persist here during the session, and the final write targets
+            // this same file (`SessionArchive::write_snapshot` writes
+            // `self.path`), so a skipped or failed final upgrade can still
+            // point `Resume:` at the last snapshot.
+            let reserved_archive_path = archive.path().to_path_buf();
             let finalize_task = tokio::task::spawn_blocking(move || {
                 archive.finalize_with_diagnostics(
                     transcript_lines,
@@ -139,16 +160,22 @@ pub(super) async fn finalize_session(
                 Ok(Ok(Err(err))) => {
                     renderer.line(MessageStyle::Error, &format!("Failed to save session: {err}"))?;
                     renderer.line_if_not_empty(MessageStyle::Output)?;
+                    archive_path = fallback_resume_archive_path(reserved_archive_path).await;
+                    *completed_output = Some(FinalizationOutput { archive_path: archive_path.clone() });
                 }
                 Ok(Err(join_error)) => {
                     renderer.line(MessageStyle::Error, &format!("Failed to save session: {join_error}"))?;
                     renderer.line_if_not_empty(MessageStyle::Output)?;
+                    archive_path = fallback_resume_archive_path(reserved_archive_path).await;
+                    *completed_output = Some(FinalizationOutput { archive_path: archive_path.clone() });
                 }
                 Err(_elapsed) => {
                     tracing::warn!(
                         "session archive finalize timed out after {:?}; keeping the last progress snapshot",
                         archive_timeout
                     );
+                    archive_path = fallback_resume_archive_path(reserved_archive_path).await;
+                    *completed_output = Some(FinalizationOutput { archive_path: archive_path.clone() });
                 }
             }
         }
@@ -282,7 +309,10 @@ pub(super) async fn finalize_session(
 
 #[cfg(test)]
 mod tests {
-    use super::{ARCHIVE_FINALIZE_TIMEOUT, ARCHIVE_FINALIZE_TIMEOUT_FAST, interrupt_budget, is_fast_session_teardown};
+    use super::{
+        ARCHIVE_FINALIZE_TIMEOUT, ARCHIVE_FINALIZE_TIMEOUT_FAST, fallback_resume_archive_path, interrupt_budget,
+        is_fast_session_teardown,
+    };
     use vtcode_core::hooks::SessionEndReason;
 
     #[test]
@@ -330,5 +360,31 @@ mod tests {
         assert_eq!(interrupt_budget(false, normal), normal);
         // Boundary: zero normal stays zero when not interrupted.
         assert_eq!(interrupt_budget(false, std::time::Duration::from_millis(0)), std::time::Duration::from_millis(0));
+    }
+
+    #[tokio::test]
+    async fn resume_fallback_prefers_existing_snapshot_over_missing_path() {
+        // Asymmetric outcomes from one helper: an existing snapshot file
+        // keeps `Resume:` working after a skipped/failed final upgrade,
+        // while a missing file (short session, nothing persisted yet) must
+        // stay resume-less rather than point at an unloadable session.
+        let dir = tempfile::TempDir::new().unwrap();
+        let snapshot = dir.path().join("session-test.json");
+        std::fs::write(&snapshot, "{}").unwrap();
+        let fallback = fallback_resume_archive_path(snapshot.clone()).await;
+        assert_eq!(fallback, Some(snapshot));
+
+        let missing = dir.path().join("session-missing.json");
+        assert_eq!(fallback_resume_archive_path(missing).await, None);
+    }
+
+    #[tokio::test]
+    async fn resume_fallback_rejects_directories() {
+        // Boundary: a directory at the reserved path is not a loadable
+        // snapshot — only regular files qualify.
+        let dir = tempfile::TempDir::new().unwrap();
+        let subdir = dir.path().join("session-dir.json");
+        std::fs::create_dir(&subdir).unwrap();
+        assert_eq!(fallback_resume_archive_path(subdir).await, None);
     }
 }

@@ -214,18 +214,39 @@ fn write_postamble_to(writer: &mut impl Write, postamble: &str) -> io::Result<()
     writer.flush()
 }
 
-/// Keep the stdout lock across the complete block so exit paths cannot
+/// Decide which streams carry the exit summary.
+///
+/// Stdout always carries it so piped runs (`vtcode > out.txt`) still capture
+/// the resume command. When stdout is redirected but stderr is still the
+/// terminal (the TUI renders there), stderr carries a second copy: otherwise
+/// a `| tee` / IDE-task run shows the TUI frame yet the summary silently
+/// lands in the pipe and the terminal looks like it printed nothing.
+fn postamble_destinations(stdout_is_terminal: bool, stderr_is_terminal: bool) -> (bool, bool) {
+    (true, !stdout_is_terminal && stderr_is_terminal)
+}
+
+/// Keep each stream lock across the complete block so exit paths cannot
 /// interleave between rows.
 fn write_postamble(postamble: &str) {
-    let mut stdout = io::stdout().lock();
+    use std::io::IsTerminal;
+    let (to_stdout, to_stderr) = postamble_destinations(io::stdout().is_terminal(), io::stderr().is_terminal());
     // Print at the restored cursor position: the canonical restore leaves an
     // alternate-screen session at the pre-TUI cursor and an inline session at
     // the end of its transcript, both visible. Jumping to the viewport bottom
     // (CUP to the last row) would scroll a viewport-height run of blanks into
     // the scrollback — the huge blank gap reported on exit — so no cursor
     // anchor belongs here.
-    if let Err(error) = write_postamble_to(&mut stdout, postamble) {
-        tracing::warn!(%error, "failed to write the exit postamble");
+    if to_stdout {
+        let mut stdout = io::stdout().lock();
+        if let Err(error) = write_postamble_to(&mut stdout, postamble) {
+            tracing::warn!(%error, "failed to write the exit postamble to stdout");
+        }
+    }
+    if to_stderr {
+        let mut stderr = io::stderr().lock();
+        if let Err(error) = write_postamble_to(&mut stderr, postamble) {
+            tracing::warn!(%error, "failed to write the exit postamble to stderr");
+        }
     }
     // Last defense before the process exits: anything that arrived while the
     // remaining teardown (git snapshot, runtime drop) ran is consumed here so
@@ -736,6 +757,18 @@ mod tests {
             postamble.contains("Interrupted — session exited"),
             "interrupt notice must survive without color: {postamble:?}"
         );
+    }
+
+    #[test]
+    fn postamble_destinations_mirror_to_stderr_only_when_stdout_is_redirected() {
+        // The TUI renders on stderr. A `| tee` run keeps stderr on the
+        // terminal while stdout lands in a pipe: without the mirror the
+        // terminal shows the TUI frame yet the summary silently vanishes
+        // into the pipe. Both ttys must not duplicate the block.
+        assert_eq!(postamble_destinations(true, true), (true, false));
+        assert_eq!(postamble_destinations(true, false), (true, false));
+        assert_eq!(postamble_destinations(false, true), (true, true));
+        assert_eq!(postamble_destinations(false, false), (true, false));
     }
 
     #[test]
