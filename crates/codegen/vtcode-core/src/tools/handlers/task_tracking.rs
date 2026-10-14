@@ -361,6 +361,57 @@ pub fn normalize_optional_text(value: Option<&str>) -> Option<String> {
     value.map(str::trim).filter(|value| !value.is_empty()).map(ToOwned::to_owned)
 }
 
+/// Parse a `files: [...]` metadata value into trimmed non-empty paths.
+/// Commas inside single/double quotes stay part of one item.
+pub fn parse_files_metadata(value: &str) -> Vec<String> {
+    super::planning_workflow::split_bracket_items(value)
+        .into_iter()
+        .map(|item| item.trim().to_owned())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+/// Consume one indented markdown metadata line (`files:`, `outcome:`,
+/// `verify:`) into `metadata`, tracking multi-line `verify:` blocks through
+/// `in_verify_block`. Returns `true` when the line was metadata.
+pub fn apply_metadata_line(metadata: &mut TaskStepMetadata, raw: &str, in_verify_block: &mut bool) -> bool {
+    let trimmed = raw.trim_start();
+
+    if *in_verify_block {
+        if let Some(command) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+            .or_else(|| trimmed.strip_prefix("+ "))
+        {
+            if let Some(command) = normalize_optional_text(Some(command)) {
+                metadata.verify.push(command);
+            }
+            return true;
+        }
+        *in_verify_block = false;
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("files:") {
+        metadata.files = parse_files_metadata(rest);
+        return true;
+    }
+    if let Some(rest) = trimmed.strip_prefix("outcome:") {
+        metadata.outcome = normalize_optional_text(Some(rest));
+        return true;
+    }
+    if trimmed == "verify:" {
+        metadata.verify.clear();
+        *in_verify_block = true;
+        return true;
+    }
+    if let Some(rest) = trimmed.strip_prefix("verify:") {
+        metadata.verify = normalize_string_items(Some(&[rest.to_string()]));
+        return true;
+    }
+
+    false
+}
+
 pub fn append_task_step_metadata(markdown: &mut String, indent: &str, metadata: &TaskStepMetadata) {
     if !metadata.files.is_empty() {
         markdown.push_str(indent);
@@ -744,6 +795,44 @@ impl TaskCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_files_metadata_keeps_quoted_commas_as_single_item() {
+        let items = parse_files_metadata("'src/a.rs, b.rs', src/c.rs");
+        assert_eq!(items, vec!["'src/a.rs, b.rs'".to_string(), "src/c.rs".to_string()]);
+    }
+
+    #[test]
+    fn apply_metadata_line_drives_verify_block_state_machine() {
+        let mut metadata = TaskStepMetadata::default();
+        let mut in_verify_block = false;
+
+        // Non-metadata lines are rejected without touching state.
+        assert!(!apply_metadata_line(&mut metadata, "just a description", &mut in_verify_block));
+        assert!(!in_verify_block);
+        assert!(metadata.verify.is_empty());
+
+        // files:/outcome: lines are consumed directly (persisted bracket-free).
+        assert!(apply_metadata_line(&mut metadata, "  files: a.rs, b.rs", &mut in_verify_block));
+        assert!(apply_metadata_line(&mut metadata, "  outcome: did the thing", &mut in_verify_block));
+        assert_eq!(metadata.files, vec!["a.rs".to_string(), "b.rs".to_string()]);
+        assert_eq!(metadata.outcome.as_deref(), Some("did the thing"));
+
+        // Bare `verify:` opens a block; mixed bullet markers accumulate.
+        assert!(apply_metadata_line(&mut metadata, "  verify:", &mut in_verify_block));
+        assert!(in_verify_block);
+        assert!(apply_metadata_line(&mut metadata, "    - cargo test", &mut in_verify_block));
+        assert!(apply_metadata_line(&mut metadata, "    * cargo clippy", &mut in_verify_block));
+        assert_eq!(metadata.verify, vec!["cargo test".to_string(), "cargo clippy".to_string()]);
+
+        // A non-bullet line closes the block and is itself rejected.
+        assert!(!apply_metadata_line(&mut metadata, "  other: x", &mut in_verify_block));
+        assert!(!in_verify_block);
+
+        // Inline `verify:` replaces the accumulated block.
+        assert!(apply_metadata_line(&mut metadata, "  verify: make check", &mut in_verify_block));
+        assert_eq!(metadata.verify, vec!["make check".to_string()]);
+    }
 
     #[test]
     fn parse_marked_status_prefix_rejects_unmarked_text() {

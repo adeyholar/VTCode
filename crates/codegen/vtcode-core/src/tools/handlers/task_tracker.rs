@@ -22,10 +22,11 @@ use crate::config::constants::tools;
 use crate::tools::error_helpers::deserialize_tool_args;
 use crate::tools::handlers::task_tracking::{
     TASK_ITEMS_DESCRIPTION, TaskCounts, TaskItemInput, TaskStepMetadata, TaskTrackingStatus, TaskTreeNode,
-    append_notes, append_notes_section, append_task_step_metadata, compact_task_tree_view, is_bulk_sync_update,
-    metadata_from_input, normalize_optional_text, normalize_string_items, parse_marked_status_prefix,
-    parse_status_prefix, task_files_property_schema, task_items_array_schema, task_status_property_schema,
-    task_verify_property_schema, validate_action_index_fields, validate_task_item_inputs, validate_update_shape,
+    append_notes, append_notes_section, append_task_step_metadata, apply_metadata_line, compact_task_tree_view,
+    is_bulk_sync_update, metadata_from_input, normalize_optional_text, normalize_string_items,
+    parse_marked_status_prefix, parse_status_prefix, task_files_property_schema, task_items_array_schema,
+    task_status_property_schema, task_verify_property_schema, validate_action_index_fields, validate_task_item_inputs,
+    validate_update_shape,
 };
 use crate::utils::file_utils::{ensure_dir_exists, read_file_with_context, write_file_with_context};
 use anyhow::{Context, Result, bail};
@@ -192,58 +193,9 @@ fn parse_single_index_from_path(index_path: &str) -> Result<usize> {
     Ok(parsed)
 }
 
-fn parse_files_metadata(value: &str) -> Vec<String> {
-    super::planning_workflow::split_bracket_items(value)
-        .into_iter()
-        .map(|item| item.trim().to_owned())
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-fn apply_task_metadata_line(item: &mut TaskItem, raw: &str, in_verify_block: &mut bool) -> bool {
-    let trimmed = raw.trim_start();
-
-    if *in_verify_block {
-        if let Some(command) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-            .or_else(|| trimmed.strip_prefix("+ "))
-        {
-            if let Some(command) = normalize_optional_text(Some(command)) {
-                item.metadata.verify.push(command);
-            }
-            return true;
-        }
-        *in_verify_block = false;
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("files:") {
-        item.metadata.files = parse_files_metadata(rest);
-        return true;
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("outcome:") {
-        item.metadata.outcome = normalize_optional_text(Some(rest));
-        return true;
-    }
-
-    if trimmed == "verify:" {
-        item.metadata.verify.clear();
-        *in_verify_block = true;
-        return true;
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("verify:") {
-        item.metadata.verify = normalize_string_items(Some(&[rest.to_string()]));
-        return true;
-    }
-
-    false
-}
-
 fn parse_plan_mirror_markdown(content: &str) -> Option<TaskChecklist> {
     let mut title = String::new();
-    let mut items = Vec::new();
+    let mut items: Vec<TaskItem> = Vec::new();
     let mut notes_lines = Vec::new();
     let mut in_notes = false;
     let mut in_verify_block = false;
@@ -277,7 +229,7 @@ fn parse_plan_mirror_markdown(content: &str) -> Option<TaskChecklist> {
 
         if let Some(last) = items.last_mut() {
             let indent = raw.chars().take_while(|c| *c == ' ').count();
-            if indent >= 2 && apply_task_metadata_line(last, raw, &mut in_verify_block) {
+            if indent >= 2 && apply_metadata_line(&mut last.metadata, raw, &mut in_verify_block) {
                 continue;
             }
             in_verify_block = false;
@@ -672,7 +624,7 @@ impl TaskTrackerTool {
         let content = read_file_with_context(&file, "task checklist").await?;
 
         let mut title = String::new();
-        let mut items = Vec::new();
+        let mut items: Vec<TaskItem> = Vec::new();
         let mut notes_lines = Vec::new();
         let mut in_notes = false;
         let mut in_verify_block = false;
@@ -694,7 +646,7 @@ impl TaskTrackerTool {
             }
             if let Some(last) = items.last_mut() {
                 let indent = line.chars().take_while(|c| *c == ' ').count();
-                if indent >= 2 && apply_task_metadata_line(last, line, &mut in_verify_block) {
+                if indent >= 2 && apply_metadata_line(&mut last.metadata, line, &mut in_verify_block) {
                     continue;
                 }
                 in_verify_block = false;
@@ -1815,11 +1767,5 @@ mod tests {
         assert_eq!(listed["status"], "ok");
         assert_eq!(listed["checklist"]["pending"], 1);
         assert_eq!(listed["checklist"]["completed"], 0);
-    }
-
-    #[test]
-    fn parse_files_metadata_keeps_quoted_commas_as_single_item() {
-        let items = parse_files_metadata("'src/a.rs, b.rs', src/c.rs");
-        assert_eq!(items, vec!["'src/a.rs, b.rs'".to_string(), "src/c.rs".to_string()]);
     }
 }
