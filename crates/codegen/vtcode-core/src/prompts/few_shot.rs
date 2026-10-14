@@ -43,7 +43,6 @@ use std::sync::{Arc, OnceLock};
 use compact_str::CompactString;
 use serde::Deserialize;
 use tracing::warn;
-use vtcode_commons::VtCodePaths;
 use vtcode_commons::tokens::estimate_tokens;
 
 use super::resource_cache::{ResourceCache, canonical_cache_path, fingerprint_markdown_directories};
@@ -53,13 +52,7 @@ const PROMPTS_PARENT: &str = ".vtcode/prompts";
 const MIN_TOKEN_BUDGET: usize = 16;
 
 fn user_examples_dir(home: &Path) -> PathBuf {
-    if dirs::home_dir().as_deref() == Some(home)
-        && let Ok(paths) = VtCodePaths::resolve()
-        && let Ok(prompt_dir) = paths.config_path("prompts")
-    {
-        return prompt_dir.join(EXAMPLES_DIR);
-    }
-    home.join(PROMPTS_PARENT).join(EXAMPLES_DIR)
+    super::resources::user_prompts_dir(home).join(EXAMPLES_DIR)
 }
 
 /// Default token budget for the `[Few-Shot Examples]` block. ~10% of an 8K
