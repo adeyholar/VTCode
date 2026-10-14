@@ -25,8 +25,8 @@ use crate::tools::handlers::task_tracking::{
     append_notes, append_notes_section, append_task_step_metadata, apply_metadata_line, compact_task_tree_view,
     is_bulk_sync_update, metadata_from_input, normalize_optional_text, normalize_string_items,
     parse_marked_status_prefix, parse_status_prefix, task_files_property_schema, task_items_array_schema,
-    task_status_property_schema, task_verify_property_schema, validate_action_index_fields, validate_task_item_inputs,
-    validate_update_shape,
+    task_status_property_schema, task_verify_property_schema, tracker_schema_allof, validate_action_index_fields,
+    validate_task_item_inputs, validate_update_shape,
 };
 use crate::utils::file_utils::{ensure_dir_exists, read_file_with_context, write_file_with_context};
 use anyhow::{Context, Result, bail};
@@ -417,91 +417,7 @@ fn standard_task_tracker_parameter_schema() -> Value {
             }
         },
         "required": ["action"],
-        "allOf": [
-            {
-                "if": {
-                    "properties": { "action": { "const": "create" } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "required": ["items"]
-                }
-            },
-            {
-                "if": {
-                    "properties": { "action": { "const": "update" } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "anyOf": [
-                        {
-                            "required": ["index", "status"],
-                            "not": {
-                                "anyOf": [
-                                    { "required": ["items"] },
-                                    { "required": ["index_path"] }
-                                ]
-                            }
-                        },
-                        {
-                            "required": ["index_path", "status"],
-                            "not": {
-                                "anyOf": [
-                                    { "required": ["items"] },
-                                    { "required": ["index"] }
-                                ]
-                            }
-                        },
-                        {
-                            "required": ["items"],
-                            "not": {
-                                "anyOf": [
-                                    { "required": ["index"] },
-                                    { "required": ["index_path"] },
-                                    { "required": ["status"] }
-                                ]
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                "if": {
-                    "properties": { "index": { "const": 0 } },
-                    "required": ["index"]
-                },
-                "then": {
-                    "properties": {
-                        "action": { "const": "update" },
-                        "status": { "const": "completed" }
-                    },
-                    "required": ["action", "status"]
-                }
-            },
-            {
-                "if": {
-                    "properties": { "action": { "enum": ["create", "list", "add"] } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "not": {
-                        "anyOf": [
-                            { "required": ["index"] },
-                            { "required": ["index_path"] }
-                        ]
-                    }
-                }
-            },
-            {
-                "if": {
-                    "properties": { "action": { "const": "add" } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "required": ["description"]
-                }
-            }
-        ]
+        "allOf": tracker_schema_allof(true)
     })
 }
 
@@ -1279,6 +1195,42 @@ mod tests {
         for args in invalid_cases {
             assert!(jsonschema::validate(&schema, &args).is_err(), "expected invalid args: {args}");
         }
+    }
+
+    #[test]
+    fn tracker_schemas_share_update_shapes_but_diverge_on_index_zero() {
+        let standard = standard_task_tracker_parameter_schema();
+        let planning = crate::tools::handlers::planning_task_tracker::planning_task_tracker_parameter_schema();
+
+        // Shared shapes: both address modes validate on both schemas,
+        // proving the normalized anyOf arm order is behavior-preserving.
+        for args in [
+            json!({"action": "update", "index": 1, "status": "completed"}),
+            json!({"action": "update", "index_path": "1", "status": "completed"}),
+            json!({"action": "update", "items": ["[x] Done"]}),
+            json!({"action": "create", "title": "T", "items": ["New item"]}),
+            json!({"action": "add", "description": "New item"}),
+            json!({"action": "list"}),
+        ] {
+            assert!(jsonschema::validate(&standard, &args).is_ok(), "standard rejects shared shape: {args}");
+            assert!(jsonschema::validate(&planning, &args).is_ok(), "planning rejects shared shape: {args}");
+        }
+
+        // Shared rejections on both schemas.
+        for args in [
+            json!({"action": "list", "index": 1}),
+            json!({"action": "create", "index": 1, "items": ["New item"]}),
+            json!({"action": "update", "index": 1, "index_path": "1", "status": "completed"}),
+        ] {
+            assert!(jsonschema::validate(&standard, &args).is_err(), "standard accepts rejected shape: {args}");
+            assert!(jsonschema::validate(&planning, &args).is_err(), "planning accepts rejected shape: {args}");
+        }
+
+        // Divergent boundary: index 0 completes a standard checklist but is
+        // invalid in planning (indices start at 1).
+        let zero_completion = json!({"action": "update", "index": 0, "status": "completed"});
+        assert!(jsonschema::validate(&standard, &zero_completion).is_ok());
+        assert!(jsonschema::validate(&planning, &zero_completion).is_err());
     }
 
     #[tokio::test]

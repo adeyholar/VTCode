@@ -249,6 +249,108 @@ fn with_description(mut schema: Value, description: &str) -> Value {
     schema
 }
 
+/// Shared `allOf` conditional blocks for both tracker parameter schemas.
+///
+/// The create, update, no-indices, and add blocks are identical across
+/// trackers; the update `anyOf` arms are order-normalized (validation is
+/// order-independent and no test indexes arm positions). The `index == 0`
+/// completion rule is standard-tracker-only (planning indices start at 1):
+/// `include_index_zero_rule` inserts it at position 2, preserving the
+/// `allOf[2]` contract asserted by the standard schema tests.
+pub(crate) fn tracker_schema_allof(include_index_zero_rule: bool) -> Vec<Value> {
+    let mut allof = vec![
+        json!({
+            "if": {
+                "properties": { "action": { "const": "create" } },
+                "required": ["action"]
+            },
+            "then": {
+                "required": ["items"]
+            }
+        }),
+        json!({
+            "if": {
+                "properties": { "action": { "const": "update" } },
+                "required": ["action"]
+            },
+            "then": {
+                "anyOf": [
+                    {
+                        "required": ["index", "status"],
+                        "not": {
+                            "anyOf": [
+                                { "required": ["items"] },
+                                { "required": ["index_path"] }
+                            ]
+                        }
+                    },
+                    {
+                        "required": ["index_path", "status"],
+                        "not": {
+                            "anyOf": [
+                                { "required": ["items"] },
+                                { "required": ["index"] }
+                            ]
+                        }
+                    },
+                    {
+                        "required": ["items"],
+                        "not": {
+                            "anyOf": [
+                                { "required": ["index"] },
+                                { "required": ["index_path"] },
+                                { "required": ["status"] }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }),
+        json!({
+            "if": {
+                "properties": { "action": { "enum": ["create", "list", "add"] } },
+                "required": ["action"]
+            },
+            "then": {
+                "not": {
+                    "anyOf": [
+                        { "required": ["index"] },
+                        { "required": ["index_path"] }
+                    ]
+                }
+            }
+        }),
+        json!({
+            "if": {
+                "properties": { "action": { "const": "add" } },
+                "required": ["action"]
+            },
+            "then": {
+                "required": ["description"]
+            }
+        }),
+    ];
+    if include_index_zero_rule {
+        allof.insert(
+            2,
+            json!({
+                "if": {
+                    "properties": { "index": { "const": 0 } },
+                    "required": ["index"]
+                },
+                "then": {
+                    "properties": {
+                        "action": { "const": "update" },
+                        "status": { "const": "completed" }
+                    },
+                    "required": ["action", "status"]
+                }
+            }),
+        );
+    }
+    allof
+}
+
 /// Shared nested item-object schema (description + optional status/files/
 /// outcome/verify). Used inside the `items` array of both tracker schemas.
 pub(crate) fn task_item_object_schema() -> Value {

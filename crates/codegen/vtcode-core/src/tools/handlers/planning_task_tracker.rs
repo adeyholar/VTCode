@@ -11,8 +11,8 @@ use crate::tools::handlers::task_tracking::{
     append_notes, append_notes_section, append_task_step_metadata, apply_metadata_line, compact_task_tree_view,
     is_bulk_sync_update, metadata_from_input, normalize_optional_text, normalize_string_items,
     parse_marked_status_prefix, parse_status_prefix, task_files_property_schema, task_items_array_schema,
-    task_status_property_schema, task_verify_property_schema, validate_action_index_fields, validate_task_item_inputs,
-    validate_update_shape,
+    task_status_property_schema, task_verify_property_schema, tracker_schema_allof, validate_action_index_fields,
+    validate_task_item_inputs, validate_update_shape,
 };
 use crate::tools::traits::Tool;
 use crate::utils::file_utils::{ensure_dir_exists, read_file_with_context, write_file_with_context};
@@ -490,78 +490,7 @@ pub(crate) fn planning_task_tracker_parameter_schema() -> Value {
             }
         },
         "required": ["action"],
-        "allOf": [
-            {
-                "if": {
-                    "properties": { "action": { "const": "create" } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "required": ["items"]
-                }
-            },
-            {
-                "if": {
-                    "properties": { "action": { "const": "update" } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "anyOf": [
-                        {
-                            "required": ["index_path", "status"],
-                            "not": {
-                                "anyOf": [
-                                    { "required": ["items"] },
-                                    { "required": ["index"] }
-                                ]
-                            }
-                        },
-                        {
-                            "required": ["index", "status"],
-                            "not": {
-                                "anyOf": [
-                                    { "required": ["items"] },
-                                    { "required": ["index_path"] }
-                                ]
-                            }
-                        },
-                        {
-                            "required": ["items"],
-                            "not": {
-                                "anyOf": [
-                                    { "required": ["index"] },
-                                    { "required": ["index_path"] },
-                                    { "required": ["status"] }
-                                ]
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                "if": {
-                    "properties": { "action": { "enum": ["create", "list", "add"] } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "not": {
-                        "anyOf": [
-                            { "required": ["index"] },
-                            { "required": ["index_path"] }
-                        ]
-                    }
-                }
-            },
-            {
-                "if": {
-                    "properties": { "action": { "const": "add" } },
-                    "required": ["action"]
-                },
-                "then": {
-                    "required": ["description"]
-                }
-            }
-        ]
+        "allOf": tracker_schema_allof(false)
     })
 }
 
