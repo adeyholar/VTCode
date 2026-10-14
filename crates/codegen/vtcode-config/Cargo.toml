@@ -18,7 +18,6 @@ categories = ["config", "development-tools"]
 anyhow = { workspace = true }
 hashbrown = { workspace = true }
 dirs = { workspace = true }
-directories = "6.0"
 indexmap = { workspace = true }
 notify = "8.2.0"
 once_cell = { workspace = true }

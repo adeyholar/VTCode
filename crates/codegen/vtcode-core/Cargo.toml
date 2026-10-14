@@ -107,7 +107,6 @@ ratatui = { workspace = true, features = [
     "unstable-widget-ref",
 ] }
 
-nucleo-matcher = "0.3"
 rig = { workspace = true }
 portable-pty = { workspace = true }
 ansi-to-tui = "8.0.1"

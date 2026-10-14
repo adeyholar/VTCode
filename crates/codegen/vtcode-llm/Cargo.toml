@@ -47,7 +47,6 @@ vtcode-macros = { workspace = true }
 vtcode-safety = { workspace = true }
 vtcode-utility-tool-specs = { workspace = true }
 anstyle = { workspace = true }
-lru = "0.18"
 which = "8.0.2"
 webpki-roots = "1.0"
 shell-words = { workspace = true }
