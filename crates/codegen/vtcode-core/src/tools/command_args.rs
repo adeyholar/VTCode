@@ -37,19 +37,29 @@ pub(crate) fn write_stdin_dispatch(args: &Value) -> Result<WriteStdinDispatch, &
     let payload = args.as_object().ok_or("write_stdin requires a JSON object")?;
     if let Some(action) = payload.get("action") {
         let action = action.as_str().ok_or("write_stdin action must be a string")?;
-        match action.to_ascii_lowercase().as_str() {
-            "wait" => return Ok(WriteStdinDispatch::Wait),
-            "inspect" => return Ok(WriteStdinDispatch::Inspect),
-            "terminate" => return Ok(WriteStdinDispatch::Terminate),
-            "close" => return Ok(WriteStdinDispatch::Close),
-            "poll" => {
-                if payload.get("chars").is_some_and(|chars| chars.as_str() != Some("")) {
-                    return Err("write_stdin poll cannot send chars");
-                }
-                return Ok(WriteStdinDispatch::Poll);
+        // Zero-alloc ASCII case-insensitive match: identical verdicts to the
+        // old `to_ascii_lowercase()` + `match` (both fold ASCII only), but
+        // without heap-allocating the lowered action on this hot path.
+        if action.eq_ignore_ascii_case("wait") {
+            return Ok(WriteStdinDispatch::Wait);
+        }
+        if action.eq_ignore_ascii_case("inspect") {
+            return Ok(WriteStdinDispatch::Inspect);
+        }
+        if action.eq_ignore_ascii_case("terminate") {
+            return Ok(WriteStdinDispatch::Terminate);
+        }
+        if action.eq_ignore_ascii_case("close") {
+            return Ok(WriteStdinDispatch::Close);
+        }
+        if action.eq_ignore_ascii_case("poll") {
+            if payload.get("chars").is_some_and(|chars| chars.as_str() != Some("")) {
+                return Err("write_stdin poll cannot send chars");
             }
-            "write" => {}
-            _ => return Err("write_stdin action must be write, poll, wait, inspect, terminate, or close"),
+            return Ok(WriteStdinDispatch::Poll);
+        }
+        if !action.eq_ignore_ascii_case("write") {
+            return Err("write_stdin action must be write, poll, wait, inspect, terminate, or close");
         }
     }
     let chars = payload
@@ -1298,6 +1308,32 @@ mod tests {
         assert!(write_stdin_dispatch(&json!({"action": "typo", "chars": "echo unsafe\n"})).is_err());
         assert!(write_stdin_dispatch(&json!({"action": "poll", "chars": "echo unsafe\n"})).is_err());
         assert!(write_stdin_dispatch(&json!({"action": 1, "chars": ""})).is_err());
+    }
+
+    #[test]
+    fn write_stdin_dispatch_matches_actions_case_insensitively() {
+        // Asymmetric: mixed-case spellings resolve like lowercase; non-ASCII
+        // lookalikes stay rejected (ASCII-only folding, as before).
+        for (action, expected) in [
+            ("WAIT", WriteStdinDispatch::Wait),
+            ("WaIt", WriteStdinDispatch::Wait),
+            ("INSPECT", WriteStdinDispatch::Inspect),
+            ("Terminate", WriteStdinDispatch::Terminate),
+            ("CLOSE", WriteStdinDispatch::Close),
+            ("Poll", WriteStdinDispatch::Poll),
+        ] {
+            assert_eq!(
+                write_stdin_dispatch(&json!({"action": action})),
+                Ok(expected),
+                "{action:?} must resolve like its lowercase form"
+            );
+        }
+        assert_eq!(
+            write_stdin_dispatch(&json!({"action": "WRITE", "chars": "status\n"})),
+            Ok(WriteStdinDispatch::Write)
+        );
+        assert!(write_stdin_dispatch(&json!({"action": "wäit"})).is_err());
+        assert!(write_stdin_dispatch(&json!({"action": "WAIT "})).is_err());
     }
 
     #[test]

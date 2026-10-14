@@ -69,13 +69,23 @@ fn command_preview_byte_limit(max_preview_bytes: Option<usize>) -> usize {
         .min(COMMAND_PREVIEW_MAX_BYTES)
 }
 
-fn inspection_preview_content(content: &str, max_preview_bytes: Option<usize>) -> String {
+/// Shared budget half of the bounded command previews below: the byte limit
+/// plus the content budget (limit minus notice reserve, at least 1 byte).
+/// Returns `None` when previews are disabled so inspection and verification
+/// share one zero-guard instead of drifting apart.
+fn preview_content_budget(max_preview_bytes: Option<usize>) -> Option<(usize, usize)> {
     let byte_limit = command_preview_byte_limit(max_preview_bytes);
     if byte_limit == 0 {
-        return String::new();
+        return None;
     }
+    Some((byte_limit, byte_limit.saturating_sub(PREVIEW_NOTICE_RESERVE_BYTES).max(1)))
+}
 
-    let content_budget = byte_limit.saturating_sub(PREVIEW_NOTICE_RESERVE_BYTES).max(1);
+fn inspection_preview_content(content: &str, max_preview_bytes: Option<usize>) -> String {
+    let Some((byte_limit, content_budget)) = preview_content_budget(max_preview_bytes) else {
+        return String::new();
+    };
+
     let head_bytes = content_budget.saturating_mul(2).div_ceil(3).min(INSPECTION_PREVIEW_HEAD_BYTES);
     let tail_bytes = content_budget.saturating_sub(head_bytes).min(INSPECTION_PREVIEW_TAIL_BYTES);
     let byte_bounded = condense_text_bytes(content, head_bytes, tail_bytes);
@@ -84,12 +94,10 @@ fn inspection_preview_content(content: &str, max_preview_bytes: Option<usize>) -
 }
 
 fn verification_preview_content(content: &str, max_preview_bytes: Option<usize>) -> String {
-    let byte_limit = command_preview_byte_limit(max_preview_bytes);
-    if byte_limit == 0 {
+    let Some((byte_limit, content_budget)) = preview_content_budget(max_preview_bytes) else {
         return String::new();
-    }
+    };
 
-    let content_budget = byte_limit.saturating_sub(PREVIEW_NOTICE_RESERVE_BYTES).max(1);
     let preview = tail_preview_text(content, content_budget, COMMAND_PREVIEW_MAX_LINES.saturating_sub(1));
     truncate_byte_budget(&preview, byte_limit, "")
 }
@@ -1479,6 +1487,34 @@ mod tests {
         assert!(preview.contains("omitted"));
         assert!(preview.contains("line-199"));
         assert!(!preview.contains("line-1\n"));
+    }
+
+    #[test]
+    fn bounded_previews_share_one_budget_and_respect_tiny_limits() {
+        // Asymmetric across shapes: inspection keeps head+tail while
+        // verification keeps tail only, but both must honor the same
+        // explicit byte limit, and both go empty when it is zero. Content
+        // exceeds every budget so truncation actually engages. Note the
+        // degenerate edge: at budget 1 the multibyte omitted-notice (`…`)
+        // itself does not fit, so verification truncates to nothing; that
+        // tail-shape edge predates the shared budget helper.
+        let content = (0..200)
+            .map(|i| format!("line {i:03} with some payload text"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(content.len() > 1024);
+        for budget in [1usize, 64, 100, 1024] {
+            let inspection = inspection_preview_content(&content, Some(budget));
+            let verification = verification_preview_content(&content, Some(budget));
+            assert!(inspection.len() <= budget, "inspection must respect {budget}");
+            assert!(verification.len() <= budget, "verification must respect {budget}");
+        }
+        for budget in [64usize, 100, 1024] {
+            assert!(!inspection_preview_content(&content, Some(budget)).is_empty());
+            assert!(!verification_preview_content(&content, Some(budget)).is_empty());
+        }
+        assert!(inspection_preview_content(&content, Some(0)).is_empty());
+        assert!(verification_preview_content(&content, Some(0)).is_empty());
     }
 
     #[tokio::test]
