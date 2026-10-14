@@ -524,9 +524,14 @@ fn picker_separates_openrouter_reasoning_from_effort_support() {
         .expect("OpenRouter Muse Spark route should exist");
     let detail = selection_from_option(option);
 
+    // The OpenRouter marketplace route advertises reasoning but no explicit
+    // effort levels in the generated catalog (empty `reasoning_efforts`);
+    // official Meta models own the effort set. This mirrors
+    // `resolver_separates_structured_reasoning_from_effort_support` in
+    // vtcode-llm.
     assert!(detail.reasoning_supported);
-    assert!(detail.reasoning_effort_supported);
-    assert!(!detail.reasoning_effort_levels().is_empty());
+    assert!(!detail.reasoning_effort_supported);
+    assert!(detail.reasoning_effort_levels().is_empty());
 }
 
 #[test]

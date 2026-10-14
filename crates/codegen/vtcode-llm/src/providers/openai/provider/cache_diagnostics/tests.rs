@@ -95,6 +95,14 @@ fn comparison_requires_native_supported_model_and_enabled_metrics() {
 }
 
 #[test]
+// `PromptCachingConfig` has private fields, so struct-update syntax cannot
+// replace the post-construction field assignments here (clippy
+// field_reassign_with_default is the accepted trade-off, introduced in
+// commit afe2c6367).
+#[allow(
+    clippy::field_reassign_with_default,
+    reason = "private config fields block struct-update syntax; see commit afe2c6367"
+)]
 fn explicit_cache_opt_out_omits_native_hints_and_accounting_key() {
     for provider_disabled in [false, true] {
         let mut cfg = vtcode_config::core::PromptCachingConfig::default();

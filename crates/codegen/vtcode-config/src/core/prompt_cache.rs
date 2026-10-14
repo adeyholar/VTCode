@@ -1000,10 +1000,9 @@ gap_warning_threshold_secs = 120
             normalized_guide
                 .contains("VT Code enables `prompt_cache.cache_friendly_prompt_shaping = true` by default.")
         );
-        assert!(
-            normalized_guide
-                .contains("Default: `None` (opt-in) - VT Code does not set prompt_cache_retention by default;")
-        );
+        // The retention doc block (guide lines 44-48) states `prompt_cache_retention` is
+        // opt-in for older supported Responses models; assert that intent survives doc rewrites.
+        assert!(normalized_guide.contains("`prompt_cache_retention` is opt-in for older supported Responses models"));
 
         let field_reference = fs::read_to_string(workspace_root.join("docs/config/CONFIG_FIELD_REFERENCE.md"))
             .expect("config field reference");
