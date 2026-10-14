@@ -203,6 +203,12 @@ impl ToolRegistry {
             .await?;
         let input = crate::tools::command_args::interactive_input_text(&args)
             .ok_or_else(|| anyhow!("input is required for command session write"))?;
+        if !input.is_empty() && !matches!(input, "\u{3}" | "\u{4}") {
+            let cwd = self.workspace_root();
+            self.edited_file_monitor_ref()
+                .source_inspection()
+                .check_shell(&json!({"cmd": "stdin-input", "input": input}), cwd)?;
+        }
         enforce_exec_input_line_policy(input)?;
 
         let yield_time_ms = clamp_exec_yield_ms(payload.get("yield_time_ms").and_then(Value::as_u64), 250);

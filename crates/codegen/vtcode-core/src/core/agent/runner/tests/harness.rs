@@ -61,6 +61,7 @@ async fn coordinator_headless_completion_waits_for_owned_verification_and_reject
             default_primary_agent: "coordinator".into(),
             ..Default::default()
         };
+        cfg.agent.harness.inspection.mode = vtcode_config::core::agent::InspectionMode::Off;
         cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
         cfg.automation.full_auto.enabled = true;
         cfg.automation.full_auto.max_turns = 4;

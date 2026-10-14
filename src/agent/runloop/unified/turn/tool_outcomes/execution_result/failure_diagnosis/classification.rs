@@ -150,6 +150,13 @@ pub(crate) fn deterministic_error_diagnosis(error: &ToolExecutionError, failure_
         error_message
     );
     let mismatch_kind = error_mismatch(error);
+    if error.edit_failure.is_some() {
+        return ToolFailureDiagnosis::new(
+            observed,
+            "The literal source was absent or ambiguous at the selected matching level.",
+            "Use edit_failure read/search arguments to locate current source, then correct the bounded edit or use anchored apply_patch. Do not retry unchanged input.",
+        ).with_revision_guidance(mismatch_kind);
+    }
     if error.patch_context_mismatch_path().is_some() {
         return ToolFailureDiagnosis::new(
             observed,

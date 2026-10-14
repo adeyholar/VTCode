@@ -556,7 +556,9 @@ mod slice {
             collected.push(line);
         }
 
-        if seen < offset {
+        // A successful empty read is necessary to inspect an existing empty
+        // file before its first edit. Higher offsets remain out of bounds.
+        if seen < offset && !(seen == 0 && offset == 1) {
             anyhow::bail!("offset exceeds file length");
         }
 
@@ -623,7 +625,7 @@ mod slice {
             .into_iter()
             .zip(collected)
             .map(|((offset, end), lines)| {
-                if line_number < offset {
+                if line_number < offset && !(line_number == 0 && offset == 1) {
                     scan_error
                         .is_none()
                         .then_some(Err(anyhow::anyhow!("offset exceeds file length")))
@@ -1044,6 +1046,33 @@ mod tests {
             "default overview read must condense large output; got {} lines",
             content.lines().count()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn empty_file_read_succeeds_at_start_and_rejects_higher_offsets() -> Result<()> {
+        let temp = NamedTempFile::new()?;
+        let result = read(temp.path(), 1, 2).await?;
+        assert!(result.lines.is_empty());
+        assert!(!result.has_more);
+        assert!(read(temp.path(), 2, 2).await.is_err());
+        let ranges = vec![
+            ReadRange {
+                offset: 1,
+                limit: 2,
+                mode: ReadMode::Slice,
+                indentation: None,
+            },
+            ReadRange {
+                offset: 2,
+                limit: 2,
+                mode: ReadMode::Slice,
+                indentation: None,
+            },
+        ];
+        let result = read_ranges(temp.path(), &ranges).await?;
+        assert!(result.results[0].as_ref().unwrap().as_ref().unwrap().lines.is_empty());
+        assert!(result.results[1].as_ref().unwrap().is_err());
         Ok(())
     }
 

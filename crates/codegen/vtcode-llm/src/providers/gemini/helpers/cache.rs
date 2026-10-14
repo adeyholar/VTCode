@@ -7,7 +7,14 @@ use crate::provider::ToolDefinition;
 
 impl GeminiProvider {
     /// Whether explicit `cachedContents` mode is active for this provider.
-    pub(crate) fn explicit_cache_active(&self) -> bool {
+    ///
+    /// Some models reject explicit `cachedContents` entirely (Gemini 4 Argon
+    /// supports implicit caching only — creation fails and body references
+    /// error), so the shared lifecycle is additionally gated per model.
+    pub(crate) fn explicit_cache_active(&self, model: &str) -> bool {
+        if models::google::IMPLICIT_CACHING_ONLY_MODELS.contains(&model) {
+            return false;
+        }
         self.prompt_cache_enabled && matches!(self.prompt_cache_settings.mode, GeminiPromptCacheMode::Explicit)
     }
 
@@ -34,7 +41,7 @@ impl GeminiProvider {
         request: &LLMRequest,
         gemini_request: &GenerateContentRequest,
     ) -> Result<Option<String>, LLMError> {
-        if !self.explicit_cache_active() {
+        if !self.explicit_cache_active(&request.model) {
             return Ok(None);
         }
 
@@ -176,6 +183,26 @@ mod explicit_cache_tool_choice_tests {
                 GeminiProvider::body_tool_config_is_non_default(&built(Some(tool_choice), true)),
                 "constrained tool choice must keep its body config"
             );
+        }
+    }
+
+    #[test]
+    fn implicit_caching_only_models_skip_explicit_cache() {
+        let mut provider = GeminiProvider::new("test-key".to_string());
+        provider.prompt_cache_enabled = true;
+        provider.prompt_cache_settings.mode = GeminiPromptCacheMode::Explicit;
+
+        // Explicit mode is honored for models that accept `cachedContents`.
+        assert!(
+            provider.explicit_cache_active(models::google::GEMINI_3_FLASH_PREVIEW),
+            "explicit mode should stay active for models supporting cachedContents"
+        );
+
+        // Gemini 4 Argon supports implicit caching only; the explicit
+        // lifecycle must stay off even when explicitly configured, since
+        // `cachedContents.create` fails and body references error.
+        for model in models::google::IMPLICIT_CACHING_ONLY_MODELS {
+            assert!(!provider.explicit_cache_active(model), "{model} must skip the explicit cachedContents lifecycle");
         }
     }
 }

@@ -25,7 +25,8 @@ pub use approval::{AsyncApprovalConfig, ConfidenceEscalationConfig, SkepticPanel
 pub use circuit_breaker::CircuitBreakerConfig;
 pub use codex_app_server::AgentCodexAppServerConfig;
 pub use harness::{
-    AgentHarnessConfig, ToolResultClearingConfig, TrackerContinuationConfig, VerificationAutoRecoveryConfig,
+    AgentHarnessConfig, InspectionConfig, InspectionMode, ToolResultClearingConfig, TrackerContinuationConfig,
+    VerificationAutoRecoveryConfig,
 };
 pub use memory::{MemoriesConfig, PersistentMemoryConfig};
 pub use onboarding::AgentOnboardingConfig;

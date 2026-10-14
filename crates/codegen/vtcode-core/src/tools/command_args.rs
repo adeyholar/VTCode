@@ -556,6 +556,28 @@ pub(crate) fn has_unsafe_readonly_options(words: &[String]) -> bool {
     let program = program.to_ascii_lowercase();
 
     match program.as_str() {
+        "rustc" => command_words.iter().enumerate().skip(1).any(|(index, word)| {
+            word.starts_with("-o")
+                || word.split('=').next() == Some("--out-dir")
+                || ["--print", "--emit"].iter().any(|option| {
+                    let value = if word == option {
+                        command_words.get(index + 1).map(String::as_str)
+                    } else {
+                        word.strip_prefix(option).and_then(|suffix| suffix.strip_prefix('='))
+                    };
+                    value.is_some_and(|value| value.contains('='))
+                })
+        }),
+        "pytest" | "python" | "python3" | "uv" => command_words.iter().skip(1).any(|word| {
+            matches!(
+                word.split('=').next(),
+                Some("--junitxml" | "--junit-xml" | "--log-file" | "--basetemp" | "--output-file")
+            )
+        }),
+        "ruff" => command_words
+            .iter()
+            .skip(1)
+            .any(|word| word.split('=').next() == Some("--output-file")),
         "git" => command_words.iter().skip(1).any(|word| {
             // `-C <dir>` (bare or inline `-C<dir>`) only redirects which
             // repository is read; the subcommand allow-list still gates every

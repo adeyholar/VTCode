@@ -24,6 +24,64 @@ pub enum PatchFailure {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditFailureKind {
+    NoMatch,
+    AmbiguousMatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditLocation {
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+/// Bounded literal-edit diagnostics; candidate locations come only from matches.
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[error(
+    "Literal edit {failure_kind:?} in '{path}'; refresh current source and correct the edit. Use anchored apply_patch to disambiguate. Never retry unchanged failed input."
+)]
+pub struct EditFailure {
+    pub failure_kind: EditFailureKind,
+    pub path: String,
+    pub candidate_locations: Vec<EditLocation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_read_args: Option<Box<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_search_args: Option<Box<Value>>,
+}
+
+impl EditFailure {
+    pub(crate) fn new(kind: EditFailureKind, path: &std::path::Path, locations: Vec<EditLocation>, old: &str) -> Self {
+        let next_read_args = locations.first().map(|location| {
+            let start = location.start_line.saturating_sub(3).max(1);
+            let limit = (location.end_line + 3 - start + 1).min(200);
+            Box::new(json!({"path":path, "offset":start, "limit":limit, "condense":false, "max_tokens":6000}))
+        });
+        let query = old
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or(old)
+            .trim()
+            .chars()
+            .take(120)
+            .collect::<String>();
+        let next_search_args = next_read_args
+            .is_none()
+            .then_some(query)
+            .filter(|query| !query.is_empty())
+            .map(|query| Box::new(json!({"path":path, "query":query, "max_results":5})));
+        Self {
+            failure_kind: kind,
+            path: path.to_string_lossy().into_owned(),
+            candidate_locations: locations,
+            next_read_args,
+            next_search_args,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolExecutionError {
     pub tool_name: String,
@@ -42,6 +100,10 @@ pub struct ToolExecutionError {
     pub original_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_failure: Option<PatchFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspection_failure: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_failure: Option<EditFailure>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +172,8 @@ impl ToolExecutionError {
             debug_context: None,
             original_error: None,
             patch_failure: None,
+            inspection_failure: None,
+            edit_failure: None,
         }
     }
 
@@ -136,6 +200,36 @@ impl ToolExecutionError {
         surface: Option<&str>,
     ) -> Self {
         let tool_name = tool_name.into();
+        if let Some(edit) = error.downcast_ref::<EditFailure>() {
+            let mut structured = Self::new(tool_name, ToolErrorType::InvalidParameters, edit.to_string());
+            structured.edit_failure = Some(edit.clone());
+            structured.retryable = false;
+            structured.is_recoverable = true;
+            structured.circuit_breaker_impact = false;
+            structured.recovery_suggestions = vec![Cow::Borrowed(
+                "Use edit_failure.next_read_args when present; otherwise use next_search_args, then read a targeted range at the returned location. One uncached read of at most 200 lines per canonical path/user turn shares the patch recovery quota. Correct old_str or use anchored apply_patch; never retry unchanged failed input.",
+            )];
+            structured = structured.with_attempt(attempt_index);
+            if let Some(surface) = surface {
+                structured = structured.with_surface(surface);
+            }
+            return structured;
+        }
+        if let Some(inspection) = error.downcast_ref::<crate::tools::source_inspection::InspectionRequired>() {
+            let mut structured = Self::new(tool_name, ToolErrorType::InvalidParameters, inspection.to_string());
+            structured.inspection_failure = Some(inspection.details.clone());
+            structured.retryable = false;
+            structured.is_recoverable = true;
+            structured.circuit_breaker_impact = false;
+            structured.recovery_suggestions = vec![Cow::Borrowed(
+                if inspection.details.get("next_read_args").is_some() {
+                    "Use inspection_failure.next_read_args to refresh the missing source, then retry a bounded edit."
+                } else {
+                    "Use apply_patch for authored file changes; mechanical commands require an exact trusted-user exemption."
+                },
+            )];
+            return structured;
+        }
         // Classify exactly once into the canonical category; the wire-visible
         // `error_type` is derived from it inside `from_category`.
         if let Some(session_error) = error.downcast_ref::<crate::tools::exec_session::ExecSessionNotFound>() {
@@ -218,11 +312,12 @@ impl ToolExecutionError {
         structured
     }
 
+    /// Recovery path for typed patch or literal mismatches; never infer from source text.
     #[must_use]
     pub fn patch_context_mismatch_path(&self) -> Option<&str> {
         match &self.patch_failure {
             Some(PatchFailure::ContextMismatch { path, .. }) => Some(path),
-            _ => None,
+            _ => self.edit_failure.as_ref().map(|failure| failure.path.as_str()),
         }
     }
 
@@ -297,6 +392,10 @@ impl ToolExecutionError {
     pub fn with_tool_call_context(mut self, tool_name: &str, args: &Value) -> Self {
         self.tool_name = tool_name.to_string();
 
+        if self.inspection_failure.is_some() || self.edit_failure.is_some() {
+            self.partial_state_possible = false;
+            return self;
+        }
         if tool_name == crate::config::constants::tools::APPLY_PATCH {
             return self;
         }
@@ -454,6 +553,8 @@ impl ToolExecutionError {
                 "debug_context": self.debug_context,
                 "original_error": self.original_error,
                 "patch_failure": self.patch_failure,
+                "inspection_failure": self.inspection_failure,
+                "edit_failure": self.edit_failure,
             }
         })
     }

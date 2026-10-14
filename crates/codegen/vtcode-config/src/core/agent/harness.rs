@@ -11,6 +11,9 @@ use super::{ContextResetMode, ContinuationPolicy, HarnessOrchestrationMode};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentHarnessConfig {
+    /// Source exposure policy; advisory by default, independently of verification.
+    #[serde(default)]
+    pub inspection: InspectionConfig,
     /// Maximum number of tool calls allowed per turn. Defaults to `120`.
     /// Set to `0` to disable the cap.
     #[serde(default = "default_harness_max_tool_calls_per_turn")]
@@ -136,6 +139,7 @@ pub struct AgentHarnessConfig {
 impl Default for AgentHarnessConfig {
     fn default() -> Self {
         Self {
+            inspection: InspectionConfig::default(),
             max_tool_calls_per_turn: default_harness_max_tool_calls_per_turn(),
             max_tool_wall_clock_secs: default_harness_max_tool_wall_clock_secs(),
             max_tool_retries: default_harness_max_tool_retries(),
@@ -161,6 +165,24 @@ impl Default for AgentHarnessConfig {
             continuation: TrackerContinuationConfig::default(),
         }
     }
+}
+/// Source inspection policy, independent of post-edit verification.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct InspectionConfig {
+    #[serde(default)]
+    pub mode: InspectionMode,
+}
+
+/// Whether missing source exposure blocks mutations.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InspectionMode {
+    Enforce,
+    #[default]
+    Warn,
+    Off,
 }
 /// Tracker-aware auto-continuation policy.
 ///
@@ -410,4 +432,27 @@ const fn default_harness_max_revision_rounds() -> usize {
 #[inline]
 const fn default_harness_budget_warning_threshold() -> f64 {
     0.75
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+
+    #[test]
+    fn source_inspection_defaults_warns_and_parses_explicit_modes() {
+        assert_eq!(AgentHarnessConfig::default().inspection.mode, InspectionMode::Warn);
+        for text in ["", "[inspection]"] {
+            let config: AgentHarnessConfig = toml::from_str(text).unwrap();
+            assert_eq!(config.inspection.mode, InspectionMode::Warn);
+        }
+        for (text, expected) in [
+            ("enforce", InspectionMode::Enforce),
+            ("warn", InspectionMode::Warn),
+            ("off", InspectionMode::Off),
+        ] {
+            let config: AgentHarnessConfig = toml::from_str(&format!("[inspection]\nmode = '{text}'")).unwrap();
+            assert_eq!(config.inspection.mode, expected);
+        }
+        assert!(toml::from_str::<AgentHarnessConfig>("[inspection]\nmode = 'permissive'").is_err());
+    }
 }

@@ -176,6 +176,24 @@ fn build_read_handler_args(args: &Value, canonical_path: &Path) -> Value {
     handler_args_json
 }
 
+/// Locate a verbatim line slice using the selected reader's coordinate system.
+pub(crate) fn source_line_offset(args: &Value) -> Option<usize> {
+    if !is_new_read_request(args) && is_legacy_read_request(args, false) {
+        // Legacy line paging is zero-based; modern slice offsets are one-based.
+        let input: Input = serde_json::from_value(args.clone()).ok()?;
+        return Some(input.offset_lines.unwrap_or(0));
+    }
+    let normalized = build_read_handler_args(args, Path::new("source"));
+    let read: ReadFileArgs = serde_json::from_value(normalized).ok()?;
+    if read.offset_bytes.is_some()
+        || read.page_size_bytes.is_some()
+        || !matches!(read.mode, crate::tools::handlers::read_file::ReadMode::Slice)
+    {
+        return None;
+    }
+    read.offset.checked_sub(1)
+}
+
 /// Admit recovery only for an explicit line range the selected reader honors.
 pub(crate) fn bounded_line_read_path(args: &Value, max_lines: usize) -> Option<String> {
     let path_args: PathArgs = serde_json::from_value(args.clone()).ok()?;

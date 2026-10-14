@@ -201,6 +201,15 @@ impl<T: Default> Default for Constrained<T> {
 /// Session trait for tool execution context
 #[async_trait]
 pub trait ToolSession: Send + Sync {
+    /// Session source ledger. Absence fails closed for edits to existing text.
+    fn source_inspection(&self) -> Option<&crate::tools::source_inspection::SourceInspection> {
+        self.edited_file_monitor().map(|monitor| monitor.source_inspection())
+    }
+
+    fn edited_file_monitor(&self) -> Option<&crate::tools::edited_file_monitor::EditedFileMonitor> {
+        None
+    }
+
     /// Get the current working directory
     fn cwd(&self) -> &PathBuf;
 

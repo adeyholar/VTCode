@@ -353,7 +353,8 @@ pub(super) async fn build_turn_request(
     if let Some(vt_cfg) = ctx.vt_cfg
         && vtcode_core::core::agent::state::should_apply_local_tool_result_clearing(
             &turn_snapshot.provider_name,
-            turn_snapshot.capabilities.context_edits,
+            turn_snapshot.capabilities.context_edits
+                && vt_cfg.agent.harness.inspection.mode != vtcode_core::config::core::agent::InspectionMode::Enforce,
             vt_cfg.agent.harness.tool_result_clearing.enabled,
         )
     {
@@ -381,6 +382,11 @@ pub(super) async fn build_turn_request(
             clearing.clear_tool_inputs,
         );
     }
+    ctx.tool_registry.set_inspection_mode(
+        ctx.vt_cfg
+            .map_or(vtcode_core::config::core::agent::InspectionMode::Warn, |cfg| cfg.agent.harness.inspection.mode),
+    );
+    ctx.tool_registry.reconcile_source_inspection(&normalized_history);
     let continuation_messages = Arc::new(normalized_history);
     let (prepared_request_messages, previous_response_id) = prepare_responses_request_history(
         ctx.session_stats,
@@ -1585,9 +1591,17 @@ mod tests {
 
     #[tokio::test]
     async fn local_clearing_uses_session_budget_and_preserves_recent_batch() {
-        for (enabled, recent_batches) in [(true, 0), (true, 1), (true, 2), (false, 2)] {
+        for (enabled, recent_batches, native) in [
+            (true, 0, false),
+            (true, 1, false),
+            (true, 2, false),
+            (false, 2, false),
+            (true, 0, true),
+            (true, 2, true),
+        ] {
             let mut backing = TestTurnProcessingBacking::new(4).await;
             let mut cfg = VTCodeConfig::default();
+            cfg.agent.harness.inspection.mode = vtcode_core::config::core::agent::InspectionMode::Enforce;
             cfg.context.max_context_tokens = 16_000;
             cfg.agent.harness.tool_result_clearing.trigger_tokens = 40_000;
             cfg.agent.harness.tool_result_clearing.enabled = enabled;
@@ -1619,7 +1633,11 @@ mod tests {
             let original = ctx.working_history.clone();
             let tokens = original.iter().map(uni::Message::estimate_tokens).sum::<usize>();
             assert!(tokens < 40_000 && tokens > 9_600, "fixture lies between capped and configured triggers");
-            let snapshot = capture_turn_request_snapshot(&mut ctx, "test-model", false);
+            let mut snapshot = capture_turn_request_snapshot(&mut ctx, "test-model", false);
+            if native {
+                snapshot.provider_name = "anthropic".into();
+                snapshot.capabilities.context_edits = true;
+            }
             let built = build_turn_request(&mut ctx, 1, "test-model", &snapshot, Some(2_000), None, false)
                 .await
                 .unwrap();
@@ -1652,6 +1670,8 @@ mod tests {
         cfg.agent.harness.auto_compaction_enabled = true;
         cfg.agent.harness.auto_compaction_threshold_tokens = Some(100_000);
         cfg.agent.harness.tool_result_clearing.enabled = true;
+        // The default advisory policy preserves supported native clearing.
+        assert_eq!(cfg.agent.harness.inspection.mode, vtcode_core::config::core::agent::InspectionMode::Warn);
         cfg.agent.harness.tool_result_clearing.trigger_tokens = 120_000;
         cfg.agent.harness.tool_result_clearing.keep_tool_uses = 5;
         cfg.agent.harness.tool_result_clearing.clear_at_least_tokens = 40_000;

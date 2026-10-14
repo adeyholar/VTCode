@@ -3,7 +3,7 @@
 use super::*;
 
 pub(crate) const BLIND_EDITING_THRESHOLD: usize = 6;
-pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Anti-Blind-Editing: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let it exit 0 before further edits.";
+pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let it exit 0 before further edits.";
 /// Ends with the text of [`VERIFIER_SHELL_FORM_NOTE`] so the shell forms it
 /// describes match what the execution kernel elides; a test keeps the two in
 /// lockstep because `concat!` cannot splice a cross-crate const.

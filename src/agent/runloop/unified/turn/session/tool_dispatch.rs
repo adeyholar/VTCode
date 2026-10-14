@@ -157,6 +157,15 @@ pub(crate) async fn execute_direct_tool_call(
                 .working_history
                 .push(uni::Message::assistant_with_tools(String::new(), vec![tool_call]));
 
+            // Only this concrete user-input route can exempt a shell invocation.
+            // Approval of a later model-authored command cannot create this grant.
+            let _inspection_exemption = if !consumed_fallback
+                && vtcode_core::tools::tool_intent::is_command_run_tool_call(&current_tool_name, &current_args)
+            {
+                Some(t_ctx.ctx.tool_registry.trusted_user_command_exemption(&current_args)?)
+            } else {
+                None
+            };
             // 3. Execute through unified pipeline to ensure safety, metrics, and consistent output
             let outcome = handle_single_tool_call(&mut t_ctx, &tool_call_id, &current_tool_name, current_args).await?;
 

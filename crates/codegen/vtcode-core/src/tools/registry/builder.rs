@@ -47,6 +47,7 @@ struct WorkspaceToolConfig {
     spooler: SpoolerConfig,
     persistent_memory: PersistentMemoryConfig,
     persistent_memory_enabled: bool,
+    inspection_mode: vtcode_config::core::agent::InspectionMode,
 }
 
 /// Load the config needed by tool registration in one parse. Falls back to
@@ -78,6 +79,7 @@ fn workspace_tool_config_from_loaded(config: &vtcode_config::loader::VTCodeConfi
         spooler: spooler_config_from_dynamic_context(&config.context.dynamic),
         persistent_memory,
         persistent_memory_enabled,
+        inspection_mode: config.agent.harness.inspection.mode,
     }
 }
 
@@ -178,8 +180,10 @@ impl ToolRegistry {
             spooler: spooler_config,
             persistent_memory: persistent_memory_config,
             persistent_memory_enabled,
+            inspection_mode,
         } = workspace_config;
         let edited_file_monitor = Arc::new(crate::tools::edited_file_monitor::EditedFileMonitor::new());
+        edited_file_monitor.source_inspection().set_mode(inspection_mode);
         let inventory = ToolInventory::new(workspace_root.clone(), Arc::clone(&edited_file_monitor));
         let planning_workflow_state = PlanningWorkflowState::new(workspace_root.clone());
 

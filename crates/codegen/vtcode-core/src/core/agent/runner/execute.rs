@@ -863,6 +863,9 @@ impl AgentRunner {
                     top_p_override = top_p_override.filter(|value| *value >= 0.95);
                 }
 
+                self.tool_registry
+                    .set_inspection_mode(self.config().agent.harness.inspection.mode);
+                self.tool_registry.reconcile_source_inspection(&normalized_messages);
                 let (request_messages, previous_response_id) = prepare_responses_request_messages(
                     &mut runtime.state.previous_response_chains,
                     &provider_name,

@@ -321,6 +321,7 @@ impl AgentRunner {
             Some(session_config.effective()),
         );
         let tool_registry = ToolRegistry::new(workspace.clone()).await;
+        tool_registry.set_inspection_mode(session_config.effective().agent.harness.inspection.mode);
         tool_registry.set_harness_session(session_id.clone());
         tool_registry.set_matrix_coordinator(session_config.effective().default_primary_agent == "coordinator");
         tool_registry.set_agent_type(agent_type.to_string());

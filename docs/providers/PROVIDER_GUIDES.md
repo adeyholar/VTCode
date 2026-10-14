@@ -171,8 +171,9 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
 - **Curated models:**
   - `gemini-4-argon` — flagship reasoning model, unified 1M context window (input, thinking, and output share one
     window), 64K sync output, tunable thinking (low/medium/high, medium default). Explicit `cachedContents` is not
-    supported; implicit caching applies automatically. Sampling parameters (`temperature`, `top_p`, `top_k`) are
-    ignored.
+    supported; implicit caching applies automatically, and VT Code's `[prompt_cache] mode = "explicit"` setting is
+    ignored for this model (requests use the implicit shape). Sampling parameters (`temperature`, `top_p`, `top_k`) are
+    ignored by the API.
   - `gemini-3.8-flash` — most intelligent Flash for long-horizon SWE and agents, 1M context, tunable thinking
     (low/medium/high)
   - `gemini-3.6-flash` — flash model with improved reasoning and efficiency, 1M context

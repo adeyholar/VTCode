@@ -503,6 +503,7 @@ fn has_explicit_blocker(lower: &str) -> bool {
         "verification is still pending",
         "unverified assistant responses",
         "anti-blind",
+        "verification checkpoint",
         "verification gate",
         "turn blocked after",
     ]

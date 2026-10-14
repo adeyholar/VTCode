@@ -115,6 +115,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Checkpoints and combined rewind?", "How does Rewind in the terminal
     work?"
 
+- **File**: `docs/development/codex-reference-workflow.md`
+  - **Content**: Codex reference workflow for VT Code internals
+  - **Topics**: Inspect and research, Compare and apply, Attribute and verify
+  - **User Questions**: "What can you tell me about Codex reference workflow for VT Code internals?", "How does Inspect
+    and research work?", "How does Compare and apply work?"
+
 - **File**: `docs/development/compaction.md`
   - **Content**: Compaction Engine
   - **Topics**: Request history and local clearing, Headless staging and module ownership, Strategy dispatch, Live
@@ -285,7 +291,8 @@ below based on the topic area.
 
 - **File**: `docs/development/runtime-guidance.md`
   - **Content**: Runtime Guidance and Project Instructions
-  - **Topics**: Planning contract ownership, User-facing progress contract, Continuity and long-running work
+  - **Topics**: Planning contract ownership, User-facing progress contract, Continuity and long-running work, Targeted
+    inspection before edits
   - **User Questions**: "What can you tell me about Runtime Guidance and Project Instructions?", "How does Planning
     contract ownership work?", "How does User-facing progress contract work?"
 
@@ -327,6 +334,13 @@ below based on the topic area.
   - **Topics**: Common control forwarding, Verification, Interactive protocol fixture
   - **User Questions**: "What can you tell me about Shared inline message and control commands?", "How does Common
     control forwarding work?", "How does Verification work?"
+
+- **File**: `docs/development/source-inspection.md`
+  - **Content**: Source inspection before editing
+  - **Topics**: Workflow and quick reference, Shell commands and host integrations, Validation, Literal matching and
+    mismatch recovery
+  - **User Questions**: "What can you tell me about Source inspection before editing?", "How does Workflow and quick
+    reference work?", "How does Shell commands and host integrations work?"
 
 - **File**: `docs/development/tui-design-system.md`
   - **Content**: TUI design system

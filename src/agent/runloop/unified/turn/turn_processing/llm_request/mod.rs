@@ -611,6 +611,8 @@ async fn execute_llm_request_with_options_impl(
                         break;
                     }
 
+                    ctx.tool_registry
+                        .reconcile_source_projection_change(&request.messages, normalized.as_ref());
                     request.messages = Arc::new(normalized.into_owned());
                     attempts_made = attempts_made.saturating_add(1);
                     tracing::warn!(
@@ -686,6 +688,8 @@ async fn execute_llm_request_with_options_impl(
                                 )
                             };
                             let compacted = compact_tool_messages_for_retry(&request.messages);
+                            ctx.tool_registry
+                                .reconcile_source_projection_change(&request.messages, &compacted);
                             request.messages = Arc::new(compacted);
                             // Strip reasoning_effort on retry — DeepSeek's
                             // `thinking` parameter causes ExecutionError on

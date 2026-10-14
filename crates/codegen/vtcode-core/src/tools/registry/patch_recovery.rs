@@ -1,4 +1,4 @@
-//! One bounded fresh read after a typed patch context mismatch.
+//! One bounded fresh read shared by typed edit/patch mismatches and strict inspection.
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -35,7 +35,13 @@ impl ToolRegistry {
     }
 
     pub(super) async fn grant_patch_recovery_read(&self, error: &ToolExecutionError) {
-        let Some(path) = error.patch_context_mismatch_path() else {
+        let Some(path) = error.patch_context_mismatch_path().or_else(|| {
+            error
+                .inspection_failure
+                .as_ref()
+                .and_then(|failure| failure.get("path"))
+                .and_then(Value::as_str)
+        }) else {
             return;
         };
         // Repeat containment validation before creating an allowance. Invalid

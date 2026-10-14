@@ -284,3 +284,12 @@ Debug traces emit span completion records with timings instead of repetitive ent
 Skill-reference extraction removes Markdown delimiters, ignores external links, and sorts deduplicated validation
 errors. PTY decoding handles large valid chunks and retains only an incomplete UTF-8 suffix across reads; chunk size
 alone is not a Unicode error.
+
+## Targeted inspection before edits
+
+Compiled guidance recommends inspection of relevant targets, including documentation,
+with dependency exploration when relevant. Reuse current retained ranges for bounded
+changes; refresh after mismatch or stale evidence, then verify. Inspection defaults
+to advisory `warn`; clearing or compaction alone does not require rereading all
+touched files. Strict `enforce` retains exposure requirements.
+Verification remains separate. See the [source inspection guide](source-inspection.md).

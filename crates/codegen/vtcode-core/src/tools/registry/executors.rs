@@ -355,6 +355,12 @@ impl ToolRegistry {
             ));
         }
 
+        let inspection_cwd = self
+            .pty_manager()
+            .working_dir_candidate(crate::tools::command_args::working_dir_text(args))?;
+        self.edited_file_monitor_ref()
+            .source_inspection()
+            .check_shell(args, &inspection_cwd)?;
         let sandbox_request = self.resolve_exec_sandbox_request(payload).await?;
         let output_config = exec_run_output_config(payload, &prepared_command.display_command);
 
@@ -493,6 +499,10 @@ impl ToolRegistry {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing code/command in execute_code"))?;
 
+        let cwd = self.workspace_root();
+        // Arbitrary interpreter code has the same file-writing authority as a
+        // shell script. It cannot be a route around guarded file mutations.
+        self.edited_file_monitor_ref().source_inspection().check_shell(&args, cwd)?;
         let language = code_language_from_args(&args);
 
         // The `code` action spawns the interpreter directly, so it must clear

@@ -70,7 +70,9 @@ fn build_anthropic_context_management(
 
     let mut edits = Vec::new();
     let clearing = &vt_cfg.agent.harness.tool_result_clearing;
-    if clearing.enabled {
+    if clearing.enabled
+        && vt_cfg.agent.harness.inspection.mode != vtcode_core::config::core::agent::InspectionMode::Enforce
+    {
         let mut edit = serde_json::Map::from_iter([
             ("type".to_string(), serde_json::Value::String("clear_tool_uses_20250919".to_string())),
             (

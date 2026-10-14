@@ -673,6 +673,7 @@ impl ToolRegistry {
                     tool = %tool_name,
                     "Fast-reusing recent successful read-only result"
                 );
+                self.observe_source_output(&tool_name, args, &reused_value).await;
                 return Ok(reused_value);
             }
         }
@@ -736,6 +737,7 @@ impl ToolRegistry {
                             };
                             obj.insert("loop_detected_note".into(), json!(note));
                         }
+                        self.observe_source_output(&tool_name, args, &reused_value).await;
                         return Ok(reused_value);
                     }
                 }

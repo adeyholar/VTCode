@@ -87,6 +87,8 @@ async fn rejected_exec_policy_is_not_a_lost_execution_result() -> Result<()> {
 async fn filtered_verifier_reports_checker_and_filter_failures_without_masking() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
     fs::create_dir(temp_dir.path().join("scripts"))?;
     for (checker_exit, filter, expected_exit, raw_alias) in [
@@ -130,6 +132,8 @@ async fn filtered_verifier_reports_checker_and_filter_failures_without_masking()
 async fn public_pipe_stdin_defaults_to_eof_and_opt_in_accepts_input() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
     let eof = registry
         .execute_tool(
@@ -172,6 +176,8 @@ async fn public_pipe_stdin_defaults_to_eof_and_opt_in_accepts_input() -> Result<
 async fn public_session_controls_inspect_terminate_and_close() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
     let active = registry
         .execute_tool(
@@ -778,6 +784,8 @@ async fn harness_exec_reuses_public_output_normalization() -> Result<()> {
 async fn harness_terminal_runs_retain_completed_sessions_until_close() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     let active_pty_sessions = Arc::new(AtomicUsize::new(0));
     registry.set_active_pty_sessions(Arc::clone(&active_pty_sessions));
 
@@ -812,6 +820,8 @@ async fn harness_terminal_runs_retain_completed_sessions_until_close() -> Result
 async fn background_terminal_runs_do_not_mark_the_ui_busy() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     let active_pty_sessions = Arc::new(AtomicUsize::new(0));
     registry.set_active_pty_sessions(Arc::clone(&active_pty_sessions));
 
@@ -840,6 +850,8 @@ async fn background_terminal_runs_do_not_mark_the_ui_busy() -> Result<()> {
 async fn background_exec_returns_reusable_session_metadata_and_drains_on_wait() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let initial = tokio::time::timeout(
@@ -907,6 +919,8 @@ fn long_running_exec_args(tty: bool, yield_time_ms: u64) -> Value {
 async fn prevalidated_exec_mode_settles_noninteractive_run() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let response = registry
@@ -930,6 +944,8 @@ async fn prevalidated_exec_mode_settles_noninteractive_run() -> Result<()> {
 async fn prevalidated_exec_mode_settles_pipe_poll_until_exit() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let initial = registry.execute_harness_command_session(delayed_exec_args(false, 50)).await?;
@@ -970,6 +986,8 @@ async fn prevalidated_exec_mode_settles_pipe_poll_until_exit() -> Result<()> {
 async fn prevalidated_exec_mode_keeps_interactive_runs_manual() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let response = registry
@@ -1001,6 +1019,8 @@ async fn prevalidated_exec_mode_keeps_interactive_runs_manual() -> Result<()> {
 async fn command_session_run_preserves_requested_session_id_for_follow_up_calls() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let mut run_args = long_running_exec_args(true, 10);
@@ -1040,6 +1060,8 @@ async fn command_session_run_preserves_requested_session_id_for_follow_up_calls(
 async fn active_exec_continuations_bypass_identical_call_loop_detection() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
     registry.execution_history.set_loop_detection_limits(5, 2);
 
@@ -1082,6 +1104,8 @@ async fn active_exec_continuations_bypass_identical_call_loop_detection() -> Res
 async fn command_session_accepts_compact_session_alias_for_poll() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let initial = registry
@@ -1109,6 +1133,8 @@ async fn command_session_accepts_compact_session_alias_for_poll() -> Result<()> 
 async fn command_session_inspect_accepts_compact_session_alias() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let initial = registry
@@ -1242,6 +1268,8 @@ async fn command_session_wait_returns_partial_output_when_session_closes_mid_wai
 async fn mutating_tools_clear_recent_read_reuse_history() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
     registry.execution_history.set_loop_detection_limits(5, 2);
 
@@ -2199,6 +2227,8 @@ async fn apply_patch_response_includes_a_bounded_diff_preview() -> Result<()> {
     let temp_dir = TempDir::new()?;
     fs::write(temp_dir.path().join("README.md"), "before\n")?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-before\n+after\n*** End Patch\n";
@@ -2222,6 +2252,8 @@ async fn write_file_response_includes_a_canonical_diff_preview() -> Result<()> {
     let temp_dir = TempDir::new()?;
     fs::write(temp_dir.path().join("README.md"), "before\n")?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let response = registry
@@ -2259,6 +2291,8 @@ async fn write_file_noop_response_exposes_an_empty_canonical_diff_entry() -> Res
     let temp_dir = TempDir::new()?;
     fs::write(temp_dir.path().join("README.md"), "same\n")?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let response = registry
@@ -2291,6 +2325,8 @@ async fn apply_patch_reports_deduplicated_paths_for_every_successful_operation()
     fs::write(temp_dir.path().join("src/old.rs"), "old\n")?;
     let canonical_base = canonicalize(temp_dir.path())?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    // This regression isolates the legacy transport/diff contract.
+    registry.set_inspection_mode(vtcode_config::core::agent::InspectionMode::Off);
     registry.allow_all_tools().await?;
 
     let mut expected = ["add.rs", "delete.rs", "new.rs", "old.rs"]

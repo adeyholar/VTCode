@@ -41,6 +41,19 @@ fn make_like_verification_targets(words: &[String]) -> bool {
     saw_target
 }
 
+fn python_verification_arguments(arguments: &[String]) -> bool {
+    // Python executes the first target, not later verifier-like tokens.
+    let mut arguments = arguments.iter();
+    let target = arguments.find(|word| {
+        !matches!(word.as_str(), "-I" | "-E" | "-s" | "-S" | "-B" | "-O" | "-OO" | "-q" | "-u" | "-b" | "-bb" | "-v")
+    });
+    match target.map(String::as_str) {
+        Some("-m") => arguments.next().is_some_and(|module| module == "pytest"),
+        Some(script) => Path::new(script).ends_with("scripts/check_markdown.py") && arguments.next().is_none(),
+        None => false,
+    }
+}
+
 fn is_verification_invocation(words: &[String]) -> bool {
     let command_words = crate::tools::command_args::command_words_after_environment_prefix(words);
     let first = command_words.first().map(String::as_str).unwrap_or_default();
@@ -98,8 +111,22 @@ fn is_verification_invocation(words: &[String]) -> bool {
         "deno" => matches!(second.as_deref(), Some("test" | "lint" | "check")),
         "make" | "gmake" | "just" => make_like_verification_targets(command_words),
         "uv" => {
-            command_words.iter().any(|word| word == "pytest")
-                || (command_words.iter().any(|word| word == "ruff") && command_words.iter().any(|word| word == "check"))
+            if command_words.get(1).is_none_or(|word| word != "run") {
+                return false;
+            }
+            let mut arguments = command_words[2..].iter();
+            let target = arguments.find(|word| {
+                !matches!(
+                    word.as_str(),
+                    "--frozen" | "--locked" | "--no-sync" | "--offline" | "--no-project" | "--quiet" | "-q"
+                )
+            });
+            match target.map(String::as_str) {
+                Some("pytest") => true,
+                Some("ruff") => arguments.next().is_some_and(|argument| argument == "check"),
+                Some("python" | "python3") => python_verification_arguments(arguments.as_slice()),
+                _ => false,
+            }
         }
         "ruff" => {
             if second.as_deref() == Some("format") {
@@ -116,13 +143,7 @@ fn is_verification_invocation(words: &[String]) -> bool {
             !words.iter().any(|word| word == "--fix" || word == "--fix-dry-run")
         }
         "rustc" | "pytest" | "xcodebuild" | "gradle" | "gradlew" => true,
-        "python" | "python3" => {
-            (command_words.len() == 2
-                && command_words
-                    .get(1)
-                    .is_some_and(|script| Path::new(script).ends_with("scripts/check_markdown.py")))
-                || (command_words.iter().any(|word| word == "-m") && command_words.iter().any(|word| word == "pytest"))
-        }
+        "python" | "python3" => python_verification_arguments(&command_words[1..]),
         _ if first.ends_with("/scripts/check.sh") || first.ends_with("/scripts/check-dev.sh") => true,
         _ => false,
     }

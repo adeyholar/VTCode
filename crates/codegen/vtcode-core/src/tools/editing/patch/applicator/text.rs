@@ -99,6 +99,23 @@ pub(super) async fn compute_replacements(
     chunks: &[PatchChunk],
     path: &str,
 ) -> Result<Vec<(usize, usize, Vec<String>)>, PatchError> {
+    Ok(compute_replacements_with_inspection(source_path, original_lines, chunks, path)
+        .await?
+        .replacements)
+}
+
+struct ReplacementPlan {
+    replacements: Vec<(usize, usize, Vec<String>)>,
+    required_ranges: Vec<std::ops::Range<usize>>,
+}
+
+async fn compute_replacements_with_inspection(
+    source_path: &Path,
+    original_lines: &[String],
+    chunks: &[PatchChunk],
+    path: &str,
+) -> Result<ReplacementPlan, PatchError> {
+    let mut inspected = Vec::new();
     let matcher = PatchContextMatcher::new(original_lines);
     let mut replacements = Vec::new();
     let mut line_index = 0usize;
@@ -110,6 +127,7 @@ pub(super) async fn compute_replacements(
         } else if let Some(context) = chunk.change_context() {
             let search_pattern = vec![context.to_string()];
             if let Some(idx) = matcher.seek(&search_pattern, line_index, false) {
+                inspected.push(idx..idx + 1);
                 line_index = idx + 1;
             } else {
                 context_found = false;
@@ -131,6 +149,7 @@ pub(super) async fn compute_replacements(
                 original_lines.len()
             };
 
+            inspected.push(insertion_idx.saturating_sub(1)..(insertion_idx + 1).min(original_lines.len()));
             line_index = insertion_idx.saturating_add(new_segment.len());
             replacements.push((insertion_idx, 0, new_segment));
             continue;
@@ -168,6 +187,10 @@ pub(super) async fn compute_replacements(
         }
 
         if let Some(start_idx) = found {
+            inspected.push(start_idx..start_idx + old_segment.len());
+            if !context_found {
+                inspected.push(0..original_lines.len());
+            }
             line_index = start_idx + old_segment.len();
             replacements.push((start_idx, old_segment.len(), new_segment));
         } else {
@@ -187,7 +210,7 @@ pub(super) async fn compute_replacements(
     }
 
     replacements.sort_by_key(|(idx, _, _)| *idx);
-    Ok(replacements)
+    Ok(ReplacementPlan { replacements, required_ranges: inspected })
 }
 
 pub(super) async fn render_patched_text_from_content(
@@ -303,4 +326,26 @@ pub(super) async fn write_patched_content(
     }
 
     Ok(())
+}
+
+pub(crate) async fn inspection_replacements(
+    source_path: &Path,
+    content: &str,
+    chunks: &[PatchChunk],
+    path: &str,
+) -> Result<crate::tools::source_inspection::mutations::PatchInspection, PatchError> {
+    let (lines, _, _) = lines_from_content(content);
+    let plan = compute_replacements_with_inspection(source_path, &lines, chunks, path).await?;
+    Ok(crate::tools::source_inspection::mutations::PatchInspection {
+        replacements: plan
+            .replacements
+            .into_iter()
+            .map(|(start, removed, added)| crate::tools::source_inspection::mutations::InspectedReplacement {
+                start,
+                removed,
+                added: added.len(),
+            })
+            .collect(),
+        required_ranges: plan.required_ranges,
+    })
 }

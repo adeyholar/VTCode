@@ -43,6 +43,13 @@ pub const CACHING_MODELS: &[&str] = &[
     "gemini-3-flash-preview",
 ];
 
+/// Models that reject explicit `cachedContents` entirely and support implicit
+/// caching only. The provider must skip its explicit-cache lifecycle for these
+/// models even when `[prompt_cache] mode = "explicit"` is configured —
+/// creation requests fail and references in generateContent bodies error.
+/// Reference: <https://ai.google.dev/gemini-api/docs/models/gemini-4-argon>
+pub const IMPLICIT_CACHING_ONLY_MODELS: &[&str] = &["gemini-4-argon"];
+
 /// Models that support code execution (Python)
 /// Code execution allows models to write and execute Python code
 /// Reference: <https://ai.google.dev/gemini-api/docs/code-execution>

@@ -48,6 +48,9 @@ impl ToolRegistry {
             output.remove("success");
         }
         let structured_error = structured_tool_output_error(&normalized_value);
+        if structured_error.is_none() && !is_mcp {
+            self.observe_source_output(tool_name, args, &normalized_value).await;
+        }
 
         ExecutionOutput { normalized_value, structured_error }
     }

@@ -197,6 +197,7 @@ struct EditedFileMonitorInner {
     audit_log: Mutex<Option<FileConflictAuditLog>>,
     next_mutation_id: AtomicU64,
     debounce_duration: Duration,
+    inspection: crate::tools::source_inspection::SourceInspection,
 }
 
 #[derive(Clone)]
@@ -273,6 +274,10 @@ impl Drop for MutationLease {
 }
 
 impl EditedFileMonitor {
+    pub fn source_inspection(&self) -> &crate::tools::source_inspection::SourceInspection {
+        &self.inner.inspection
+    }
+
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel::<PathBuf>();
         let watcher = RecommendedWatcher::new(
@@ -299,6 +304,7 @@ impl EditedFileMonitor {
             audit_log: Mutex::new(None),
             next_mutation_id: AtomicU64::new(1),
             debounce_duration: Duration::from_millis(250),
+            inspection: Default::default(),
         });
 
         let monitor = Self { inner: Arc::clone(&inner) };
@@ -364,6 +370,42 @@ impl EditedFileMonitor {
             entry.stale_conflict = None;
         }
         self.watch_parent(&path);
+        Ok(())
+    }
+
+    pub(crate) async fn record_agent_write(&self, path: &Path) -> Result<()> {
+        let root = normalize_event_path(path);
+        let mut paths = self
+            .tracked_paths()
+            .into_iter()
+            .filter(|path| path.starts_with(&root))
+            .collect::<Vec<_>>();
+        paths.push(root);
+        self.record_agent_paths(paths).await
+    }
+
+    pub(crate) async fn record_agent_move(&self, source: &Path, destination: &Path) -> Result<()> {
+        let source = normalize_event_path(source);
+        let destination = normalize_event_path(destination);
+        let mut paths = vec![source.clone(), destination.clone()];
+        for path in self.tracked_paths() {
+            if let Ok(relative) = path.strip_prefix(&source) {
+                paths.push(destination.join(relative));
+                paths.push(path);
+            } else if path.starts_with(&destination) {
+                paths.push(path);
+            }
+        }
+        self.record_agent_paths(paths).await
+    }
+
+    async fn record_agent_paths(&self, mut paths: Vec<PathBuf>) -> Result<()> {
+        paths.sort();
+        paths.dedup();
+        for path in paths {
+            let snapshot = snapshot_path_async(path.clone()).await?;
+            self.record_agent_write_snapshot(&path, snapshot)?;
+        }
         Ok(())
     }
 

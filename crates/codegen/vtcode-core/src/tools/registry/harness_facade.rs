@@ -67,6 +67,21 @@ impl ToolRegistry {
         self.shared_circuit_breaker.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Grant an exact, single-use inspection exemption for a command supplied
+    /// directly by a trusted user. Model tool approval must never call this.
+    pub fn trusted_user_command_exemption(
+        &self,
+        args: &Value,
+    ) -> Result<crate::tools::source_inspection::TrustedCommandExemption> {
+        let cwd = self
+            .pty_manager()
+            .working_dir_candidate(crate::tools::command_args::working_dir_text(args))?;
+        Ok(self
+            .edited_file_monitor_ref()
+            .source_inspection()
+            .scoped_user_command(args, &cwd))
+    }
+
     /// Execute a harness-owned verification command through the same exec/sandbox
     /// runtime used by the public `command_session` tool while bypassing the
     /// model-facing full-auto allow-list gate.

@@ -370,3 +370,5 @@ pub use pattern_detection::{DetectedPattern, PatternDetector};
 pub use tool_middleware::{Middleware, MiddlewareChain};
 pub use vtcode_utility_tool_specs::parse_tool_input_schema;
 pub use workflow_optimizer::{Optimization, OptimizationType, WorkflowOptimizer};
+
+pub mod source_inspection;

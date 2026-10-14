@@ -809,6 +809,7 @@ async fn matrix_verification_preserves_full_auto_denials_and_work_budgets() {
     for allow_execution in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let mut cfg = VTCodeConfig::default();
+        cfg.agent.harness.inspection.mode = vtcode_config::core::agent::InspectionMode::Off;
         cfg.automation.full_auto.enabled = true;
         cfg.agent.harness.max_tool_calls_per_turn = 1;
         cfg.automation.full_auto.allowed_tools = if allow_execution {
@@ -849,6 +850,7 @@ async fn matrix_verification_enforces_inherited_bash_permissions_despite_full_au
     for deny in [Some("bash"), Some("bash(printf*)"), None] {
         let root = tempfile::tempdir().unwrap();
         let mut cfg = VTCodeConfig::default();
+        cfg.agent.harness.inspection.mode = vtcode_config::core::agent::InspectionMode::Off;
         cfg.automation.full_auto.enabled = true;
         cfg.automation.full_auto.allowed_tools = vec!["exec_command".into(), "write_stdin".into()];
         cfg.commands.allow_list.push("printf".into());

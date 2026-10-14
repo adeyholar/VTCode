@@ -119,6 +119,7 @@ const RECOVERABLE_BLOCK_BASE_DENY_TOKENS: &[&str] = &[
     "verification is still pending",
     "unverified assistant responses",
     "anti-blind",
+    "verification checkpoint",
     "verification gate",
     "compaction could not reduce",
     "unmatched tool result",
@@ -160,7 +161,11 @@ fn verification_block_has_hard_deny(lower: &str, extra_deny: &[&str]) -> bool {
         .filter(|token| {
             !matches!(
                 **token,
-                "verification is still pending" | "unverified assistant responses" | "anti-blind" | "verification gate"
+                "verification is still pending"
+                    | "unverified assistant responses"
+                    | "anti-blind"
+                    | "verification checkpoint"
+                    | "verification gate"
             )
         })
         .chain(extra_deny.iter())
