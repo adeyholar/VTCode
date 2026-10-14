@@ -301,15 +301,8 @@ pub(super) fn shell_allows_persistent_decisions(tool_name: &str, tool_args: Opti
 
 #[cfg(test)]
 fn truncate_arg_preview(value: &str) -> String {
-    const MAX_CHARS: usize = 60;
-    const TRUNCATED_CHARS: usize = 57;
-    if value.chars().nth(MAX_CHARS).is_some() {
-        let mut truncated: String = value.chars().take(TRUNCATED_CHARS).collect();
-        truncated.push_str("...");
-        truncated
-    } else {
-        value.to_string()
-    }
+    // Canonical helper: hard 60-char budget with "..." reserving its own width.
+    vtcode_commons::formatting::truncate_within(value, 60, "...")
 }
 
 fn shell_command_preview_lines(tool_name: &str, tool_args: Option<&Value>) -> Option<Vec<String>> {

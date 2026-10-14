@@ -97,25 +97,20 @@ impl ToolExecutionRecord {
         effective_timeout_ms: Option<u64>,
         circuit_breaker: bool,
     ) -> Self {
-        Self {
+        Self::new_execution_record(
             tool_name,
             requested_name,
             is_mcp,
             mcp_provider,
             args,
-            result: Err(error_msg),
-            timestamp: SystemTime::now(),
-            success: false,
+            Err(error_msg),
             context,
             timeout_category,
             base_timeout_ms,
             adaptive_timeout_ms,
             effective_timeout_ms,
             circuit_breaker,
-            attempt: 1,
-            retry_after_ms: None,
-            circuit_breaker_state: None,
-        }
+        )
     }
 
     /// Create a new successful execution record.
@@ -138,15 +133,52 @@ impl ToolExecutionRecord {
         effective_timeout_ms: Option<u64>,
         circuit_breaker: bool,
     ) -> Self {
+        Self::new_execution_record(
+            tool_name,
+            requested_name,
+            is_mcp,
+            mcp_provider,
+            args,
+            Ok(result),
+            context,
+            timeout_category,
+            base_timeout_ms,
+            adaptive_timeout_ms,
+            effective_timeout_ms,
+            circuit_breaker,
+        )
+    }
+
+    /// Shared initializer: both constructors differ only in the `result`
+    /// outcome, so this pins the single field list.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Intentional compatibility, platform, test, or API-shape suppression."
+    )]
+    fn new_execution_record(
+        tool_name: String,
+        requested_name: String,
+        is_mcp: bool,
+        mcp_provider: Option<String>,
+        args: Value,
+        result: Result<Value, String>,
+        context: HarnessContextSnapshot,
+        timeout_category: Option<String>,
+        base_timeout_ms: Option<u64>,
+        adaptive_timeout_ms: Option<u64>,
+        effective_timeout_ms: Option<u64>,
+        circuit_breaker: bool,
+    ) -> Self {
+        let success = result.is_ok();
         Self {
             tool_name,
             requested_name,
             is_mcp,
             mcp_provider,
             args,
-            result: Ok(result),
+            result,
             timestamp: SystemTime::now(),
-            success: true,
+            success,
             context,
             timeout_category,
             base_timeout_ms,
@@ -267,23 +299,28 @@ impl ToolExecutionHistory {
 
     /// Get the most recent records.
     pub fn get_recent_records(&self, count: usize) -> Vec<ToolExecutionRecord> {
-        let Ok(records) = self.records.read() else {
-            return Vec::new();
-        };
-        let records_len = records.len();
-        let start = records_len.saturating_sub(count);
-        records.iter().skip(start).cloned().collect()
+        self.with_records(|records| {
+            let records_len = records.len();
+            let start = records_len.saturating_sub(count);
+            records.iter().skip(start).cloned().collect()
+        })
     }
 
     /// Get recent failures in chronological order.
     pub fn get_recent_failures(&self, count: usize) -> Vec<ToolExecutionRecord> {
-        let Ok(records) = self.records.read() else {
-            return Vec::new();
-        };
-        let mut failures: Vec<ToolExecutionRecord> =
-            records.iter().rev().filter(|r| !r.success).take(count).cloned().collect();
-        failures.reverse();
-        failures
+        self.with_records(|records| {
+            let mut failures: Vec<ToolExecutionRecord> =
+                records.iter().rev().filter(|r| !r.success).take(count).cloned().collect();
+            failures.reverse();
+            failures
+        })
+    }
+
+    /// Run `f` against a shared read of the records; poisoned locks recover
+    /// via `into_inner` without losing the history.
+    fn with_records<T>(&self, f: impl FnOnce(&VecDeque<ToolExecutionRecord>) -> T) -> T {
+        let guard = self.records.read().unwrap_or_else(|e| e.into_inner());
+        f(&guard)
     }
 
     /// Clear all records.

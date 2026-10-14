@@ -11,6 +11,68 @@ fn make_task_snapshot(task_id: &str) -> HarnessContextSnapshot {
 }
 
 #[test]
+fn recent_records_and_failures_respect_count_and_chronology() {
+    let history = ToolExecutionHistory::new(10);
+    for index in 0..5 {
+        let record = if index % 2 == 0 {
+            ToolExecutionRecord::success(
+                format!("tool_{index}"),
+                format!("tool_{index}"),
+                false,
+                None,
+                json!({}),
+                json!("ok"),
+                make_snapshot(),
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+        } else {
+            ToolExecutionRecord::failure(
+                format!("tool_{index}"),
+                format!("tool_{index}"),
+                false,
+                None,
+                json!({}),
+                format!("failed {index}"),
+                make_snapshot(),
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+        };
+        history.add_record(record);
+    }
+
+    // Constructors agree with the record outcome on both sides.
+    let recent = history.get_recent_records(10);
+    assert_eq!(recent.len(), 5);
+    for record in &recent {
+        assert_eq!(record.success, record.result.is_ok());
+    }
+    // Chronological order: earliest first.
+    assert_eq!(recent.first().expect("first").tool_name, "tool_0");
+    assert_eq!(recent.last().expect("last").tool_name, "tool_4");
+
+    // count=0 boundary yields nothing without panic.
+    assert!(history.get_recent_records(0).is_empty());
+    assert!(history.get_recent_failures(0).is_empty());
+
+    // More failures exist than requested: the newest wins, oldest first.
+    assert_eq!(recent.len(), 5);
+    let failures = history.get_recent_failures(1);
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].tool_name, "tool_3");
+
+    let failures = history.get_recent_failures(10);
+    assert_eq!(failures.iter().map(|r| r.tool_name.as_str()).collect::<Vec<_>>(), vec!["tool_1", "tool_3"]);
+}
+
+#[test]
 fn finds_recent_spooled_result() {
     let args = json!({"command": "git diff"});
     let temp = tempdir().unwrap();
