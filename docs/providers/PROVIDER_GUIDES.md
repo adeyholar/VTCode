@@ -179,6 +179,10 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
   - `gemini-3.6-flash` — flash model with improved reasoning and efficiency, 1M context
 - **Features:** Streaming, tool calls, structured output, image/video/audio input, context caching, code execution, and
   configurable reasoning effort
+- **Hard-prompt timeouts:** Argon at `high` thinking can take several minutes per turn. If long reasoning turns time
+  out, raise `timeouts.streaming_ceiling_seconds` (default `600`); Google recommends at least 15 minutes for hard
+  prompts. Single responses are capped at 64K tokens — VT Code does not use long decode (Interactions
+  `background: true`); long work proceeds across turns instead.
 - Configuration details are covered in the main
   [Getting Started guide](../user-guide/getting-started.md#api-requirements).
 - Models and constants are defined in
