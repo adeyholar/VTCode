@@ -435,16 +435,32 @@ fn sanitize_static_shell_command(command: &str) -> Option<String> {
     (!sanitized.trim().is_empty()).then_some(sanitized)
 }
 
+/// Shared extract + static-parse prologue for command-session classifiers.
+///
+/// Extracts the full classification candidate (including the quoted argv
+/// suffix) and proves a static shape through the tree-sitter boundary.
+/// Returns `None` when the args cannot prove one invocation (conflicting raw
+/// alias, dynamic syntax, redirection) — every caller maps `None` to
+/// fail-closed `false`, in the same order as before.
+fn parsed_session_commands(args: &Value) -> Option<Vec<Vec<String>>> {
+    let raw = shell_command_text_with_args(args)?;
+    static_shell_command_words(&raw)
+}
+
+/// Shared read-only gate over already-parsed segments: a `&&` chain is
+/// accepted only when every segment independently passes the allow-list.
+/// (`sanitize_static_shell_command` already rejected `;`, `||`,
+/// redirections, and background `&` up front.)
+fn all_commands_readonly(commands: &[Vec<String>]) -> bool {
+    commands.iter().all(|words| command_words_are_readonly(words))
+}
+
 pub fn is_readonly_command_session_command(args: &Value) -> bool {
-    let Some(raw) = shell_command_text_with_args(args) else {
+    let Some(commands) = parsed_session_commands(args) else {
         return false;
     };
 
-    // `sanitize_static_shell_command` rejects `;`, `||`, redirections, and
-    // background `&` up front; a `&&` chain is accepted only when every
-    // parsed segment independently passes the allow-list below.
-    static_shell_command_words(&raw)
-        .is_some_and(|commands| commands.iter().all(|words| command_words_are_readonly(words)))
+    all_commands_readonly(&commands)
 }
 
 /// A stricter read-only command shape that may run concurrently after hooks,
@@ -461,11 +477,10 @@ pub(crate) fn is_parallel_safe_command_session_command(args: &Value) -> bool {
     {
         return false;
     }
-    let Some(raw) = shell_command_text_with_args(args) else {
+    let Some(commands) = parsed_session_commands(args) else {
         return false;
     };
-    static_shell_command_words(&raw)
-        .is_some_and(|commands| commands.len() == 1 && command_words_are_parallel_safe(&commands[0]))
+    commands.len() == 1 && command_words_are_parallel_safe(&commands[0])
 }
 
 /// Returns `true` when a safe shell inspection command reads the internal tool
@@ -476,18 +491,14 @@ pub fn is_spool_file_read_command(tool_name: &str, args: &Value) -> bool {
         return false;
     }
 
-    // Parse once: the same segments feed both the read-only gate and the
-    // spool-path scan. Delegating the gate to
-    // `is_readonly_command_session_command` and then parsing again repeats
-    // the extract + sanitize + tree-sitter pipeline on every completed
-    // command output (see `prepare_execution_output`).
-    let Some(raw) = shell_command_text_with_args(args) else {
+    // Parse once through the shared prologue: the same segments feed both
+    // the read-only gate below and the spool-path scan, so a completed
+    // command output (see `prepare_execution_output`) pays the extract +
+    // sanitize + tree-sitter pipeline a single time.
+    let Some(commands) = parsed_session_commands(args) else {
         return false;
     };
-    let Some(commands) = static_shell_command_words(&raw) else {
-        return false;
-    };
-    if !commands.iter().all(|words| command_words_are_readonly(words)) {
+    if !all_commands_readonly(&commands) {
         return false;
     }
     commands
@@ -995,5 +1006,37 @@ rest=substr(line,3); g=index(rest,"|")+1; guide=substr(rest,g+2); gp=0; gg=guide
             "exec_command",
             &run_cmd("cat .vtcode/context/tool_outputs/run-1.txt && rm copied.txt")
         ));
+    }
+
+    #[test]
+    fn shared_prologue_keeps_classifier_gates_distinct() {
+        // Same args through all three classifiers: outcomes must differ per
+        // gate, proving the shared extract+parse did not collapse predicates.
+        // Asymmetric by construction: each row flips a different gate.
+        let spool_read = run_cmd("cat .vtcode/context/tool_outputs/run-1.txt");
+        assert!(is_readonly_command_session_command(&spool_read));
+        assert!(is_spool_file_read_command("exec_command", &spool_read));
+        assert!(is_parallel_safe_command_session_command(&spool_read));
+
+        // Build commands are policy-readonly but touch shared package-manager
+        // state, so parallel safety stays denied while the spool gate (which
+        // needs a spool path) also stays denied.
+        let build = run_cmd("cargo check");
+        assert!(is_readonly_command_session_command(&build));
+        assert!(!is_parallel_safe_command_session_command(&build));
+        assert!(!is_spool_file_read_command("exec_command", &build));
+
+        // A mutating tail fails the shared read-only gate on both paths that
+        // use it; the spool scan must never admit a mutation.
+        let mutating_spool = run_cmd("cat .vtcode/context/tool_outputs/run-1.txt && rm copied.txt");
+        assert!(!is_readonly_command_session_command(&mutating_spool));
+        assert!(!is_spool_file_read_command("exec_command", &mutating_spool));
+
+        // Conflicting raw overrides prove no single invocation: fail closed
+        // on every classifier.
+        let conflicted = json!({"action": "run", "command": "ls", "raw_command": "rm -rf /"});
+        assert!(!is_readonly_command_session_command(&conflicted));
+        assert!(!is_parallel_safe_command_session_command(&conflicted));
+        assert!(!is_spool_file_read_command("exec_command", &conflicted));
     }
 }

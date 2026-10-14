@@ -945,6 +945,22 @@ mod tests {
     }
 
     #[test]
+    fn advertised_per_path_read_cap_matches_enforcement() {
+        // Lockstep guard for a hand-synced mirror: enforcement lives here
+        // (`MAX_SAME_FILE_PATH_READ_CALLS`) while the model-facing
+        // advertisement lives in `vtcode-core` (`harness_limits.rs`
+        // `MAX_SAME_FILE_PATH_READS`, a separate crate so the const cannot be
+        // shared). Render the prompt section and require the advertised line
+        // to carry the live enforcement value: drift on either side fails.
+        let mut prompt = String::from("Base prompt");
+        vtcode_core::prompts::upsert_harness_limits_section(&mut prompt, 32, 600, 2);
+        assert!(
+            prompt.contains(&format!("max_same_file_path_reads: {MAX_SAME_FILE_PATH_READ_CALLS}")),
+            "advertised per-path cap must match enforcement ({MAX_SAME_FILE_PATH_READ_CALLS}): {prompt}"
+        );
+    }
+
+    #[test]
     fn repeated_file_read_family_key_returns_none_for_missing_command() {
         let args = serde_json::json!({});
         let key = repeated_file_read_family_key(tool_names::UNIFIED_EXEC, &args);

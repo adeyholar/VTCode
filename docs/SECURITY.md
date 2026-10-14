@@ -9,7 +9,7 @@ disclosure and will work to address it promptly.
 
 Instead, please report security vulnerabilities via one of the following channels:
 
-- Email: **<security@vtcode.org>** (replace with actual email if available)
+- Email: **<vinhnguyen2308@gmail.com>**
 - [GitHub Private Vulnerability Reporting](https://github.com/vinhnx/vtcode/security/advisories/new) - This is the
   preferred method for reporting vulnerabilities, as it allows for secure, private communication.
 

@@ -310,7 +310,7 @@ impl SessionToolCatalogState {
         planning_active: bool,
         request_user_input_enabled: bool,
     ) -> SessionToolCatalogSnapshot {
-        let defs = sort_snapshot_definitions(defs);
+        let defs = sort_tool_definitions(defs);
         let filtered = filter_tool_definitions_for_mode(
             (!defs.is_empty()).then(|| Arc::new(defs)),
             planning_active,
@@ -333,7 +333,7 @@ impl SessionToolCatalogState {
         planning_active: bool,
         request_user_input_enabled: bool,
     ) -> SessionToolCatalogSnapshot {
-        let defs = sort_snapshot_definitions(defs);
+        let defs = sort_tool_definitions(defs);
         let requested_active_tool_names: BTreeSet<String> = active_tool_names.into_iter().collect();
         let active_tool_names = defs
             .iter()
@@ -384,7 +384,7 @@ impl SessionToolCatalogState {
                         }
                     }
                 }
-                Some(Arc::new(sort_snapshot_definitions(snapshot)))
+                Some(Arc::new(sort_tool_definitions(snapshot)))
             }
         };
 
@@ -392,10 +392,6 @@ impl SessionToolCatalogState {
         *cache_guard = next_snapshot.as_ref().map(|snapshot| (version, Arc::clone(snapshot)));
         next_snapshot
     }
-}
-
-fn sort_snapshot_definitions(defs: Vec<ToolDefinition>) -> Vec<ToolDefinition> {
-    sort_tool_definitions(defs)
 }
 
 impl super::ToolRegistry {

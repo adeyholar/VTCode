@@ -45,6 +45,16 @@ pub fn filter_tool_definitions_for_mode_with_stability(
     // Cache-stable catalog: union of planning/execution exposure and no action
     // masking, so planning toggles cannot rewrite the wire tool array.
     if stable_catalog {
+        // Fast path first, mirroring the arms below: when every tool
+        // survives, reuse the Arc instead of deep-cloning the catalog (each
+        // definition carries its description + JSON schema). No-op filters
+        // must not copy shared state.
+        if tools
+            .iter()
+            .all(|tool| should_expose_tool_in_stable_catalog(tool, request_user_input_enabled))
+        {
+            return Some(tools);
+        }
         let filtered: Vec<ToolDefinition> = tools
             .iter()
             .filter(|tool| should_expose_tool_in_stable_catalog(tool, request_user_input_enabled))
@@ -389,6 +399,39 @@ mod tests {
         assert_eq!(planning_names, execution_names, "stable catalog must match across modes");
         assert!(planning_names.contains(&tools::APPLY_PATCH));
         assert!(planning_names.contains(&tools::WRITE_FILE));
+    }
+
+    #[test]
+    fn stable_catalog_reuses_arc_when_nothing_is_filtered() {
+        // Asymmetric triple: all-exposed input keeps its Arc (no deep clone
+        // of descriptions + schemas); input with a mode-hidden tool gets a
+        // new Arc without it; fully-hidden input stays None.
+        let tools = Arc::new(vec![function_tool(tools::CODE_SEARCH), function_tool(tools::APPLY_PATCH)]);
+
+        let filtered = filter_tool_definitions_for_mode_with_stability(Some(tools.clone()), true, false, true)
+            .expect("stable catalog");
+        assert!(Arc::ptr_eq(&tools, &filtered), "no-op stable filter must reuse the Arc");
+
+        let execution = filter_tool_definitions_for_mode_with_stability(Some(tools.clone()), false, false, true)
+            .expect("stable catalog");
+        assert!(Arc::ptr_eq(&filtered, &execution), "stable catalog must be identical across toggles");
+
+        let mixed = Arc::new(vec![
+            function_tool(tools::CODE_SEARCH),
+            function_tool(tools::REQUEST_USER_INPUT),
+        ]);
+        let pruned = filter_tool_definitions_for_mode_with_stability(Some(mixed.clone()), true, false, true)
+            .expect("stable catalog");
+        assert!(!Arc::ptr_eq(&mixed, &pruned));
+        let names: Vec<&str> = pruned.iter().map(|tool| tool.function_name()).collect();
+        assert!(names.contains(&tools::CODE_SEARCH));
+        assert!(!names.contains(&tools::REQUEST_USER_INPUT));
+
+        let hidden = Arc::new(vec![function_tool(tools::REQUEST_USER_INPUT)]);
+        assert!(
+            filter_tool_definitions_for_mode_with_stability(Some(hidden), false, false, true).is_none(),
+            "fully-hidden stable catalog stays None"
+        );
     }
 
     #[test]

@@ -1,11 +1,10 @@
-use std::collections::BTreeSet;
-use std::fmt::Write as _;
-
 use crate::config::constants::tools;
 use crate::config::types::{CapabilityLevel, ResolvedShellPromptProfile};
 use crate::core::agent::harness_kernel::SessionToolCatalogSnapshot;
 use crate::llm::provider::ToolDefinition;
-use crate::prompts::sections::SectionBoundaryMode;
+use crate::prompts::sections::{
+    SectionBoundaryMode, append_prompt_block, remove_prompt_section, trim_trailing_newlines,
+};
 use crate::tools::registry::tool_groups;
 
 const TOOL_EXEC_COMMAND: &str = tools::EXEC_COMMAND;
@@ -111,6 +110,7 @@ struct ToolPresence {
     write_stdin: bool,
     code_search: bool,
     read_file: bool,
+    grep_file: bool,
     list_files: bool,
     apply_patch: bool,
     request_user_input: bool,
@@ -130,6 +130,7 @@ impl ToolPresence {
             write_stdin: false,
             code_search: false,
             read_file: false,
+            grep_file: false,
             list_files: false,
             apply_patch: false,
             request_user_input: false,
@@ -144,6 +145,7 @@ impl ToolPresence {
                 TOOL_WRITE_STDIN => presence.write_stdin = true,
                 TOOL_CODE_SEARCH => presence.code_search = true,
                 TOOL_READ_FILE => presence.read_file = true,
+                TOOL_GREP_FILE => presence.grep_file = true,
                 TOOL_LIST_FILES => presence.list_files = true,
                 TOOL_APPLY_PATCH => presence.apply_patch = true,
                 TOOL_REQUEST_USER_INPUT => presence.request_user_input = true,
@@ -328,7 +330,7 @@ pub fn append_runtime_tool_prompt_sections_for_profile(
     shell_profile: ResolvedShellPromptProfile,
 ) {
     let names = snapshot_tool_names(tool_snapshot);
-    append_runtime_tool_sections_with_names(prompt, tool_snapshot, &names, include_catalog_metadata, shell_profile);
+    append_runtime_tool_sections_with_names(prompt, tool_snapshot, names, include_catalog_metadata, shell_profile);
 }
 
 /// Select documentation density using the active route and session budgets.
@@ -343,7 +345,7 @@ pub fn append_runtime_tool_prompt_sections_for_model(
 ) {
     let names = snapshot_tool_names(tool_snapshot);
     let default_guidance =
-        append_runtime_tool_sections_with_names(prompt, tool_snapshot, &names, include_catalog_metadata, shell_profile);
+        append_runtime_tool_sections_with_names(prompt, tool_snapshot, names, include_catalog_metadata, shell_profile);
     let pricing = crate::config::models::model_catalog_entry(provider.name(), model).map(|entry| entry.pricing);
     let profile = ToolGuidanceProfile::resolve(
         crate::compaction::effective_context_budget(config, provider, model),
@@ -358,12 +360,12 @@ pub fn append_runtime_tool_prompt_sections_for_model(
     if tool_snapshot.planning_active && profile == ToolGuidanceProfile::Default {
         return;
     }
-    remove_prompt_section(prompt, "## Active Tools");
-    let capability_level = Some(infer_capability_level(&names));
+    remove_prompt_section(prompt, "## Active Tools", SectionBoundaryMode::BracketOrMarkdown);
+    let presence = ToolPresence::of(names);
+    let capability_level = Some(infer_capability_level_from_presence(&presence));
     let mut guidance = match profile {
         ToolGuidanceProfile::Default => {
             let mut guidance = default_guidance;
-            let presence = ToolPresence::of(&names);
             if let (Some(original), Some(effective)) = (
                 capability_mode_line(None, presence.exec, presence.apply_patch),
                 capability_mode_line(capability_level, presence.exec, presence.apply_patch),
@@ -378,11 +380,11 @@ pub fn append_runtime_tool_prompt_sections_for_model(
             guidance
         }
         ToolGuidanceProfile::Minimal => {
-            generate_tool_guidelines_with_capabilities(&names, capability_level, shell_profile, profile, parallel_tools)
+            generate_tool_guidelines_with_capabilities(names, capability_level, shell_profile, profile, parallel_tools)
         }
     };
     if tool_snapshot.planning_active {
-        append_minimal_planning_addendum(&mut guidance, &names);
+        append_minimal_planning_addendum(&mut guidance, &presence);
     }
     append_prompt_block(prompt, guidance.trim_start_matches('\n'));
 }
@@ -397,11 +399,9 @@ fn append_runtime_tool_sections_with_names(
     include_catalog_metadata: bool,
     shell_profile: ResolvedShellPromptProfile,
 ) -> String {
-    remove_prompt_section(prompt, "## Active Tools");
-    remove_prompt_section(prompt, "[Runtime Tool Catalog]");
-    while prompt.ends_with('\n') {
-        prompt.pop();
-    }
+    remove_prompt_section(prompt, "## Active Tools", SectionBoundaryMode::BracketOrMarkdown);
+    remove_prompt_section(prompt, "[Runtime Tool Catalog]", SectionBoundaryMode::BracketOrMarkdown);
+    trim_trailing_newlines(prompt);
 
     let guidelines = generate_runtime_tool_guidelines_for_profile(names, tool_snapshot.planning_active, shell_profile);
     if !guidelines.is_empty() {
@@ -430,25 +430,31 @@ fn append_runtime_tool_sections_with_names(
 
 /// Compact tool reminders; the planning mode section retains the canonical
 /// research, step-quality, output, and persistence contract at every density.
-fn append_minimal_planning_addendum(guidance: &mut String, names: &[String]) {
+fn append_minimal_planning_addendum(guidance: &mut String, presence: &ToolPresence) {
     guidance.push_str("\n- Planning is read-only.");
-    let read_tools = [TOOL_READ_FILE, TOOL_GREP_FILE, TOOL_CODE_SEARCH, TOOL_LIST_FILES]
-        .into_iter()
-        .filter(|tool| names.iter().any(|name| name == tool))
-        .collect::<Vec<_>>();
-    if read_tools.is_empty() {
-        guidance.push_str("\n- Keep inspections small: keep `max_output_tokens` small, avoid batching multiple large inspections in parallel; start git history with `git log --oneline` before targeted `git show --stat`.");
-    } else {
-        guidance.push_str(&format!(
-            "\n- Keep inspections small: prefer `{}` over `exec_command` shell reads; keep `max_output_tokens` small, avoid batching multiple large inspections in parallel; start git history with `git log --oneline` before targeted `git show --stat`.",
-            read_tools.join("`/`")
-        ));
+    let mut read_tools = Vec::with_capacity(4);
+    if presence.read_file {
+        read_tools.push(TOOL_READ_FILE);
     }
-    if names.iter().any(|name| name == TOOL_TASK_TRACKER) {
+    if presence.grep_file {
+        read_tools.push(TOOL_GREP_FILE);
+    }
+    if presence.code_search {
+        read_tools.push(TOOL_CODE_SEARCH);
+    }
+    if presence.list_files {
+        read_tools.push(TOOL_LIST_FILES);
+    }
+    guidance.push_str("\n- Keep inspections small: ");
+    if !read_tools.is_empty() {
+        guidance.push_str(&format!("prefer `{}` over `exec_command` shell reads; ", read_tools.join("`/`")));
+    }
+    guidance.push_str("keep `max_output_tokens` small, avoid batching multiple large inspections in parallel; start git history with `git log --oneline` before targeted `git show --stat`.");
+    if presence.task_tracker {
         guidance.push('\n');
         guidance.push_str(PLANNING_TASK_TRACKER_COMPACT_LINE);
     }
-    if names.iter().any(|name| name == TOOL_REQUEST_USER_INPUT) {
+    if presence.request_user_input {
         guidance.push('\n');
         guidance.push_str(REQUEST_USER_INPUT_LINE);
     }
@@ -462,7 +468,7 @@ fn append_minimal_planning_addendum(guidance: &mut String, names: &[String]) {
 /// descriptions are server-provided and unbounded, so each line is truncated
 /// to `DEFERRED_TOOLS_MAX_DESC_CHARS` characters.
 pub fn append_deferred_tools_prompt_section(prompt: &mut String, tools: &[ToolDefinition]) {
-    remove_prompt_section(prompt, "[Deferred Tools]");
+    remove_prompt_section(prompt, "[Deferred Tools]", SectionBoundaryMode::BracketOrMarkdown);
 
     let mut groups: Vec<_> = tool_groups(tools)
         .into_iter()
@@ -509,33 +515,14 @@ const DEFERRED_TOOLS_MAX_GROUPS: usize = 8;
 const DEFERRED_TOOLS_MAX_DESC_CHARS: usize = 120;
 
 fn truncate_deferred_description(description: &str) -> String {
-    if description.chars().count() <= DEFERRED_TOOLS_MAX_DESC_CHARS {
+    // Single pass: visit at most `MAX + 1` chars. The old form ran
+    // `chars().count()` over the whole string, then `chars().take()` again.
+    let mut chars = description.chars();
+    let truncated: String = chars.by_ref().take(DEFERRED_TOOLS_MAX_DESC_CHARS).collect();
+    if chars.next().is_none() {
         return description.to_string();
     }
-    let truncated: String = description.chars().take(DEFERRED_TOOLS_MAX_DESC_CHARS).collect();
     format!("{}...", truncated.trim_end())
-}
-
-fn append_prompt_block(prompt: &mut String, block: &str) {
-    if block.is_empty() {
-        return;
-    }
-
-    if prompt.is_empty() {
-        prompt.push_str(block);
-    } else {
-        let _ = write!(prompt, "\n\n{block}");
-    }
-}
-
-fn remove_prompt_section(prompt: &mut String, section_header: &str) {
-    while let Some((section_start, section_end)) = find_prompt_section_bounds(prompt, section_header) {
-        prompt.replace_range(section_start..section_end, "");
-    }
-}
-
-fn find_prompt_section_bounds(prompt: &str, section_header: &str) -> Option<(usize, usize)> {
-    crate::prompts::sections::find_prompt_section_bounds(prompt, section_header, SectionBoundaryMode::BracketOrMarkdown)
 }
 
 fn generate_runtime_tool_guidelines_for_profile(
@@ -589,14 +576,8 @@ fn generate_runtime_tool_guidelines_for_profile(
     format!("\n\n## Active Tools\n{}", lines.join("\n"))
 }
 
-fn snapshot_tool_names(tool_snapshot: &SessionToolCatalogSnapshot) -> Vec<String> {
-    tool_snapshot
-        .active_tool_names
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+fn snapshot_tool_names(tool_snapshot: &SessionToolCatalogSnapshot) -> &[String] {
+    &tool_snapshot.active_tool_names
 }
 
 fn browse_tool_guidance(
@@ -638,13 +619,11 @@ fn shell_browse_guidance(shell_profile: ResolvedShellPromptProfile, has_search: 
     const SEARCH_PREFERENCE_POWERSHELL: &str = " Prefer `code_search` over `Select-String` for code.";
     match shell_profile {
         ResolvedShellPromptProfile::UnixLike => {
-            let mut line = if has_search {
-                "- Use `exec_command.cmd` with `ls`, `find`, `cat`, `sed`, and `awk` for repository browsing."
-                    .to_string()
-            } else {
-                "- Use `exec_command.cmd` with `ls`, `rg`, `find`, `cat`, `sed`, and `awk` for repository browsing."
-                    .to_string()
-            };
+            let mut line = String::from("- Use `exec_command.cmd` with `ls`, ");
+            if !has_search {
+                line.push_str("`rg`, ");
+            }
+            line.push_str("`find`, `cat`, `sed`, and `awk` for repository browsing.");
             if has_search {
                 line.push_str(SEARCH_PREFERENCE_UNIX);
             }
@@ -709,7 +688,10 @@ fn capability_mode_line(
 
 /// Infer capability level from available tools.
 pub(crate) fn infer_capability_level(available_tools: &[String]) -> CapabilityLevel {
-    let presence = ToolPresence::of(available_tools);
+    infer_capability_level_from_presence(&ToolPresence::of(available_tools))
+}
+
+fn infer_capability_level_from_presence(presence: &ToolPresence) -> CapabilityLevel {
     if presence.code_search {
         CapabilityLevel::CodeSearch
     } else if presence.apply_patch {
@@ -765,16 +747,17 @@ mod tests {
         if snapshot.planning_active && profile == ToolGuidanceProfile::Default {
             return prompt;
         }
-        remove_prompt_section(&mut prompt, "## Active Tools");
+        remove_prompt_section(&mut prompt, "## Active Tools", SectionBoundaryMode::BracketOrMarkdown);
+        let presence = ToolPresence::of(names);
         let mut guidance = generate_tool_guidelines_with_capabilities(
-            &names,
-            Some(infer_capability_level(&names)),
+            names,
+            Some(infer_capability_level_from_presence(&presence)),
             shell,
             profile,
             provider.supports_parallel_tool_config(model),
         );
         if snapshot.planning_active {
-            append_minimal_planning_addendum(&mut guidance, &names);
+            append_minimal_planning_addendum(&mut guidance, &presence);
         }
         append_prompt_block(&mut prompt, guidance.trim_start_matches('\n'));
         prompt
@@ -958,7 +941,7 @@ mod tests {
             ToolGuidanceProfile::Minimal,
             false,
         );
-        append_minimal_planning_addendum(&mut minimal_planning, &planning_tools);
+        append_minimal_planning_addendum(&mut minimal_planning, &ToolPresence::of(&planning_tools));
         let variants = [
             ("default", generate_tool_guidelines_for_profile(&execution_tools, None, shell, true), false),
             (
@@ -1541,6 +1524,42 @@ mod tests {
     }
 
     #[test]
+    fn truncate_deferred_description_keeps_boundaries_and_char_safety() {
+        // Asymmetric boundaries: exactly at the cap stays verbatim, one over
+        // truncates with an ellipsis. Unicode stays on char boundaries.
+        let short = "Tools provided by MCP server";
+        assert_eq!(truncate_deferred_description(short), short);
+
+        let empty = "";
+        assert_eq!(truncate_deferred_description(empty), "");
+
+        let exact: String = "a".repeat(DEFERRED_TOOLS_MAX_DESC_CHARS);
+        assert_eq!(truncate_deferred_description(&exact), exact);
+
+        let one_over: String = "a".repeat(DEFERRED_TOOLS_MAX_DESC_CHARS + 1);
+        let truncated = truncate_deferred_description(&one_over);
+        assert!(truncated.ends_with("..."));
+        assert!(!truncated.contains(&"a".repeat(DEFERRED_TOOLS_MAX_DESC_CHARS + 1)));
+        assert_eq!(truncated.chars().count(), DEFERRED_TOOLS_MAX_DESC_CHARS + 3);
+
+        // Multi-byte chars at the cut point must not panic or split bytes.
+        let unicode_exact = format!("{}🚀", "a".repeat(DEFERRED_TOOLS_MAX_DESC_CHARS - 1));
+        assert_eq!(unicode_exact.chars().count(), DEFERRED_TOOLS_MAX_DESC_CHARS);
+        assert_eq!(truncate_deferred_description(&unicode_exact), unicode_exact);
+
+        let unicode_over = format!("{}🚀b", "a".repeat(DEFERRED_TOOLS_MAX_DESC_CHARS - 1));
+        let unicode_truncated = truncate_deferred_description(&unicode_over);
+        assert!(unicode_truncated.ends_with("..."));
+        assert!(unicode_truncated.contains("🚀"));
+
+        // Trailing blanks inside the window are trimmed before the ellipsis.
+        let padded = format!("{}   {}", "a".repeat(DEFERRED_TOOLS_MAX_DESC_CHARS - 4), "b".repeat(10));
+        let padded_truncated = truncate_deferred_description(&padded);
+        assert!(padded_truncated.ends_with("..."));
+        assert!(!padded_truncated.contains(" ..."));
+    }
+
+    #[test]
     fn test_parallel_tool_call_guidance() {
         let tools = vec![
             TOOL_EXEC_COMMAND.to_string(),
@@ -1625,6 +1644,27 @@ mod tests {
     }
 
     #[test]
+    fn minimal_planning_addendum_prefers_read_tools_over_shell_reads() {
+        // Asymmetric pair over read-tool presence: with read tools the
+        // inspection line names them and prefers them over shell reads;
+        // without, only the generic small-inspection rule remains. Both
+        // share the same git-history tail.
+        let tail = "start git history with `git log --oneline`";
+        let with_readers = ToolPresence::of(&[TOOL_READ_FILE.to_string(), TOOL_CODE_SEARCH.to_string()]);
+        let mut guidance = String::new();
+        append_minimal_planning_addendum(&mut guidance, &with_readers);
+        assert!(guidance.contains("prefer `read_file`/`code_search` over `exec_command` shell reads"));
+        assert!(guidance.contains(tail));
+
+        let without_readers = ToolPresence::of(&[TOOL_EXEC_COMMAND.to_string()]);
+        let mut bare = String::new();
+        append_minimal_planning_addendum(&mut bare, &without_readers);
+        assert!(!bare.contains("prefer `"));
+        assert!(!bare.contains("over `exec_command` shell reads"));
+        assert!(bare.contains(tail));
+    }
+
+    #[test]
     fn runtime_tool_guidance_uses_explicit_powershell_profile() {
         let tools = vec![
             TOOL_APPLY_PATCH.to_string(),
@@ -1658,6 +1698,21 @@ mod tests {
         assert!(guidelines.contains("shell-only tasks"));
         assert!(!guidelines.contains("native PowerShell commands"));
         assert!(!guidelines.contains("`Get-ChildItem`"));
+    }
+
+    #[test]
+    fn shell_browse_guidance_lists_rg_only_without_code_search() {
+        // Asymmetric pair over `has_search`: without the dedicated search
+        // tool the browse line must name `rg`; with it, `rg` drops out in
+        // favor of the `code_search` preference suffix.
+        let without_search = shell_browse_guidance(ResolvedShellPromptProfile::UnixLike, false);
+        assert!(without_search.contains("`ls`, `rg`, `find`, `cat`, `sed`, and `awk` for repository browsing"));
+        assert!(!without_search.contains("Prefer `code_search`"));
+
+        let with_search = shell_browse_guidance(ResolvedShellPromptProfile::UnixLike, true);
+        assert!(with_search.contains("`ls`, `find`, `cat`, `sed`, and `awk` for repository browsing"));
+        assert!(!with_search.contains("`ls`, `rg`, `find`"));
+        assert!(with_search.contains("Prefer `code_search` over `rg`/`grep` for code"));
     }
 
     #[test]
