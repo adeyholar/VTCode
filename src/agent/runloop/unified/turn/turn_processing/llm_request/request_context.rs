@@ -25,6 +25,7 @@
 //!   prompt, which would rewrite the cached system prefix whenever the
 //!   selection changes.
 
+use crate::agent::runloop::unified::turn::context::last_user_message_index;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::prompts::FEW_SHOT_SECTION_HEADER;
 
@@ -37,7 +38,7 @@ fn is_few_shot_context_message(message: &uni::Message) -> bool {
 /// Context may only be placed around such a message without editing a prefix
 /// an earlier request already sent.
 fn unanswered_user_turn_index(history: &[uni::Message]) -> Option<usize> {
-    let user_index = history.iter().rposition(|message| message.role == uni::MessageRole::User)?;
+    let user_index = last_user_message_index(history)?;
     let answered = history[user_index + 1..]
         .iter()
         .any(|message| matches!(message.role, uni::MessageRole::Assistant | uni::MessageRole::Tool));

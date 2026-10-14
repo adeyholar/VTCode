@@ -19,6 +19,7 @@ use crate::agent::runloop::unified::planning_workflow_state::{
     PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT, PlanningWorkflowSessionState, short_confirmation_hint,
 };
 use crate::agent::runloop::unified::state::CtrlCState;
+use crate::agent::runloop::unified::turn::context::last_user_message;
 use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::PLAN_MODE_AUTO_CONTINUE_MARKER;
 
@@ -112,7 +113,7 @@ pub(crate) async fn maybe_handle_planning_exit_trigger(
         return Ok(PlanningTransition::None);
     }
 
-    let Some(last_user_msg) = working_history.iter().rev().find(|msg| msg.role == uni::MessageRole::User) else {
+    let Some(last_user_msg) = last_user_message(working_history) else {
         return Ok(PlanningTransition::None);
     };
 

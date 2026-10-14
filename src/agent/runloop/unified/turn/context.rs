@@ -37,6 +37,7 @@ use self::message_history::{
     build_combined_reasoning, parse_reasoning_detail_value, push_assistant_message, reasoning_duplicates_content,
     should_suppress_redundant_diff_recap,
 };
+pub(crate) use self::message_history::{last_user_message, last_user_message_index};
 #[cfg(test)]
 use self::response_handling::looks_like_clarifying_question;
 pub(crate) use self::runtime_context::{

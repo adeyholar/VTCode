@@ -3,6 +3,7 @@ use crate::agent::runloop::ResumeSession;
 use crate::agent::runloop::git::{DirtyWorktreeStatus, git_dirty_worktree_entries, workspace_relative_display};
 use crate::agent::runloop::unified::overlay_prompt::{OverlayWaitOutcome, show_overlay_and_wait};
 use crate::agent::runloop::unified::turn::context::TurnLoopResult;
+use crate::agent::runloop::unified::turn::context::last_user_message_index;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -554,7 +555,7 @@ pub(super) async fn approved_plan_execution_summary(
 pub(super) fn take_pending_resumed_user_prompt(
     history: &mut Vec<vtcode_core::llm::provider::Message>,
 ) -> Option<String> {
-    let user_index = history.iter().rposition(|message| message.role == MessageRole::User)?;
+    let user_index = last_user_message_index(history)?;
     if history
         .iter()
         .skip(user_index + 1)

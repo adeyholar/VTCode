@@ -1,3 +1,4 @@
+use super::message_history::{last_user_message, last_user_message_index};
 use vtcode_core::llm::provider as uni;
 
 /// Pushed when an interim/status reply (or a recap while tracker steps remain)
@@ -364,10 +365,7 @@ pub(super) fn continuation_telemetry_outcome(
 }
 
 pub(super) fn push_system_directive_once(history: &mut Vec<uni::Message>, directive: &str) {
-    let current_turn_start = history
-        .iter()
-        .rposition(|message| message.role == uni::MessageRole::User)
-        .unwrap_or(0);
+    let current_turn_start = last_user_message_index(history).unwrap_or(0);
     let already_present = history
         .iter()
         .skip(current_turn_start)
@@ -531,13 +529,9 @@ pub(super) fn is_interim_progress_update(text: &str) -> bool {
 }
 
 fn last_user_message_is_follow_up(history: &[uni::Message]) -> bool {
-    history
-        .iter()
-        .rev()
-        .find(|message| message.role == uni::MessageRole::User)
-        .is_some_and(|message| {
-            crate::agent::runloop::unified::state::is_follow_up_prompt_like(message.content.as_text().as_ref())
-        })
+    last_user_message(history).is_some_and(|message| {
+        crate::agent::runloop::unified::state::is_follow_up_prompt_like(message.content.as_text().as_ref())
+    })
 }
 
 /// Whether workspace tracker state may drive automatic continuation.
@@ -953,11 +947,7 @@ fn starts_with_present_progress_update(lower: &str) -> bool {
 }
 
 fn last_user_message_text(history: &[uni::Message]) -> Option<String> {
-    history
-        .iter()
-        .rev()
-        .find(|message| message.role == uni::MessageRole::User)
-        .map(|message| message.content.as_text().to_ascii_lowercase())
+    last_user_message(history).map(|message| message.content.as_text().to_ascii_lowercase())
 }
 
 #[cfg(test)]

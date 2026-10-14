@@ -6,7 +6,7 @@ use crate::agent::runloop::unified::planning_workflow::detect_enter_planning_int
 use crate::agent::runloop::unified::run_loop_context::{
     BudgetExhaustedMetrics, HarnessTurnState, budget_kind, emit_budget_exhausted_metric, full_auto_loop_grants_enabled,
 };
-use crate::agent::runloop::unified::turn::context::TurnLoopResult;
+use crate::agent::runloop::unified::turn::context::{TurnLoopResult, last_user_message};
 use crate::agent::runloop::unified::turn::turn_helpers::{display_error, display_status};
 use crate::agent::runloop::unified::turn::turn_loop::TurnLoopContext;
 use vtcode_core::config::constants::defaults::DEFAULT_MAX_REPEATED_TOOL_CALLS;
@@ -774,7 +774,7 @@ pub(super) async fn maybe_handle_planning_enter_trigger(
         return Ok(false);
     }
 
-    let Some(last_user_msg) = working_history.iter().rev().find(|msg| msg.role == uni::MessageRole::User) else {
+    let Some(last_user_msg) = last_user_message(working_history) else {
         return Ok(false);
     };
 

@@ -15,6 +15,7 @@ use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
+use crate::agent::runloop::unified::turn::context::last_user_message_index;
 use vtcode_commons::reasoning::ReasoningEffortLevel;
 use vtcode_core::config::build_session_affinity_prompt_cache_key;
 use vtcode_core::config::constants::llm_generation;
@@ -81,10 +82,7 @@ fn should_add_collapsed_tool_output_notice(
     }
     // One copy per user turn: the marker is turn-scoped, so a copy placed
     // after an earlier tool round of this turn still applies.
-    let turn_start = history
-        .iter()
-        .rposition(|message| message.role == uni::MessageRole::User)
-        .map_or(0, |index| index + 1);
+    let turn_start = last_user_message_index(history).map_or(0, |index| index + 1);
     if history[turn_start..].iter().any(is_collapsed_tool_output_notice) {
         return false;
     }
