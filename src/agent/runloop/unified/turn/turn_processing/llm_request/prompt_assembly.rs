@@ -30,6 +30,25 @@ use super::{prompt_runtime, prompt_sections};
 
 pub(super) use prompt_runtime::render_primary_agent_runtime_context;
 
+/// Await a future, attaching a `vtcode.prompt` debug span when the
+/// `profiling` feature is enabled and awaiting plainly otherwise.
+/// Callers add `?` themselves when the future is fallible.
+macro_rules! profiled_await {
+    ($future:expr, $span_name:literal) => {{
+        #[cfg(feature = "profiling")]
+        {
+            use tracing::Instrument as _;
+            $future
+                .instrument(tracing::debug_span!(target: "vtcode.prompt", $span_name))
+                .await
+        }
+        #[cfg(not(feature = "profiling"))]
+        {
+            $future.await
+        }
+    }};
+}
+
 pub(super) struct PromptAssemblyInput<'a> {
     pub(super) turn: &'a TurnRequestSnapshot,
 }
@@ -107,19 +126,7 @@ async fn build_prompt_output(
                 planning_active: input.turn.planning_active,
                 request_user_input_enabled: input.turn.request_user_input_enabled,
             });
-    let mut system_prompt = {
-        #[cfg(feature = "profiling")]
-        {
-            use tracing::Instrument as _;
-            system_prompt_future
-                .instrument(tracing::debug_span!(target: "vtcode.prompt", "prompt_assembly.base_prompt"))
-                .await?
-        }
-        #[cfg(not(feature = "profiling"))]
-        {
-            system_prompt_future.await?
-        }
-    };
+    let mut system_prompt = profiled_await!(system_prompt_future, "prompt_assembly.base_prompt")?;
 
     let agent = &input.turn.active_primary_agent;
     vtcode_core::prompts::apply_coordinator_role_guidance(&mut system_prompt, agent.name() == "coordinator");
@@ -169,15 +176,7 @@ async fn build_prompt_output(
                 input.turn.request_user_input_enabled,
                 stable_catalog,
             );
-            #[cfg(feature = "profiling")]
-            let base_snapshot = {
-                use tracing::Instrument as _;
-                base_snapshot_future
-                    .instrument(tracing::debug_span!(target: "vtcode.prompt", "prompt_assembly.tool_catalog"))
-                    .await
-            };
-            #[cfg(not(feature = "profiling"))]
-            let base_snapshot = base_snapshot_future.await;
+            let base_snapshot = profiled_await!(base_snapshot_future, "prompt_assembly.tool_catalog");
             apply_primary_agent_policy_to_tool_snapshot(
                 base_snapshot,
                 &input.turn.active_primary_agent,
@@ -232,18 +231,7 @@ async fn build_prompt_output(
         if input.turn.tool_free_recovery {
             None
         } else {
-            let few_shot_future = prompt_sections::build_few_shot_section(ctx);
-            #[cfg(feature = "profiling")]
-            {
-                use tracing::Instrument as _;
-                few_shot_future
-                    .instrument(tracing::debug_span!(target: "vtcode.prompt", "prompt_assembly.few_shot"))
-                    .await
-            }
-            #[cfg(not(feature = "profiling"))]
-            {
-                few_shot_future.await
-            }
+            profiled_await!(prompt_sections::build_few_shot_section(ctx), "prompt_assembly.few_shot")
         }
     };
 
