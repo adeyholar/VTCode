@@ -18,6 +18,19 @@ use super::parsing::{self, parse_compact_command, parse_session_log_export_forma
 use super::rendering::{render_help, render_theme_list};
 
 // ---- Built-in command handlers ----
+fn handle_fast_command(args: &str, renderer: &mut AnsiRenderer) -> Result<SlashCommandOutcome> {
+    let enable = match args.trim() {
+        "" => None,
+        arg if arg.eq_ignore_ascii_case("on") => Some(true),
+        arg if arg.eq_ignore_ascii_case("off") => Some(false),
+        _ => {
+            renderer.line(MessageStyle::Error, "Usage: /fast [on|off]")?;
+            return Ok(SlashCommandOutcome::Handled);
+        }
+    };
+    Ok(SlashCommandOutcome::ToggleFastMode { enable })
+}
+
 // Each command is an independently testable function. The dispatch match in
 // `execute_built_in_command_skill` is the strict interface guard: adding a
 // new command requires a handler and a match-arm registration.
@@ -567,6 +580,7 @@ pub(in crate::agent::runloop::slash_commands) async fn execute_built_in_command_
         "webmcp" => handle_webmcp_command(args, renderer),
         "local" => handle_local_command(args, renderer),
         "model" => Ok(SlashCommandOutcome::StartModelSelection),
+        "fast" => handle_fast_command(args, renderer),
         "mode" => handle_mode_command(args),
         "files" => handle_files_command(args, renderer),
         "share" => handle_share_command(args, renderer),

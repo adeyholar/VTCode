@@ -210,6 +210,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Extension Boundaries in VT Code?", "How does Why This Exists work?",
     "How does Default Extension Order work?"
 
+- **File**: `docs/development/fast-mode.md`
+  - **Content**: Fast mode
+  - **Topics**: Implementation reference, Verification
+  - **User Questions**: "What can you tell me about Fast mode?", "How does Implementation reference work?", "How does
+    Verification work?"
+
 - **File**: `docs/development/completion-verification.md`
   - **Content**: Fresh verification before successful completion
   - **Topics**: Implementation boundaries, Research provenance
@@ -1916,9 +1922,9 @@ below based on the topic area.
 
 - **File**: `docs/user-guide/commands.md`
   - **Content**: Command Reference
-  - **Topics**: Core command reference, Execution explanations, Headless / CI, Search, Storage diagnostics
+  - **Topics**: Core command reference, Fast mode, Execution explanations, Headless / CI, Search
   - **User Questions**: "What can you tell me about Command Reference?", "How does Core command reference work?", "How
-    does Execution explanations work?"
+    does Fast mode work?"
 
 - **File**: `docs/user-guide/interactive-mode.md`
   - **Content**: Interactive Mode Reference

@@ -145,6 +145,7 @@ pub(crate) struct SessionStats {
     recent_touched_files: VecDeque<String>,
     total_usage: HarnessUsage,
     decisions_probe_suggestion_shown: bool,
+    fast_mode_suggestion_shown: bool,
     /// Rolling prompt-cache health fed by every recorded turn. Shared
     /// `vtcode-core` monitor so thresholds and wording match the headless
     /// runloop; fires at most two session-scoped hit-rate alerts.
@@ -236,6 +237,18 @@ impl SessionStats {
         }
         self.decisions_probe_suggestion_shown = true;
         true
+    }
+
+    pub(crate) fn take_fast_mode_suggestion(&mut self, applicable: bool) -> bool {
+        if self.fast_mode_suggestion_shown || !applicable {
+            return false;
+        }
+        self.fast_mode_suggestion_shown = true;
+        true
+    }
+
+    pub(crate) fn dismiss_fast_mode_suggestion(&mut self) {
+        self.fast_mode_suggestion_shown = true;
     }
 
     /// Record one turn's usage for prompt-cache health and return a

@@ -23,7 +23,7 @@ use rig::providers::openai::responses_api::{
     AdditionalParameters as RigResponsesAdditionalParameters, Include as RigResponsesInclude,
 };
 use serde_json::{Value, json};
-use vtcode_config::models::{Provider as ModelProvider, ProviderModelSupport};
+use vtcode_config::models::Provider as ModelProvider;
 
 /// Default `prompt_cache_options.ttl` for GPT-5.6-family Responses requests.
 /// Currently the only value OpenAI accepts; sent explicitly so cache intent
@@ -171,8 +171,8 @@ fn build_responses_request_from_history(
 
     let mut typed_parameters = RigResponsesAdditionalParameters::default();
 
-    if ModelProvider::OpenAI.supports_service_tier(&request.model)
-        && let Some(service_tier) = trimmed_non_empty(request.service_tier.as_deref().or(ctx.default_service_tier))
+    if let Some(service_tier) =
+        super::resolved_service_tier(&request.model, request.service_tier.as_deref(), ctx.default_service_tier)
     {
         openai_request["service_tier"] = json!(service_tier);
     }

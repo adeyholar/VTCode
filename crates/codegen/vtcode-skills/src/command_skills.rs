@@ -164,6 +164,12 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
         backend: CommandSkillBackend::BuiltInCommand { executor: BuiltInCommandExecutor::SlashAlias },
     },
     built_in_command_spec!(
+        "fast",
+        "Toggle OpenAI ultrafast processing at higher cost (usage: /fast [on|off])",
+        "/fast [on|off]",
+        "configuration"
+    ),
+    built_in_command_spec!(
         "mode",
         "Switch the active agent mode (usage: /mode [agent-name])",
         "/mode [agent-name]",

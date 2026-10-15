@@ -72,6 +72,7 @@ use selection::{
 };
 #[cfg(test)]
 use selection::{supports_gpt5_none_reasoning, supports_max_reasoning, supports_xhigh_reasoning};
+pub(crate) use state_machine::configured_openai_base_url;
 #[cfg(test)]
 use subagent::{
     SubagentModelTarget, normalized_subagent_reasoning, parseable_subagent_dynamic_indexes,

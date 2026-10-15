@@ -1280,3 +1280,38 @@ async fn vim_command_toggles_and_sets_mode() {
     let outcome = handle_slash_command("vim bogus", &mut renderer, &workspace).await.unwrap();
     assert!(matches!(outcome, SlashCommandOutcome::Handled));
 }
+
+#[tokio::test]
+async fn fast_command_catalog_and_parser() {
+    let spec = command_skill_specs()
+        .iter()
+        .find(|spec| spec.slash_name == "fast")
+        .expect("fast catalog entry");
+    assert_eq!(spec.usage, "/fast [on|off]");
+    let workspace = tempfile::tempdir().unwrap();
+    let mut renderer = renderer_for_tests();
+    for (input, expected) in [
+        ("fast", None),
+        ("  FAST  ", None),
+        ("fast on", Some(true)),
+        ("fast OFF", Some(false)),
+        ("fast \t On \n", Some(true)),
+    ] {
+        let outcome = handle_slash_command(input, &mut renderer, workspace.path()).await.unwrap();
+        assert!(matches!(outcome, SlashCommandOutcome::ToggleFastMode { enable } if enable == expected), "{input}");
+    }
+    for input in [
+        "fast true",
+        "fast toggle",
+        "fast on off",
+        "fast on extra",
+        "fast --help",
+    ] {
+        let outcome = handle_slash_command(input, &mut renderer, workspace.path()).await.unwrap();
+        assert!(matches!(outcome, SlashCommandOutcome::Handled), "{input}");
+    }
+    let outcome = super::dispatch::execute_command_skill_by_name("fast", "on", &mut renderer, workspace.path())
+        .await
+        .unwrap();
+    assert!(matches!(outcome, SlashCommandOutcome::ToggleFastMode { enable: Some(true) }));
+}

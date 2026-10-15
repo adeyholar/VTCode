@@ -188,6 +188,12 @@ pub(super) async fn run_interaction_loop_impl(
 
         // This loop runs only at the idle input boundary. Reevaluate the live
         // provider and mode after settings/auth changes, with a session latch.
+        crate::agent::runloop::unified::fast_mode::maybe_render_fast_mode_suggestion(
+            ctx.renderer,
+            ctx.config,
+            ctx.vt_cfg.as_ref(),
+            ctx.session_stats,
+        )?;
         let applicable = crate::agent::runloop::unified::auto_permission::decisions_suggestion_applicable(
             ctx.renderer.supports_inline_ui(),
             true,

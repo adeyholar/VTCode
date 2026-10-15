@@ -20,6 +20,7 @@ pub(super) async fn route_outcome(
         | SlashCommandOutcome::StartStatuslineSetup { .. }
         | SlashCommandOutcome::StartTerminalTitleSetup
         | SlashCommandOutcome::StartModelSelection
+        | SlashCommandOutcome::ToggleFastMode { .. }
         | SlashCommandOutcome::StartModePalette
         | SlashCommandOutcome::SelectPrimaryAgent { .. }
         | SlashCommandOutcome::ToggleVimMode { .. }
@@ -95,6 +96,7 @@ async fn route_ui_and_settings_outcome(
         }
         SlashCommandOutcome::StartTerminalTitleSetup => handlers::handle_start_terminal_title_setup(ctx).await,
         SlashCommandOutcome::StartModelSelection => handlers::handle_start_model_selection(ctx).await,
+        SlashCommandOutcome::ToggleFastMode { enable } => handlers::handle_toggle_fast_mode(ctx, enable).await,
         SlashCommandOutcome::StartModePalette => handlers::handle_start_mode_palette(ctx).await,
         SlashCommandOutcome::SelectPrimaryAgent { name } => {
             handlers::handle_select_primary_agent_from_slash(ctx, &name).await

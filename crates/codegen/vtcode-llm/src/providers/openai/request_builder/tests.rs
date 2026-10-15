@@ -843,3 +843,37 @@ fn reminder_only_input_receives_no_explicit_breakpoint() {
 
     assert_eq!(count_explicit_breakpoints(&payload), 0, "varying reminder must stay unmarked");
 }
+
+#[test]
+fn ultrafast_service_tier_checks_models_for_explicit_and_provider_defaults() {
+    for (model, allowed) in [
+        ("gpt-6-astra", true),
+        ("gpt-6.1-sol", true),
+        ("gpt-5.6-sol", false),
+        ("gpt-5", false),
+        ("gpt-6-astra-pro", false),
+    ] {
+        for explicit in [false, true] {
+            let mut request = request();
+            request.model = model.to_string();
+            let mut chat = chat_context();
+            let mut responses = base_context(None);
+            if explicit {
+                request.service_tier = Some("ultrafast".to_string());
+            } else {
+                chat.default_service_tier = Some("ultrafast");
+                responses.default_service_tier = Some("ultrafast");
+            }
+            for payload in [
+                build_chat_request(&request, &chat).unwrap(),
+                build_responses_request(&request, &responses).unwrap(),
+            ] {
+                assert_eq!(
+                    payload.get("service_tier").and_then(Value::as_str),
+                    allowed.then_some("ultrafast"),
+                    "{model} explicit={explicit}"
+                );
+            }
+        }
+    }
+}

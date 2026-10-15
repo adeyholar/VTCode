@@ -1213,6 +1213,7 @@ async fn websocket_stream_tool_followup_sends_only_new_input_on_one_connection()
         ]]).await else { panic!("server unavailable"); };
         let provider = websocket_test_provider(base);
         let mut request = websocket_test_request();
+        request.model = "gpt-6-astra".to_string();
         request.service_tier = Some(tier.to_string());
         let response = final_normalized(provider.stream_normalized_request(request.clone()).await.unwrap()).await;
         Arc::make_mut(&mut request.messages)
@@ -1479,6 +1480,7 @@ async fn websocket_tier_rejection_uses_tierless_http_then_cached_reconnect() {
                 let mut provider = websocket_test_provider(base);
                 provider.responses_url = Arc::from(format!("{}/responses", http.uri()));
                 let mut request = websocket_test_request();
+                request.model = "gpt-6-astra".to_string();
                 request.service_tier = Some(tier.to_string());
                 if legacy {
                     let mut stream = provider.stream_request(request.clone()).await.unwrap();
@@ -1953,4 +1955,41 @@ fn websocket_replay_retains_reasoning_on_models_that_support_it() {
             json!({"role":"assistant", "content":[{"type":"output_text", "text":"answer"}]}),
         ]
     );
+}
+
+#[test]
+fn fast_service_tier_rebuilt_client_payloads_follow_configuration() {
+    for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-5.6-sol"] {
+        for tier in [Some(vtcode_config::OpenAIServiceTier::Ultrafast), None] {
+            let provider = OpenAIProvider::from_config(
+                Some("fixture-key".to_string()),
+                None,
+                Some(model.to_string()),
+                None,
+                None,
+                None,
+                None,
+                Some(OpenAIConfig { service_tier: tier, ..Default::default() }),
+                None,
+            );
+            let request = LLMRequest {
+                model: model.to_string(),
+                messages: vec![crate::provider::Message::user("hello".to_string())].into(),
+                ..Default::default()
+            };
+            let http = provider.convert_to_openai_responses_format(&request).unwrap();
+            let chat = provider.convert_to_openai_format(&request).unwrap();
+            for warmup in [false, true] {
+                let websocket = prepare_websocket_event(&http, None, warmup).unwrap();
+                let expected = (tier.is_some() && model != "gpt-5.6-sol").then_some("ultrafast");
+                for payload in [&http, &chat, &websocket.event] {
+                    assert_eq!(
+                        payload.get("service_tier").and_then(Value::as_str),
+                        expected,
+                        "{model} {tier:?} warmup={warmup}"
+                    );
+                }
+            }
+        }
+    }
 }

@@ -60,6 +60,8 @@ Entry point for VT Code contributor workflows.
 
 ## Model Management
 
+- [Fast mode](./fast-mode.md) - `/fast`, service-tier compatibility, persistence, and client replacement.
+
 - [Responses WebSocket streaming](./responses-websocket-streaming.md) - Connection lifecycle, continuation,
   cancellation, HTTP fallback, and service-tier recovery.
 - [Adding Models](./ADDING_MODELS.md) - Complete workflow for adding new LLM models.

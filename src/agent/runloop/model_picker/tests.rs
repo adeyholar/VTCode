@@ -654,6 +654,13 @@ fn available_service_tiers_hides_ultrafast_outside_native_openai() {
         available_service_tiers(&detail(Some(Provider::OpenAI), "gpt-6.1-sol", true)),
         vec![None, Some(Flex), Some(Priority), Some(Ultrafast)]
     );
+    // Other OpenAI models retain flex/priority without ultrafast.
+    for model in ["gpt-5", "gpt-5.6-sol"] {
+        assert_eq!(
+            available_service_tiers(&detail(Some(Provider::OpenAI), model, true)),
+            vec![None, Some(Flex), Some(Priority)]
+        );
+    }
     // Merge Gateway and other compatibles offer flex/priority but never ultrafast.
     assert_eq!(
         available_service_tiers(&detail(Some(Provider::MergeGateway), "openai/gpt-6.1-sol", true)),

@@ -53,7 +53,11 @@ pub trait ProviderModelSupport: AsRef<str> {
     fn supports_service_tier_value(&self, model: &str, tier: OpenAIServiceTier) -> bool {
         match tier {
             OpenAIServiceTier::Ultrafast => {
-                self.as_ref() == Provider::OpenAI.as_ref() && self.supports_service_tier(model)
+                const ULTRAFAST_MODELS: &[&str] = &[
+                    crate::constants::models::openai::GPT_6_ASTRA,
+                    crate::constants::models::openai::GPT_6_1_SOL,
+                ];
+                self.as_ref() == Provider::OpenAI.as_ref() && ULTRAFAST_MODELS.contains(&model)
             }
             _ => self.supports_service_tier(model),
         }

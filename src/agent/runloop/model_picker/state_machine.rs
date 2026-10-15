@@ -879,7 +879,7 @@ pub(super) fn standard_decisions_endpoint(base_url: &str) -> bool {
 /// `override_base_url`: explicit config `base_url` wins, then the
 /// `OPENAI_BASE_URL` environment variable. `None` means no override is set, so
 /// the runtime uses the built-in standard endpoint.
-fn configured_openai_base_url(vt_cfg: Option<&VTCodeConfig>) -> Option<String> {
+pub(crate) fn configured_openai_base_url(vt_cfg: Option<&VTCodeConfig>) -> Option<String> {
     let configured = vt_cfg
         .and_then(|cfg| cfg.provider_overrides.get("openai"))
         .and_then(|override_config| override_config.base_url.as_deref())

@@ -17,7 +17,6 @@ use crate::providers::openai::types::MAX_COMPLETION_TOKENS_FIELD;
 use crate::providers::shared::split_dynamic_prompt_suffix;
 use hashbrown::HashSet;
 use serde_json::{Value, json};
-use vtcode_config::models::{Provider as ModelProvider, ProviderModelSupport};
 
 pub(crate) fn build_chat_request(
     request: &provider::LLMRequest,
@@ -166,8 +165,8 @@ pub(crate) fn build_chat_request(
         }
     }
 
-    if ModelProvider::OpenAI.supports_service_tier(&request.model)
-        && let Some(service_tier) = trimmed_non_empty(request.service_tier.as_deref().or(ctx.default_service_tier))
+    if let Some(service_tier) =
+        super::resolved_service_tier(&request.model, request.service_tier.as_deref(), ctx.default_service_tier)
     {
         openai_request["service_tier"] = json!(service_tier);
     }

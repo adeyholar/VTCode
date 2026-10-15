@@ -255,7 +255,9 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
 - **GPT-6 Luna (`gpt-6-luna`):** fast cost-efficient GPT-6 model for high-volume latency-sensitive workloads (1,050,000
   context, 128k max output, reasoning `low`/`medium`/`high`/`xhigh`/`max`, default `medium`). Same Responses API route,
   GPT-6 prompt contract, explicit cache breakpoints, and `30m` cache TTL as Astra; sampling and logprobs unsupported.
-- **Service tiers:** `provider.openai.service_tier` accepts `flex`, `priority`, and `ultrafast` (`ultrafast` is
+- **Service tiers:** Use `/fast [on|off]` to toggle ultrafast on Astra/6.1 Sol; `/fast off` clears the override.
+  See the [fast mode guide](../development/fast-mode.md). `provider.openai.service_tier` accepts `flex`, `priority`,
+  and `ultrafast` (`ultrafast` is
   native-OpenAI-only; see the config field reference). `ultrafast` is the fastest tier: GA for `gpt-6-astra`
   and `gpt-6.1-sol` for all API users (`model = "gpt-6-astra"` + `service_tier = "ultrafast"` on every `response.create`).
   It costs more and has separate TPM limits (Astra 500k / 1M /

@@ -71,5 +71,16 @@ pub(super) fn trimmed_non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
+fn resolved_service_tier<'a>(model: &str, explicit: Option<&'a str>, default: Option<&'a str>) -> Option<&'a str> {
+    use vtcode_config::core::OpenAIServiceTier;
+    use vtcode_config::models::{Provider, ProviderModelSupport};
+
+    trimmed_non_empty(explicit.or(default)).filter(|value| {
+        Provider::OpenAI.supports_service_tier(model)
+            && OpenAIServiceTier::parse(value)
+                .is_none_or(|tier| Provider::OpenAI.supports_service_tier_value(model, tier))
+    })
+}
+
 #[cfg(test)]
 mod tests;

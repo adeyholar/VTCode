@@ -127,6 +127,9 @@ pub(crate) enum SlashCommandOutcome {
     OpenFeedback,
     OpenDonateLinks,
     StartModelSelection,
+    ToggleFastMode {
+        enable: Option<bool>,
+    },
     StartModePalette,
     SelectPrimaryAgent {
         name: String,

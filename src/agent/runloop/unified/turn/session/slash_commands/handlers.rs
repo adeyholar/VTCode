@@ -14,6 +14,8 @@ mod config_toml;
 mod control;
 #[path = "diagnostics.rs"]
 mod diagnostics;
+#[path = "fast.rs"]
+mod fast;
 #[path = "interactive.rs"]
 mod interactive;
 #[path = "local_server.rs"]
@@ -62,6 +64,7 @@ pub(super) use diagnostics::{
 // the ConfigManager dance inline.
 #[expect(unused_imports, reason = "guard-rail for the upcoming /checkup 7-step flow")]
 pub(super) use diagnostics::memory::config_persistence::persist_workspace_config_change;
+pub(super) use fast::handle_toggle_fast_mode;
 pub(super) use interactive::{handle_show_jobs_panel, handle_toggle_tasks_panel};
 pub(super) use local_server::handle_manage_local_server;
 pub(super) use log_viewer::handle_show_log_viewer;
