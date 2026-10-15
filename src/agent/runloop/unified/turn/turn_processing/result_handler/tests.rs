@@ -572,7 +572,7 @@ async fn harness_required_verifiers_report_progress_and_finish_without_repeating
             .execute_tool(
                 tools::TASK_TRACKER,
                 serde_json::json!({
-                    "action":"create", "items":[{"description":"Check", "verify":["rustc --version", "rustc --help"]}]
+                    "action":"create", "items":[{"description":"Check", "status":"completed", "verify":["rustc --version", "rustc --help"]}]
                 }),
             )
             .await
@@ -602,12 +602,45 @@ async fn harness_required_verifiers_report_progress_and_finish_without_repeating
                         .contains("Next required tracker check: `rustc --help`")
             }));
             assert!(tracker.should_auto_execute_verifier());
+            assert!(!ctx.working_history[history_start..].iter().any(|message| {
+                message.role == uni::MessageRole::System && message.content.as_text().contains("gate is cleared")
+            }));
         } else {
             assert!(!tracker.verification_is_pending());
             assert!(!ctx.tool_registry.completion_verification_pending());
         }
         assert_eq!(ctx.session_stats.verification_consecutive_failures(), 0);
     }
+    let outcome = {
+        let mut ctx = backing.turn_processing_context();
+        handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: "The requested work is complete.".into(),
+                reasoning: vec![],
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 3,
+            repeated_tool_attempts: &mut tracker,
+            turn_modified_files: &mut modified,
+            max_tool_loops: 8,
+            tool_repeat_limit: 4,
+        })
+        .await
+        .unwrap()
+    };
+    assert!(matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Completed { .. })));
+    let ctx = backing.turn_processing_context();
+    let calls = ctx
+        .working_history
+        .iter()
+        .filter_map(|message| message.tool_calls.as_ref())
+        .flatten()
+        .filter(|call| call.id == super::helpers::HARNESS_AUTO_VERIFY_CALL_ID)
+        .count();
+    assert_eq!(calls, 2, "completion must reuse both passes without a third verifier");
 }
 
 #[cfg(unix)]
@@ -2045,5 +2078,119 @@ async fn navigation_synthesis_uses_only_adopted_tracker_and_nonempty_summary() {
         assert_eq!(matches!(outcome, TurnHandlerOutcome::Continue), resumes, "adopted={adopted}, text={text:?}");
         let ctx = backing.turn_processing_context();
         assert_eq!(!ctx.harness_state.recovery_is_tool_free(), resumes);
+    }
+}
+
+#[tokio::test]
+async fn repeated_successes_cannot_refill_recovery_for_a_missing_requirement() {
+    use vtcode_core::config::constants::tools;
+    let mut backing = TestTurnProcessingBacking::new(20).await;
+    let mut tracker = LoopTracker::new();
+    tracker.mark_verification_pending();
+    assert!(tracker.record_verification_auto_recovery_with_limit(1));
+    tracker.record_auto_verification_executed();
+    let mut modified = BTreeSet::new();
+    {
+        let ctx = backing.turn_processing_context();
+        ctx.tool_registry.allow_all_tools().await.unwrap();
+        ctx.tool_registry
+            .execute_tool(
+                tools::TASK_TRACKER,
+                serde_json::json!({
+                    "action":"create", "items":[{"description":"Check", "verify":["grep -n absent fixture.txt"]}]
+                }),
+            )
+            .await
+            .unwrap();
+        ctx.tool_registry.restore_completion_verification_debt();
+    }
+    for _ in 0..2 {
+        drive_model_tool_call(
+            &mut backing,
+            &mut tracker,
+            &mut modified,
+            tools::EXEC_COMMAND,
+            r#"{"cmd":"rustc --version"}"#,
+        )
+        .await;
+        assert!(tracker.verification_is_pending());
+        assert!(!tracker.should_auto_execute_verifier());
+        assert_eq!(tracker.verification_auto_recovery_attempts(), 1);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalid_and_no_match_required_grep_bound_repeated_completion_summaries() {
+    use vtcode_core::config::constants::tools;
+    for (command, exit) in [
+        ("grep -n '---\\s\\+\\|' fixture.txt", 2),
+        ("grep -n missing fixture.txt", 1),
+    ] {
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut cfg = vtcode_core::config::loader::VTCodeConfig::default();
+        cfg.agent.harness.verification.in_turn_attempts = 0;
+        backing.set_vt_cfg_for_test(cfg);
+        {
+            let ctx = backing.turn_processing_context();
+            std::fs::write(ctx.tool_registry.workspace_root().join("fixture.txt"), "present\n").unwrap();
+            ctx.tool_registry.allow_all_tools().await.unwrap();
+            ctx.tool_registry
+                .execute_tool(
+                    tools::TASK_TRACKER,
+                    serde_json::json!({
+                        "action":"create", "items":[{"description":"Check", "verify":[command]}]
+                    }),
+                )
+                .await
+                .unwrap();
+            ctx.tool_registry.restore_completion_verification_debt();
+        }
+        let mut tracker = LoopTracker::new();
+        let mut modified = BTreeSet::new();
+        let mut blocked = false;
+        for step in 1..=4 {
+            let outcome = {
+                let mut ctx = backing.turn_processing_context();
+                handle_turn_processing_result(HandleTurnProcessingResultParams {
+                    ctx: &mut ctx,
+                    processing_result: TurnProcessingResult::TextResponse {
+                        text: "The requested work is complete.".into(),
+                        reasoning: vec![],
+                        reasoning_details: None,
+                        proposed_plan: None,
+                    },
+                    response_streamed: false,
+                    step_count: step,
+                    repeated_tool_attempts: &mut tracker,
+                    turn_modified_files: &mut modified,
+                    max_tool_loops: 20,
+                    tool_repeat_limit: 4,
+                })
+                .await
+                .unwrap()
+            };
+            match outcome {
+                TurnHandlerOutcome::Continue => {}
+                TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. }) => {
+                    blocked = true;
+                    break;
+                }
+                _ => panic!("an unsatisfied mandatory check cannot complete"),
+            }
+        }
+        assert!(blocked, "{command} must terminate within the configured recovery limit");
+        let ctx = backing.turn_processing_context();
+        assert!(ctx.tool_registry.completion_verification_pending());
+        let failure = ctx.session_stats.last_verification_failure().unwrap();
+        assert_eq!(failure.command, command);
+        assert_eq!(failure.exit_code, Some(exit));
+        assert_eq!(ctx.session_stats.verification_consecutive_failures(), 1);
+        assert!(
+            !ctx.working_history
+                .iter()
+                .any(|message| message.role == uni::MessageRole::System
+                    && message.content.as_text().contains("gate is cleared"))
+        );
     }
 }

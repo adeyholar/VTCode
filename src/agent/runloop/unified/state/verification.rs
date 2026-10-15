@@ -16,6 +16,8 @@ use super::SessionStats;
 pub(crate) struct VerificationFailureSummary {
     /// Verifier command that failed (e.g. `cargo check --locked`).
     pub command: String,
+    /// Observed terminal status, retained separately from the bounded tail.
+    pub exit_code: Option<i64>,
     /// Tail excerpt of the tool output, bounded to
     /// `VERIFICATION_FAILURE_EXCERPT_CHARS` chars at record time.
     pub excerpt_tail: String,
@@ -143,8 +145,14 @@ impl SessionStats {
         let tail = excerpt[start..].to_string();
         self.verification_consecutive_failures = self.verification_consecutive_failures.saturating_add(1);
         let consecutive_failures = self.verification_consecutive_failures;
-        self.last_verification_failure =
-            Some(VerificationFailureSummary { command, excerpt_tail: tail, consecutive_failures });
+        self.last_verification_failure = Some(VerificationFailureSummary {
+            command,
+            exit_code: serde_json::from_str::<serde_json::Value>(excerpt)
+                .ok()
+                .and_then(|value| value.get("exit_code").and_then(serde_json::Value::as_i64)),
+            excerpt_tail: tail,
+            consecutive_failures,
+        });
         consecutive_failures
     }
 

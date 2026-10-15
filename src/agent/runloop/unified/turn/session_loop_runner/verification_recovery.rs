@@ -69,7 +69,7 @@ pub(super) fn handle_verification_block(
             verifier.as_deref(),
             stats.verification_auto_recovery_turns(),
             max_turns,
-            stats.last_verification_failure().filter(|_| escalated),
+            stats.last_verification_failure(),
         ),
     }
 }

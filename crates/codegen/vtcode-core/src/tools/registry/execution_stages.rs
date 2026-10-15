@@ -80,10 +80,11 @@ impl ToolRegistry {
         let normalized_args = execution_kernel::normalize_tool_args(tool_name, args, parameter_schema.as_ref())?;
         // Classify before stripping output metadata: verification calls retain
         // full preview budgets and must remain exempt from result reuse.
-        let is_verification_command = matches!(
-            tool_intent::classify_shell_activity(tool_name, normalized_args.as_ref()),
-            tool_intent::ShellActivity::Verification
-        );
+        let is_verification_command = self.is_completion_verifier_call(tool_name, normalized_args.as_ref())
+            || matches!(
+                tool_intent::classify_shell_activity(tool_name, normalized_args.as_ref()),
+                tool_intent::ShellActivity::Verification
+            );
         let max_output_tokens = output_limits::resolve_max_output_tokens(
             normalized_args.as_ref(),
             self.is_planning_active(),

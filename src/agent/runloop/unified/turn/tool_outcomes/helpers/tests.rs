@@ -794,6 +794,30 @@ fn consecutive_mutations_increments_on_edit() {
 }
 
 #[test]
+fn dynamic_readonly_inspections_do_not_arm_verification_gate() {
+    let mut tracker = LoopTracker::new();
+    // Session-vtcode-20261015T142625Z: dynamic `for` loops over grep results
+    // with `test -f` exited 0 with no writes but were counted as blind edits,
+    // bumping completion generation and looping harness auto-verification.
+    for command in [
+        "for p in $(grep -o '](\\./[^)#]*' README.md | sed 's/](//' | sort -u); do test -f \"$p\" || echo \"missing: $p\"; done",
+        "rg -n 'vinhnx/(VTCode|vtcode)' README.md",
+        "grep -n '^## ' README.md",
+        "git status --short",
+    ] {
+        let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        update_repetition_tracker(&mut tracker, &outcome, "exec_command", &json!({"cmd": command}));
+    }
+    assert_eq!(tracker.consecutive_mutations, 0);
+    assert!(!tracker.verification_is_pending());
+}
+
+#[test]
 fn execution_tool_resets_mutation_counter() {
     let mut tracker = LoopTracker::new();
     let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
@@ -1909,4 +1933,25 @@ fn promoted_listing_repeat_counts_toward_low_signal_telemetry() {
     assert_eq!(tracker.total_low_signal_navigations, 1);
     assert_eq!(tracker.consecutive_low_signal_navigations, 1);
     assert_eq!(tracker.max_coarse_listing_count(), 3);
+}
+
+#[test]
+fn concrete_exec_changes_and_unproven_inspections_incur_mutation_pressure() {
+    for (command, modified_files) in [
+        ("grep -n x README.md", vec!["src/lib.rs".to_string()]),
+        ("echo \"$(touch marker)\"", vec![]),
+        ("for p in a; do echo x > marker; done", vec![]),
+        ("for p in a; do sed -i '' 's/a/b/' README.md; done", vec![]),
+        ("for p in a; do echo x", vec![]),
+    ] {
+        let mut tracker = LoopTracker::new();
+        let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: json!({"exit_code":0}),
+            stdout: None,
+            modified_files,
+            command_success: true,
+        });
+        update_repetition_tracker(&mut tracker, &outcome, "exec_command", &json!({"cmd":command}));
+        assert_eq!(tracker.consecutive_mutations, 1, "{command}");
+    }
 }

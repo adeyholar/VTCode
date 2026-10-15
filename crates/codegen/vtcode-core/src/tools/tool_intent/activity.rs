@@ -936,6 +936,149 @@ pub fn classify_shell_activity(tool_name: &str, args: &Value) -> ShellActivity {
     }
 }
 
+/// Whether an exec result creates workspace mutation debt. This is accounting
+/// only: permission and admission still use the stricter static classifiers.
+/// Unknown syntax or commands retain debt; changed-file evidence always wins.
+#[must_use]
+pub fn exec_mutation_should_incur_debt(command: &str, output: &Value) -> bool {
+    if exec_output_has_changes(output) {
+        return true;
+    }
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&tree_sitter_bash::LANGUAGE.into()).is_err() {
+        return true;
+    }
+    let Some(tree) = parser.parse(command, None) else {
+        return true;
+    };
+    let root = tree.root_node();
+    root.has_error() || root.named_child_count() == 0 || !nonmutating_shell_node(root, command)
+}
+
+pub(crate) fn exec_output_has_changes(output: &Value) -> bool {
+    output
+        .get("modified_files")
+        .and_then(Value::as_array)
+        .is_some_and(|files| !files.is_empty())
+        || crate::tools::file_ops::diff_output_has_effective_change(output) == Some(true)
+}
+
+/// Walk every supported node, including commands nested in substitutions.
+/// Unlike command extraction, this proof must never discard unknown syntax.
+fn nonmutating_shell_node(node: tree_sitter::Node<'_>, source: &str) -> bool {
+    use crate::command_safety::shell_parser::contains_dynamic_shell_syntax;
+    let Ok(text) = node.utf8_text(source.as_bytes()) else {
+        return false;
+    };
+    match node.kind() {
+        "command" => {
+            let Some(name) = node.child_by_field_name("name") else {
+                return false;
+            };
+            let Ok(name_text) = name.utf8_text(source.as_bytes()) else {
+                return false;
+            };
+            if contains_dynamic_shell_syntax(name_text) {
+                return false;
+            }
+            let mut words = Vec::new();
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                let Ok(word) = child.utf8_text(source.as_bytes()) else {
+                    return false;
+                };
+                if child.kind() == "variable_assignment" {
+                    return false;
+                }
+                if contains_dynamic_shell_syntax(word) {
+                    // Only these builtins cannot turn a dynamic argument into
+                    // an option that writes or executes code. Keep arguments
+                    // quoted so expansion cannot alter their dimensionality.
+                    if !matches!(name_text, "echo" | "test") || !word.starts_with('"') {
+                        return false;
+                    }
+                    words.push("dynamic-argument".to_owned());
+                } else {
+                    let Ok(parts) = shell_words::split(word) else {
+                        return false;
+                    };
+                    words.extend(parts);
+                }
+            }
+            if crate::tools::command_args::has_unsafe_readonly_options(&words)
+                || (!is_verification_invocation(&words) && !command_words_are_readonly(&words))
+            {
+                return false;
+            }
+        }
+        "file_redirect" => {
+            // Exact AST spans, never substring replacement: a filename such
+            // as /dev/null.backup must not be mistaken for descriptor plumbing.
+            return matches!(text, "2>&1" | "1>&2") || (cfg!(unix) && text == "2>/dev/null");
+        }
+        "word" | "regex" => return !contains_dynamic_shell_syntax(text),
+        "raw_string" | "string_content" | "comment" | "number" | "variable_name" | "special_variable_name" => {
+            return true;
+        }
+        "simple_expansion" => return true,
+        "expansion" => {
+            // Support the literal prefix/suffix removal used by link probes;
+            // other parameter operators and arithmetic remain unproven.
+            if text.contains([':', '=', '+', '?', '!']) {
+                return false;
+            }
+        }
+        "program"
+        | "list"
+        | "pipeline"
+        | "for_statement"
+        | "do_group"
+        | "if_statement"
+        | "elif_clause"
+        | "else_clause"
+        | "while_statement"
+        | "command_name"
+        | "string"
+        | "concatenation"
+        | "command_substitution"
+        | "redirected_statement" => {}
+        _ if !node.is_named() => {
+            return matches!(
+                text,
+                "&&" | "||"
+                    | ";"
+                    | "|"
+                    | "for"
+                    | "in"
+                    | "do"
+                    | "done"
+                    | "if"
+                    | "then"
+                    | "elif"
+                    | "else"
+                    | "fi"
+                    | "while"
+                    | "until"
+                    | "\""
+                    | "'"
+                    | "$("
+                    | ")"
+                    | "`"
+                    | "$"
+                    | "${"
+                    | "}"
+                    | "#"
+                    | "##"
+                    | "%"
+                    | "%%"
+            );
+        }
+        _ => return false,
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor).all(|child| nonmutating_shell_node(child, source))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -1636,5 +1779,105 @@ mod tests {
         assert!(matches!(shell_args_as_executed(tools::UNIFIED_EXEC, &poll), std::borrow::Cow::Borrowed(_)));
         let read = json!({"path": "src/lib.rs"});
         assert!(matches!(shell_args_as_executed(tools::READ_FILE, &read), std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn mutation_accounting_rejects_unproven_shell_forms() {
+        let output = json!({"exit_code": 0});
+        for command in [
+            "echo \"$(touch marker)\"",
+            "echo \"`touch marker`\"",
+            "for p in $(echo $(touch marker)); do test -f \"$p\"; done",
+            "for p in a; do sed -i '' 's/a/b/' README.md; done",
+            "for p in a; do sort -o README.md README.md; done",
+            "echo x 2>/dev/null.backup",
+            "echo x 2>&1>marker",
+            "cat <(touch marker)",
+            "$program --version",
+            "\"$(echo rm)\" marker",
+            "grep $options README.md",
+            "if true; then touch marker; fi",
+            "for p in a; do echo x",
+            "echo $(",
+            "echo hi &",
+            "sed -n '1p' README.md > marker",
+            "echo ${x:=value}",
+        ] {
+            assert!(exec_mutation_should_incur_debt(command, &output), "{command}");
+        }
+        for command in [
+            "echo '>'",
+            "echo '2>/dev/null.backup'",
+            "echo \"$(grep -n x README.md)\"",
+        ] {
+            assert!(!exec_mutation_should_incur_debt(command, &output), "{command}");
+        }
+    }
+
+    #[test]
+    fn dynamic_readonly_inspections_do_not_incur_mutation_debt() {
+        let clean_output = json!({"success": true, "exit_code": 0});
+        // Session-vtcode-20261015T142625Z: `for` loops over grep results with
+        // `test -f` exited 0 with no writes, bumped the completion generation,
+        // invalidated tracker evidence, and looped harness auto-verification
+        // on `rg` inspections instead of ending the turn. Admission stays
+        // fail-closed (still Mutation, still blocked when pending); accounting
+        // must not create new debt.
+        for command in [
+            "for p in $(grep -o '](\\./[^)#]*' README.md | sed 's/](//' | sort -u); do test -f \"$p\" || echo \"missing: $p\"; done; echo \"check done\"",
+            "for p in $(grep -o '](\\./[^)#]*' README.md | sed 's/](\\.\\///' | sort -u); do test -f \"docs/${p#docs/}\" 2>/dev/null || echo \"missing: $p\"; done",
+            "rg -n 'vinhnx/(VTCode|vtcode)' README.md",
+            "grep -n '^## ' README.md",
+            "ls docs/guides/zed-acp.md",
+            "git diff --stat -- README.md",
+            "git status --short",
+            "npx markdownlint-cli2 README.md",
+            "cargo check --locked",
+        ] {
+            let expected = if command.starts_with("npx markdownlint") || command.starts_with("cargo check") {
+                ShellActivity::Verification
+            } else if command.starts_with("for") {
+                ShellActivity::Mutation
+            } else {
+                ShellActivity::Inspection
+            };
+            assert_eq!(classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)), expected, "{command}");
+            assert!(!exec_mutation_should_incur_debt(command, &clean_output), "{command}");
+        }
+        // Dynamic `for`/`test` inspections: no debt without writes.
+        assert!(!exec_mutation_should_incur_debt(
+            "for p in $(grep -o 'x' README.md); do test -f \"$p\" || echo \"missing: $p\"; done",
+            &clean_output,
+        ));
+        assert!(!exec_mutation_should_incur_debt("rg -n 'x' README.md", &clean_output));
+        assert!(!exec_mutation_should_incur_debt("grep -n 'x' README.md", &clean_output));
+        assert!(!exec_mutation_should_incur_debt("git status --short", &clean_output));
+        // Concrete evidence still counts.
+        assert!(exec_mutation_should_incur_debt(
+            "for p in $(grep -o 'x' README.md); do test -f \"$p\" || echo \"missing: $p\"; done",
+            &json!({"success": true, "exit_code": 0, "modified_files": ["README.md"]}),
+        ));
+        // Shell redirection is a potential write.
+        assert!(exec_mutation_should_incur_debt("echo hi > README.md", &clean_output));
+        assert!(exec_mutation_should_incur_debt("for f in a b; do echo x > \"$f\"; done", &clean_output));
+        // Static mutating base still counts (fail-closed for `rm`, etc.).
+        assert!(exec_mutation_should_incur_debt("rm -rf target", &clean_output));
+        // Dynamic mutating base with variable still counts.
+        assert!(exec_mutation_should_incur_debt("rm $f", &clean_output));
+        // Stderr plumbing alone is not a file write.
+        assert!(!exec_mutation_should_incur_debt("rg -n 'x' README.md 2>&1", &clean_output));
+        // Shared classifiers decide verifier-shaped commands: mutating
+        // variants count, clean checks do not. Asymmetric pairs.
+        assert!(exec_mutation_should_incur_debt("npx markdownlint-cli2 --fix README.md", &clean_output));
+        assert!(!exec_mutation_should_incur_debt("npx markdownlint-cli2 README.md", &clean_output));
+        assert!(exec_mutation_should_incur_debt("cargo fmt", &clean_output));
+        assert!(!exec_mutation_should_incur_debt("cargo fmt --check", &clean_output));
+        assert!(exec_mutation_should_incur_debt("tsc", &clean_output));
+        assert!(!exec_mutation_should_incur_debt("tsc --noEmit", &clean_output));
+        // Unresolved options stay unproven even for inspection subcommands.
+        assert!(exec_mutation_should_incur_debt("git diff $x", &clean_output));
+        assert!(exec_mutation_should_incur_debt("git checkout $x", &clean_output));
+        // Dynamic chains of inspections with exit-echo tails stay debt-free.
+        assert!(!exec_mutation_should_incur_debt("grep -n 'x' README.md; echo \"exit:$?\"", &clean_output,));
     }
 }

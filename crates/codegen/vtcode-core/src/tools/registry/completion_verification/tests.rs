@@ -962,3 +962,80 @@ async fn completion_verification_bulk_termination_releases_mutators_without_eras
         "a fresh check after bulk termination must satisfy the gate"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn required_inspections_bypass_primed_results_and_record_actual_verdicts() {
+    for (command, expected_exit) in [
+        ("rg -n original fixture.txt", 1),
+        ("grep -n original fixture.txt", 1),
+        ("grep -n '---\\s\\+\\|' fixture.txt", 2),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("fixture.txt"), "original\n").unwrap();
+        let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+        registry.allow_all_tools().await.unwrap();
+        let mut commands = registry.commands_config();
+        commands.allow_list.push("rg".into());
+        registry.apply_commands_config(&commands);
+        let args = json!({"cmd":command, "yield_time_ms":10000});
+        let first = registry.execute_tool(tools::EXEC_COMMAND, args.clone()).await.unwrap();
+        assert_eq!(first["exit_code"], if expected_exit == 2 { 2 } else { 0 }, "{command}: {first}");
+        std::fs::write(dir.path().join("fixture.txt"), "changed\n").unwrap();
+        registry.restore_completion_verification_debt();
+        registry.set_required_completion_verifiers(vec![command.into()]);
+        let result = registry.execute_tool(tools::EXEC_COMMAND, args).await.unwrap();
+        assert_eq!(result["exit_code"], expected_exit, "{command}: {result}");
+        assert_ne!(result["reused_recent_result"], true);
+        assert!(!registry.completion_verifier_passed(command));
+        assert!(registry.completion_verification_pending());
+    }
+}
+
+#[tokio::test]
+async fn inspection_accounting_preserves_generation_but_concrete_changes_invalidate_passes() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+    registry.restore_completion_verification_debt();
+    registry.set_required_completion_verifiers(vec!["cargo check".into()]);
+    let args = json!({"cmd":"cargo check"});
+    let id = registry.begin_completion_verifier(&args);
+    registry.observe_completion_verifier(id, &args, &Ok(json!({"exit_code":0})));
+    for command in [
+        "for p in $(grep -o 'x' README.md | sort -u); do test -f \"$p\" || echo \"missing: $p\"; done",
+        "grep x README.md; echo \"exit:$?\"",
+    ] {
+        registry.observe_completion_mutation(tools::EXEC_COMMAND, &json!({"cmd":command}), &json!({"exit_code":0}));
+        assert!(registry.completion_verifier_passed("cargo check"), "{command}");
+    }
+    registry.observe_completion_mutation(
+        tools::EXEC_COMMAND,
+        &json!({"cmd":"grep x README.md"}),
+        &json!({"exit_code":0, "modified_files":["src/lib.rs"]}),
+    );
+    assert!(!registry.completion_verifier_passed("cargo check"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn required_inspection_repetition_limit_rejects_instead_of_replaying_a_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fixture.txt"), "original\n").unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+    registry.allow_all_tools().await.unwrap();
+    registry.execution_history.set_loop_detection_limits(5, 2);
+    let command = "grep -n original fixture.txt";
+    let args = json!({"cmd":command});
+    for _ in 0..2 {
+        let result = registry.execute_tool(tools::EXEC_COMMAND, args.clone()).await.unwrap();
+        assert_eq!(result["exit_code"], 0);
+    }
+    registry.restore_completion_verification_debt();
+    registry.set_required_completion_verifiers(vec![command.into()]);
+    let result = registry.execute_tool(tools::EXEC_COMMAND, args).await.unwrap();
+    assert_eq!(result["loop_detected"], true, "{result}");
+    assert!(result["error"]["message"].as_str().unwrap().contains("Loop detection"), "{result}");
+    assert!(result.get("exit_code").is_none());
+    assert!(!registry.completion_verifier_passed(command));
+    assert!(registry.completion_verification_pending());
+}

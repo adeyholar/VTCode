@@ -498,17 +498,19 @@ impl ToolRegistry {
         {
             return;
         }
-        if mutation_targets_are_exempt(name, args, output)
-            || !tool_intent::classify_tool_intent(name, args).mutating
-            || output.get("error").is_some()
-            || output.get("success").and_then(Value::as_bool) == Some(false)
-            || ["blocked", "not_executed", "cancelled"]
-                .iter()
-                .any(|key| output.get(key).and_then(Value::as_bool) == Some(true))
+        let exec_changed = tool_intent::is_command_tool(name) && tool_intent::activity::exec_output_has_changes(output);
+        if !exec_changed
+            && (mutation_targets_are_exempt(name, args, output)
+                || !tool_intent::classify_tool_intent(name, args).mutating
+                || output.get("error").is_some()
+                || output.get("success").and_then(Value::as_bool) == Some(false)
+                || ["blocked", "not_executed", "cancelled"]
+                    .iter()
+                    .any(|key| output.get(key).and_then(Value::as_bool) == Some(true)))
         {
             return;
         }
-        if tool_intent::is_command_tool(name) {
+        if tool_intent::is_command_tool(name) && !exec_changed {
             let executed = tool_intent::shell_args_as_executed(name, args);
             if tool_intent::classify_shell_activity(name, &executed) != tool_intent::ShellActivity::Mutation
                 || tool_intent::shell_command_is_admitted_verification_attempt(&executed)
@@ -520,10 +522,18 @@ impl ToolRegistry {
             {
                 return;
             }
+            // Dynamic inspections need a complete nonmutation proof before
+            // they may preserve prior verifier evidence. Admission is unchanged.
+            if let Some(command_text) = command_args::raw_command_text(&executed)
+                .or_else(|| command_args::shell_command_text_with_args(&executed))
+                && !tool_intent::activity::exec_mutation_should_incur_debt(&command_text, output)
+            {
+                return;
+            }
         }
         match crate::tools::file_ops::diff_output_has_effective_change(output) {
-            Some(false) => return,
-            Some(true) => {}
+            Some(false) if !exec_changed => return,
+            Some(false) | Some(true) => {}
             None if output.get("success").and_then(Value::as_bool) != Some(true)
                 && output.get("exit_code").and_then(Value::as_i64) != Some(0)
                 && command_args::session_id_text(output).is_none()

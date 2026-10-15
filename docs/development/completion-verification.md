@@ -10,6 +10,14 @@ operations, so prose/planning symlinks to code still require verification.
 Planning exemptions require every target to be a planning artifact. Build and dependency inputs
 such as `CMakeLists.txt` and `requirements.txt` require verification.
 
+Shell accounting exempts an inspection only after a complete syntax-aware proof
+that every command, including nested substitutions, is nonmutating. Unknown or
+malformed syntax, dynamic executables/options, mutating options, and file writes
+retain debt. Descriptor plumbing and literal quoted operator text do not create
+debt. Concrete changed-file evidence always creates shell mutation debt. This
+proof affects freshness and mutation pacing only; admission and permissions
+remain unchanged.
+
 Verification evidence belongs to runtime state in the existing tool registry,
 separate from source inspection. Each verifier has a launch identity, mutation
 generation, session identity while running, and observed terminal verdict. A
@@ -51,6 +59,16 @@ Otherwise the harness uses the existing configured verifier override and project
 detection. Disabling tracker continuation does not disable changed-code
 verification. An empty verification list never proves changed code verified.
 
+Generated `verify:` commands must exit zero on success. A `grep`/`rg` absence
+check returning exit one is useful inspection evidence but cannot satisfy a
+mandatory completion requirement; invalid grep options returning exit two also
+remain failures. Choose a verifier with a zero-on-success contract when writing
+a plan. Existing tracker requirements are never repaired or replaced automatically.
+Required inspections and custom checks bypass both result-cache boundaries,
+including entries cached before tracker adoption, so actual execution supplies
+the verdict. Passing current-generation checks remain reusable as verification
+evidence without executing them again merely for a completion summary.
+
 A yielded command has no verdict. Interactive and headless verification resume an
 owned session covering the requested check in the current mutation generation before
 starting another command, including a check inside a qualifying `&&` chain.
@@ -61,7 +79,11 @@ stop at the first unsuccessful result. Only observed terminal exit zero can
 produce passing evidence. Nonzero exit is a failed check; denial, lost results,
 timeout, and cancellation remain unverified. Unavailable sessions are cleaned up
 through existing termination/release facilities. Output retained for verification
-is bounded.
+is bounded. Partial success names the next missing requirement without announcing
+a cleared gate or replenishing reminder/cross-turn recovery budgets. Unchanged
+tracker updates, repeated summaries, and replay do not restore those budgets.
+Exhaustion produces a blocked handoff with the failing command, observed terminal
+exit status, and bounded failure tail even below the consecutive-failure limit.
 
 If no verifier is available or recovery budgets are exhausted, changes remain in
 place and the run returns the existing blocked/failure outcome with unverified
@@ -89,8 +111,8 @@ Verification, checker-session, and recovery suites live under
 Interactive tool-bearing responses share bounded verification recovery: repeated
 tracker observations, six inspections, or six batches without advancing the next
 required check schedule the missing verifier through the existing tool pipeline.
-Passing unrelated checks does not reset this progress window. Real edits, tracker
-updates, and advancement to another required command do reset it; a harness
+Passing unrelated checks does not reset this progress window. Real edits, changed tracker
+state, and advancement to another required command reset the progress window; a harness
 attempt leaves a bounded diagnostic/repair window after failure. Existing cancellation,
 permissions, failure limits, and execution budgets still apply. Without pending
 verification, repeated unchanged tracker polls get one tool-enabled correction;
@@ -119,3 +141,13 @@ policy; no upstream implementation was copied.
 [OpenAI's goals guidance](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)
 supports explicit completion evidence and blocked conditions. These sources inform
 the policy and do not establish a measured VT Code reliability improvement.
+
+The conservative syntax proof was compared with
+[`codex-rs/shell-command/src/bash.rs`](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/shell-command/src/bash.rs)
+at commit `f0c5077c34ec7a76b4ad9134835925e6ae3d72ec` (Apache-2.0, copyright
+2025 OpenAI). VT Code reuses its own command predicates and explicitly walks
+supported control flow and substitutions; no upstream code was copied.
+The saved `session-vtcode-20261015T142625Z_988722-36010` failure supplied the
+inspection loops, stale cached `rg` verdict, and invalid mandatory `grep` cases
+for deterministic regressions, following
+[OpenAI's trace-to-regression workflow](https://developers.openai.com/cookbook/examples/agents_sdk/agent_improvement_loop).

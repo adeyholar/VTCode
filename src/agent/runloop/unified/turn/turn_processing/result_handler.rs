@@ -336,6 +336,7 @@ pub(crate) async fn execute_harness_auto_verification(
         None => (tool_names::EXEC_COMMAND, serde_json::json!({"cmd": command, "max_output_tokens": 4000})),
     };
 
+    let required_before = ctx.tool_registry.next_required_completion_verifier();
     repeated_tool_attempts.record_auto_verification_executed();
     let action = if tool_name == tool_names::WRITE_STDIN {
         "waiting for the existing verifier"
@@ -373,11 +374,26 @@ pub(crate) async fn execute_harness_auto_verification(
             turn_modified_files: &mut *turn_modified_files,
         };
         let outcome = handle_tool_calls(&mut t_ctx_inner, std::slice::from_ref(&synthetic)).await?;
-        if t_ctx_inner.ctx.tool_registry.completion_verifier_passed(&command) {
+        let passed = t_ctx_inner.ctx.tool_registry.completion_verifier_passed(&command);
+        let pending = t_ctx_inner.ctx.tool_registry.completion_verification_pending();
+        if passed && !pending {
             t_ctx_inner.repeated_tool_attempts.mark_verification_complete();
         }
         if t_ctx_inner.repeated_tool_attempts.pending_verifier_session_id.is_some() {
             // A running session has no verdict and must not consume failure budget.
+        } else if passed && pending {
+            t_ctx_inner.repeated_tool_attempts.mark_verification_pending();
+            if required_before.as_deref() == Some(command.as_str())
+                && t_ctx_inner.ctx.tool_registry.next_required_completion_verifier() != required_before
+            {
+                // Advancing a mandatory check permits execution of the next
+                // one, without replenishing reminder or cross-turn budgets.
+                t_ctx_inner.repeated_tool_attempts.auto_verification_executed = false;
+            }
+            t_ctx_inner
+                .ctx
+                .working_history
+                .push(uni::Message::system(t_ctx_inner.ctx.tool_registry.unverified_completion_reason()));
         } else if t_ctx_inner.repeated_tool_attempts.verification_is_pending() {
             // Count only an observed non-zero exit. Policy/preflight rejections
             // and missing results are not executed verification failures.

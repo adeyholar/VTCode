@@ -18,6 +18,34 @@ fn is_execution_tool(name: &str) -> bool {
     )
 }
 
+/// Whether a Mutation-classified exec success should count toward
+/// anti-blind-editing pressure. Admission stays fail-closed elsewhere;
+/// this only prevents read-only-behaving dynamic inspections (e.g. `for`
+/// loops over `grep` with `test -f`) from arming the gate when they exit 0
+/// with no writes. Concrete `modified_files`, effective diffs, and shell
+/// redirection still count; see
+/// [`vtcode_core::tools::tool_intent::exec_mutation_should_incur_debt`].
+fn exec_mutation_should_count(
+    canonical_name: &str,
+    executed: &serde_json::Value,
+    outcome: &ToolPipelineOutcome,
+) -> bool {
+    if !is_execution_tool(canonical_name) {
+        return true;
+    }
+    let ToolExecutionStatus::Success { output, modified_files, .. } = &outcome.status else {
+        return false;
+    };
+    if !modified_files.is_empty() {
+        return true;
+    }
+    let command_text = vtcode_core::tools::command_args::raw_command_text(executed);
+    let Some(command_text) = command_text else {
+        return true;
+    };
+    vtcode_core::tools::tool_intent::exec_mutation_should_incur_debt(&command_text, output)
+}
+
 /// Return whether a tool call must wait for a successful verification step.
 ///
 /// Reads, inspections, verification commands, task tracking, dedicated
@@ -106,7 +134,25 @@ pub(crate) fn update_repetition_tracker_for_registry(
     args: &serde_json::Value,
     registry: &vtcode_core::tools::ToolRegistry,
 ) -> bool {
-    update_repetition_tracker_inner(loop_tracker, outcome, name, args, registry.is_completion_verifier_call(name, args))
+    let was_pending = loop_tracker.verification_is_pending();
+    let attempts = loop_tracker.verification_auto_recovery_attempts;
+    let executed = loop_tracker.auto_verification_executed;
+    let failed = update_repetition_tracker_inner(
+        loop_tracker,
+        outcome,
+        name,
+        args,
+        registry.is_completion_verifier_call(name, args),
+    );
+    if registry.completion_verification_pending() {
+        // A partial or unrelated pass cannot refill the recovery episode.
+        if was_pending {
+            loop_tracker.mark_verification_pending();
+        }
+        loop_tracker.verification_auto_recovery_attempts = attempts;
+        loop_tracker.auto_verification_executed = executed;
+    }
+    failed
 }
 
 fn update_repetition_tracker_inner(
@@ -276,7 +322,13 @@ fn update_repetition_tracker_inner(
         // piped only into `head`/`tail` executes standalone, so its truthful
         // exit status is the verifier's and it counts as verification.
         let executed = shell_args_as_executed(canonical_name, args);
-        let activity = if registered_verifier {
+        let concrete_changes = matches!(&outcome.status, ToolExecutionStatus::Success { output, modified_files, .. }
+            if !modified_files.is_empty()
+                || output.get("modified_files").and_then(serde_json::Value::as_array).is_some_and(|paths| !paths.is_empty())
+                || vtcode_core::tools::file_ops::diff_output_has_effective_change(output) == Some(true));
+        let activity = if concrete_changes {
+            ShellActivity::Mutation
+        } else if registered_verifier {
             ShellActivity::Verification
         } else {
             classify_shell_activity(canonical_name, &executed)
@@ -360,7 +412,7 @@ fn update_repetition_tracker_inner(
                 // standalone verifier. Chained mutations smuggled behind a
                 // verifier prefix are rejected by the admission predicate and
                 // take the blind-edit path below.
-                if shell_command_is_admitted_verification_attempt(&executed) {
+                if !concrete_changes && shell_command_is_admitted_verification_attempt(&executed) {
                     let ran_and_failed =
                         matches!(&outcome.status, ToolExecutionStatus::Success { command_success: false, .. });
                     if ran_and_failed {
@@ -384,7 +436,10 @@ fn update_repetition_tracker_inner(
                     }
                     loop_tracker.reset_navigation_window(low_signal_family.is_none());
                 } else {
-                    if mutation_was_applied(outcome) {
+                    if concrete_changes
+                        || (mutation_was_applied(outcome)
+                            && exec_mutation_should_count(canonical_name, &executed, outcome))
+                    {
                         loop_tracker.record_successful_mutation();
                     }
                     loop_tracker.reset_navigation_window(low_signal_family.is_none());

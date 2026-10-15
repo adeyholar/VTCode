@@ -178,3 +178,29 @@ async fn verification_recovery_leaves_other_blocks_and_existing_inputs_untouched
     assert_eq!(fixture.runtime.run_until_idle().as_deref(), Some("Keep this queued input"));
     assert!(!fixture.runtime.has_pending_follow_up_inputs());
 }
+
+#[tokio::test]
+async fn exhausted_recovery_keeps_non_escalated_exit_and_bounded_failure_evidence() {
+    let mut fixture = RecoveryFixture::new().await;
+    let mut cfg = VTCodeConfig::default();
+    cfg.agent.harness.verification.cross_turn_turns = 1;
+    cfg.agent.harness.verification.max_consecutive_failures = 3;
+    let command = "grep -n '---\\s\\+\\|' README.md";
+    cfg.agent.harness.verification.default_verifier_override = Some(command.into());
+    fixture.stats.record_verification_auto_failure(
+        command.into(),
+        &serde_json::json!({"exit_code":2,"output":format!("{}invalid grep option", "x".repeat(5000))}).to_string(),
+    );
+    assert!(fixture.stats.record_verification_auto_recovery_turn_with_limit(1));
+    std::sync::Arc::make_mut(&mut fixture.runtime.state.messages)
+        .push(Message::assistant("The requested work is complete.".into()));
+    let VerificationBlockResult::Handoff { reason } = fixture.recover(PENDING_REASON, Some(&cfg)) else {
+        panic!("the exhausted episode must hand off once");
+    };
+    assert!(reason.contains(command), "{reason}");
+    assert!(reason.contains("Terminal exit: 2"), "{reason}");
+    assert!(reason.contains("invalid grep option"), "{reason}");
+    assert!(reason.len() < 4000);
+    assert!(!fixture.runtime.has_pending_follow_up_inputs());
+    assert_eq!(fixture.stats.verification_auto_recovery_turns(), 1);
+}

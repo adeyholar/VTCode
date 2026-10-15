@@ -713,7 +713,7 @@ impl ToolRegistry {
                 // the model to see "success" and keep retrying.
                 let hard_block = loop_result.repeat_count >= LOOP_HARD_BLOCK_REPEAT_COUNT;
 
-                if reusable_result && !hard_block && !fresh_patch_read {
+                if reusable_result && !is_verification_command && !hard_block && !fresh_patch_read {
                     let reuse_max_age = Duration::from_secs(120);
                     let reused = self
                         .execution_history

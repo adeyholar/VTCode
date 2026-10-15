@@ -166,7 +166,9 @@ pub(super) async fn execute_with_cache_and_streaming(
     safety_prevalidated: bool,
     show_live_pty_preview: bool,
 ) -> RuntimeToolExecution {
-    let is_cacheable_tool = is_tool_cacheable(name, args_val) && !registry.has_patch_recovery_read(name, args_val);
+    let is_cacheable_tool = is_tool_cacheable(name, args_val)
+        && !registry.is_completion_verifier_call(name, args_val)
+        && !registry.has_patch_recovery_read(name, args_val);
     let cache_target = cache_target_path(name, args_val);
 
     if is_cacheable_tool
@@ -316,7 +318,9 @@ pub(crate) async fn execute_prevalidated_read_only_with_cache(
     exec_settlement_mode: ExecSettlementMode,
     safety_prevalidated: bool,
 ) -> ToolExecutionStatus {
-    let is_cacheable_tool = is_tool_cacheable(name, args_val) && !registry.has_patch_recovery_read(name, args_val);
+    let is_cacheable_tool = is_tool_cacheable(name, args_val)
+        && !registry.is_completion_verifier_call(name, args_val)
+        && !registry.has_patch_recovery_read(name, args_val);
     let cache_target = cache_target_path(name, args_val);
     if is_cacheable_tool
         && let Some(cached_status) =
@@ -352,7 +356,7 @@ async fn cache_successful_output(
     cache_target: &str,
     status: &ToolExecutionStatus,
 ) {
-    if !is_tool_cacheable(name, args_val) {
+    if !is_tool_cacheable(name, args_val) || registry.is_completion_verifier_call(name, args_val) {
         return;
     }
 
@@ -682,6 +686,74 @@ mod tests {
             .remove(TOOL_EXECUTION_METADATA_FIELD);
         assert_eq!(second_output, first_cached_shape);
         assert_eq!(cache.read().await.stats().hits, 1);
+    }
+
+    #[tokio::test]
+    async fn required_git_inspection_bypasses_the_shared_pipeline_cache() {
+        let dir = TempDir::new().unwrap();
+        for argv in [vec!["init", "--quiet"], vec!["add", "fixture.txt"]] {
+            std::fs::write(dir.path().join("fixture.txt"), "before\n").unwrap();
+            assert!(
+                std::process::Command::new("git")
+                    .args(argv)
+                    .current_dir(dir.path())
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+        registry.allow_all_tools().await.unwrap();
+        let cache = Arc::new(tokio::sync::RwLock::new(ToolResultCache::new(8)));
+        let ctrl_c_state = Arc::new(CtrlCState::new());
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let command = "git diff -- fixture.txt";
+        let args = json!({"cmd":command});
+        let first = execute_prevalidated_read_only_with_cache(
+            &registry,
+            &cache,
+            tools::EXEC_COMMAND,
+            &args,
+            &ctrl_c_state,
+            &notify,
+            None,
+            0,
+            ExecSettlementMode::Manual,
+            false,
+        )
+        .await;
+        assert!(matches!(first, super::ToolExecutionStatus::Success { command_success: true, .. }));
+        assert_eq!(cache.read().await.stats().current_size, 1);
+        std::fs::write(dir.path().join("fixture.txt"), "after\n").unwrap();
+        registry
+            .execute_tool(
+                tools::TASK_TRACKER,
+                json!({"action":"create", "items":[{
+                    "description":"Review fixture", "verify":[command]
+                }]}),
+            )
+            .await
+            .unwrap();
+        registry.restore_completion_verification_debt();
+        let second = execute_prevalidated_read_only_with_cache(
+            &registry,
+            &cache,
+            tools::EXEC_COMMAND,
+            &args,
+            &ctrl_c_state,
+            &notify,
+            None,
+            0,
+            ExecSettlementMode::Manual,
+            false,
+        )
+        .await;
+        let super::ToolExecutionStatus::Success { output, .. } = second else {
+            panic!("{second:?}")
+        };
+        assert!(output.to_string().contains("+after"), "{output}");
+        assert_eq!(cache.read().await.stats().hits, 0);
+        assert!(registry.completion_verifier_passed(command));
     }
 
     #[test]
