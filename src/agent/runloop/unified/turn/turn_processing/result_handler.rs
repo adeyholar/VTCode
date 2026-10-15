@@ -253,11 +253,13 @@ impl TurnProcessingContext<'_> {
             && self.session_stats.verification_consecutive_failures() < max_failures
             && repeated_tool_attempts.should_auto_execute_verifier()
         {
-            let command = helpers::resolve_harness_verifier_command(
-                self.vt_cfg,
-                self.tool_registry.workspace_root().as_path(),
-                self.working_history,
-            );
+            let command = self.tool_registry.next_required_completion_verifier().or_else(|| {
+                helpers::resolve_harness_verifier_command(
+                    self.vt_cfg,
+                    self.tool_registry.workspace_root().as_path(),
+                    self.working_history,
+                )
+            });
             return command.or_else(|| {
                 repeated_tool_attempts
                     .pending_verifier_session_id
@@ -325,24 +327,8 @@ pub(crate) async fn execute_harness_auto_verification(
 
     // A fresh internal turn may still own the previous turn's verifier. Reuse
     // only an exact command match from this runtime, never archived handles.
-    if repeated_tool_attempts.pending_verifier_session_id.is_none() {
-        let sessions = ctx.tool_registry.in_progress_exec_sessions(32).await;
-        if let Some(session) = sessions.into_iter().find(|session| {
-            session.exit_code.is_none()
-                && session.lifecycle_state == Some(vtcode_core::tools::types::VTCodeSessionLifecycleState::Running)
-                && (session.command_label() == command
-                    || (std::path::Path::new(&session.command)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| matches!(name, "sh" | "bash" | "zsh" | "fish"))
-                        && session
-                            .args
-                            .windows(2)
-                            .any(|pair| matches!(pair[0].as_str(), "-c" | "-lc") && pair[1] == command)))
-        }) {
-            repeated_tool_attempts.pending_verifier_session_id = Some(session.id.to_string());
-        }
-    }
+    repeated_tool_attempts.pending_verifier_session_id =
+        ctx.tool_registry.pending_completion_verifier_session(&command);
 
     if let Some(reason) = ctx.verification_execution_blocker(repeated_tool_attempts) {
         return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) }));
@@ -393,6 +379,9 @@ pub(crate) async fn execute_harness_auto_verification(
             turn_modified_files: &mut *turn_modified_files,
         };
         let outcome = handle_tool_calls(&mut t_ctx_inner, std::slice::from_ref(&synthetic)).await?;
+        if t_ctx_inner.ctx.tool_registry.completion_verifier_passed(&command) {
+            t_ctx_inner.repeated_tool_attempts.mark_verification_complete();
+        }
         if t_ctx_inner.repeated_tool_attempts.pending_verifier_session_id.is_some() {
             // A running session has no verdict and must not consume failure budget.
         } else if t_ctx_inner.repeated_tool_attempts.verification_is_pending() {
@@ -414,6 +403,9 @@ pub(crate) async fn execute_harness_auto_verification(
                     A bounded fix window is active: repair the reported failure, then re-run the standalone verifier."
                 )));
             }
+        } else if t_ctx_inner.ctx.tool_registry.completion_verification_pending() {
+            // A required check remains, or this verifier predates a later edit.
+            t_ctx_inner.repeated_tool_attempts.mark_verification_pending();
         } else {
             t_ctx_inner.ctx.session_stats.record_verification_auto_success();
             t_ctx_inner.ctx.working_history.push(uni::Message::system(format!(
@@ -559,6 +551,9 @@ pub(crate) async fn handle_turn_processing_result<'a>(
             // bound this path instead, and the generic cap still refuses
             // unverified completion.
             let tool_free_synthesis = params.ctx.in_tool_free_recovery_synthesis();
+            if !is_planning_synthesis && params.ctx.tool_registry.completion_verification_pending() {
+                params.repeated_tool_attempts.mark_verification_pending();
+            }
             if params.repeated_tool_attempts.verification_is_pending() && !is_planning_synthesis && !tool_free_synthesis
             {
                 match params

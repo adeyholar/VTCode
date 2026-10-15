@@ -20,13 +20,13 @@ use crate::agent::runloop::unified::turn::tool_outcomes::execution_result::{
 };
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
     PIPED_VERIFICATION_DIRECTIVE, PIPED_VERIFICATION_WARNING, VERIFICATION_RESULT_LOST_DIRECTIVE,
-    VERIFICATION_RESULT_LOST_WARNING, resolve_max_tool_retries, update_repetition_tracker,
+    VERIFICATION_RESULT_LOST_WARNING, resolve_max_tool_retries, update_repetition_tracker_for_registry,
 };
 
 const DEFAULT_MAX_PARALLEL_TOOL_CALLS: usize = 4;
 
 /// Surface queued loop directives after the tool response lands.
-/// `update_repetition_tracker` queues them when a pending gate's verifier
+/// `update_repetition_tracker_for_registry` queues them when a pending gate's verifier
 /// result was lost (verifier-level Failure/Timeout, or a dead exec session)
 /// or when a completed checker used an unverified shell form. The latter is
 /// one diagnostic per turn even when no verification gate is pending.
@@ -335,7 +335,13 @@ async fn execute_parallel_group<'a, 'b>(
         batch_tracker.record(&outcome.status);
         record_circuit_transition(t_ctx.ctx, &name, circuit_before).await;
 
-        if update_repetition_tracker(t_ctx.repeated_tool_attempts, &outcome, &name, &args) {
+        if update_repetition_tracker_for_registry(
+            t_ctx.repeated_tool_attempts,
+            &outcome,
+            &name,
+            &args,
+            t_ctx.ctx.tool_registry,
+        ) {
             // A failed verifier grants fix-up edits; give the model one
             // diagnostic explanation before the pending-verification text cap
             // re-applies instead of blocking the turn on the failure summary.
@@ -698,7 +704,13 @@ async fn execute_and_handle_tool_call_inner<'a>(
     }
     record_circuit_transition(ctx, tool_name, circuit_before).await;
 
-    if update_repetition_tracker(repeated_tool_attempts, &pipeline_outcome, tool_name, &args_val) {
+    if update_repetition_tracker_for_registry(
+        repeated_tool_attempts,
+        &pipeline_outcome,
+        tool_name,
+        &args_val,
+        ctx.tool_registry,
+    ) {
         // A failed verifier grants fix-up edits; reset the text streak so the
         // model can diagnose the failure before the text cap re-applies.
         ctx.harness_state.reset_assistant_text_response_streak();

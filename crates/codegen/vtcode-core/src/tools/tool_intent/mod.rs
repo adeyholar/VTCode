@@ -1,6 +1,9 @@
 //! Tool intent classification: mutating vs read-only, parallel-safe, and
 //! action extraction for unified tool surfaces.
 
+mod mutation;
+pub use mutation::{is_docs_only_write, is_plan_artifact_write};
+
 pub mod actions;
 pub mod activity;
 pub mod classify;

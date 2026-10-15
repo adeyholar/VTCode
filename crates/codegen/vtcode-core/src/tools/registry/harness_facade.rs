@@ -1,6 +1,5 @@
 //! Harness context accessors for ToolRegistry.
 
-use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -14,6 +13,9 @@ impl ToolRegistry {
     /// Begin a genuine request, optionally restoring adoption from its persisted
     /// history or explicit continuation. Internal turns must not reset this latch.
     pub fn begin_tracker_request(&self, adopted: bool) {
+        if !adopted {
+            self.set_required_completion_verifiers(Vec::new());
+        }
         self.harness_context
             .tracker_adopted
             .store(adopted, std::sync::atomic::Ordering::Relaxed);
@@ -93,7 +95,11 @@ impl ToolRegistry {
     /// Start a harness-owned PTY command session while retaining the session metadata even when
     /// the command exits immediately. ACP terminal sessions use explicit release semantics.
     pub async fn execute_harness_command_session_terminal_run(&self, args: Value) -> Result<Value> {
-        let value = self.execute_harness_command_session_terminal_run_raw(args).await?;
+        let launch = self.begin_completion_verifier(&args);
+        let result = self.execute_harness_command_session_terminal_run_raw(args.clone()).await;
+        self.observe_completion_verifier(launch, &args, &result);
+        let value = result?;
+        self.observe_completion_mutation(tools::EXEC_COMMAND, &args, &value);
         self.process_harness_command_session_output(value).await
     }
 
@@ -101,24 +107,39 @@ impl ToolRegistry {
         self.exec_sessions.read_session_output(session_id, drain).await
     }
 
-    /// Inline-delegating wrapper over
-    /// [`Self::harness_exec_session_completed`].
-    /// Returns the inner future directly (audit section 16).
-    pub fn harness_exec_session_completed<'a>(
-        &'a self,
-        session_id: &'a str,
-    ) -> impl Future<Output = Result<Option<i32>>> + 'a {
-        self.exec_sessions.is_session_completed(session_id)
+    /// Observe the owned native terminal session's actual exit for runtime verification.
+    pub async fn harness_exec_session_completed(&self, session_id: &str) -> Result<Option<i32>> {
+        let result = self.exec_sessions.is_session_completed(session_id).await;
+        if let Ok(Some(exit_code)) = result {
+            self.observe_completion_verifier(
+                None,
+                &serde_json::json!({"action":"wait", "session_id":session_id}),
+                &Ok(serde_json::json!({"exit_code":exit_code})),
+            );
+        }
+        result
     }
 
-    /// Inline-delegating wrapper over
-    /// [`Self::terminate_harness_exec_session`].
-    pub fn terminate_harness_exec_session<'a>(&'a self, session_id: &'a str) -> impl Future<Output = Result<()>> + 'a {
-        self.exec_sessions.terminate_session(session_id)
+    /// Terminate an owned session and retire any active mutation boundary.
+    pub async fn terminate_harness_exec_session(&self, session_id: &str) -> Result<()> {
+        let result = self.exec_sessions.terminate_session(session_id).await;
+        if result.is_ok() {
+            self.observe_completion_verifier(
+                None,
+                &serde_json::json!({"action":"close", "session_id":session_id}),
+                &Ok(serde_json::json!({"success":true})),
+            );
+        }
+        result
     }
 
     pub async fn close_harness_exec_session(&self, session_id: &str) -> Result<()> {
         self.close_exec_session(session_id).await?;
+        self.observe_completion_verifier(
+            None,
+            &serde_json::json!({"action":"close", "session_id":session_id}),
+            &Ok(serde_json::json!({"success":true})),
+        );
         Ok(())
     }
 

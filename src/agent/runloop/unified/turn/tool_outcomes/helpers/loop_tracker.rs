@@ -385,14 +385,14 @@ impl LoopTracker {
     }
 
     /// One-shot accessor for the lost-verification-result notice queued by
-    /// [`update_repetition_tracker`]. Handlers consume it after the tool
+    /// [`update_repetition_tracker_for_registry`]. Handlers consume it after the tool
     /// response lands so the directive never splits an assistant batch.
     pub(crate) fn take_verification_result_lost_notice(&mut self) -> bool {
         std::mem::take(&mut self.verification_result_lost_notice_pending)
     }
 
     /// Once-per-turn accessor for the status-masking notice queued by
-    /// [`update_repetition_tracker`]. Handlers consume it after the tool
+    /// [`update_repetition_tracker_for_registry`]. Handlers consume it after the tool
     /// response lands so the directive never splits an assistant batch.
     pub(crate) fn take_piped_verification_notice(&mut self) -> bool {
         let pending = std::mem::take(&mut self.piped_verification_notice_pending);
@@ -415,6 +415,8 @@ impl LoopTracker {
 
     pub(super) fn record_successful_mutation(&mut self) {
         self.clear_navigation_evidence();
+        // A verifier launched before this edit cannot clear the pacing checkpoint.
+        self.pending_verifier_session_id = None;
         // Consume the fix-up window first: repair edits must not grow the
         // blind-editing counter while the gate already requires re-verify.
         if self.verification_pending && self.fix_edits_remaining > 0 {
@@ -461,7 +463,7 @@ impl LoopTracker {
         self.auto_verification_executed = true;
     }
 
-    pub(super) fn mark_verification_complete(&mut self) {
+    pub(crate) fn mark_verification_complete(&mut self) {
         self.pending_verifier_session_id = None;
         self.verifier_failed_notice_pending = false;
         self.consecutive_mutations = 0;

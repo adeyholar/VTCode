@@ -445,23 +445,126 @@ impl AgentRunner {
         &self,
         commands: &[String],
         event_recorder: &mut ExecEventRecorder,
+        runtime: &mut AgentRuntime,
     ) -> Result<Vec<VerificationResult>> {
+        let wait_args = |session_id: &str| {
+            json!({
+                "action": "wait", "session_id": session_id,
+                "wait_timeout_seconds": 1, "max_output_tokens": 4000,
+            })
+        };
         let mut results = Vec::with_capacity(commands.len());
         for command in commands {
+            if self.tool_registry.completion_verifier_passed(command) {
+                results.push(VerificationResult {
+                    command: command.clone(),
+                    success: true,
+                    exit_code: Some(0),
+                    output: "Reused fresh terminal verification evidence.".to_string(),
+                });
+                continue;
+            }
             let command_event = event_recorder.command_started(command);
-            let payload = json!({
-                "action": "run",
-                "command": command,
-                "workdir": self._workspace.display().to_string(),
-                "yield_time_ms": 1000,
-            });
-            let result = self.tool_registry.execute_harness_command_session(payload).await?;
-            let exit_code = result
-                .get("exit_code")
-                .and_then(serde_json::Value::as_i64)
-                .map(|value| value as i32);
-            let success = exit_code.unwrap_or(0) == 0;
-            let output = summarize_verification_output(&result);
+            let mut launched_session = self.tool_registry.pending_completion_verifier_session(command);
+            let payload = if let Some(session_id) = launched_session.as_deref() {
+                wait_args(session_id)
+            } else {
+                json!({
+                    "action": "run",
+                    "command": command,
+                    "workdir": self._workspace.display().to_string(),
+                    "yield_time_ms": 1000,
+                })
+            };
+            let started = std::time::Instant::now();
+            let ceiling = self
+                .tool_registry
+                .timeout_policy()
+                .ceiling_for(crate::tools::registry::ToolTimeoutCategory::LongRunningCommand)
+                .unwrap_or(std::time::Duration::from_secs(3600));
+            let mut observed = self.tool_registry.execute_harness_command_session(payload).await;
+            let mut output = String::new();
+            let exit_code = loop {
+                let result = match observed {
+                    Ok(result) => result,
+                    Err(error) => {
+                        output.push_str(&format!("\nUnverified: verifier result unavailable: {error:#}"));
+                        break None;
+                    }
+                };
+                let chunk = summarize_verification_output(&result);
+                // Retain bounded evidence across yielded polls.
+                output.push_str(&chunk);
+                if output.len() > 16_384 {
+                    let mut boundary = output.len() - 16_384;
+                    while !output.is_char_boundary(boundary) {
+                        boundary += 1;
+                    }
+                    output.drain(..boundary);
+                }
+                let session = crate::tools::command_args::session_id_text(&result)
+                    .or_else(|| {
+                        result
+                            .get("next_wait_args")
+                            .and_then(crate::tools::command_args::session_id_text)
+                    })
+                    .or_else(|| {
+                        result
+                            .get("next_continue_args")
+                            .and_then(crate::tools::command_args::session_id_text)
+                    })
+                    .map(str::to_owned);
+                if launched_session.is_none() {
+                    launched_session = session.clone();
+                }
+                if result.get("error").is_some()
+                    || result.get("success").and_then(serde_json::Value::as_bool) == Some(false)
+                    || ["cancelled", "blocked", "not_executed", "termination_requested"]
+                        .iter()
+                        .any(|key| result.get(key).and_then(serde_json::Value::as_bool) == Some(true))
+                {
+                    output.push_str("\nUnverified: verifier was denied, cancelled, or unavailable.");
+                    break None;
+                }
+                if matches!(runtime.poll_turn_control().await, RuntimeControl::StopRequested) {
+                    runtime.state.outcome = TaskOutcome::Cancelled;
+                    output.push_str("\nUnverified: verification cancelled.");
+                    break None;
+                }
+                if started.elapsed() >= ceiling {
+                    output.push_str("\nUnverified: verification execution limit exhausted.");
+                    break None;
+                }
+                if session
+                    .as_deref()
+                    .zip(launched_session.as_deref())
+                    .is_some_and(|(returned, expected)| returned != expected)
+                {
+                    output.push_str("\nUnverified: verifier session identity changed.");
+                    break None;
+                }
+                if let Some(code) = result.get("exit_code").and_then(serde_json::Value::as_i64) {
+                    break i32::try_from(code).ok();
+                }
+                let Some(session_id) = launched_session.as_deref() else {
+                    output.push_str("\nUnverified: no terminal exit or verifier session was returned.");
+                    break None;
+                };
+                observed = self.tool_registry.execute_harness_command_session(wait_args(session_id)).await;
+            };
+            if exit_code.is_none()
+                && let Some(session_id) = launched_session
+            {
+                if let Err(error) = self.tool_registry.terminate_harness_exec_session(&session_id).await {
+                    output.push_str(&format!("\nVerifier cleanup: {error:#}"));
+                }
+                if let Err(error) = self.tool_registry.close_harness_exec_session(&session_id).await {
+                    output.push_str(&format!("\nVerifier release: {error:#}"));
+                }
+            }
+            let success = exit_code == Some(0);
+            let output =
+                vtcode_commons::formatting::truncate_byte_budget(&output, 16_384, "\n[verification output truncated]");
             event_recorder.command_finished(
                 &command_event,
                 if success {
@@ -512,7 +615,10 @@ impl AgentRunner {
                 None,
                 None,
             );
-        } else {
+        } else if !commands.is_empty()
+            && results.len() == commands.len()
+            && results.iter().all(|result| result.exit_code == Some(0))
+        {
             event_recorder.harness_event(
                 HarnessEventKind::VerificationPassed,
                 Some(format!("Verification passed: {}", commands.join(", "))),
@@ -544,6 +650,8 @@ impl AgentRunner {
         let max_tool_loops = setup.max_tool_loops;
         let max_context_tokens = setup.max_context_tokens;
         let mut runtime = setup.runtime;
+        self.tool_registry
+            .restore_completion_verification_from_history(&runtime.state.messages);
         // Normalize usage from the provider actually serving this session;
         // configuration may contain an alias (or be inferred from the model).
         runtime.state.stats.provider_name = self.provider_client.name().to_string();
@@ -1316,7 +1424,9 @@ impl AgentRunner {
                         break;
                     }
 
-                    if check_completion_candidate(response.content_text()) {
+                    if check_completion_candidate(response.content_text())
+                        || self.tool_registry.completion_verification_pending()
+                    {
                         self.runner_println(format_args!(
                             "[{}] {}",
                             self.agent_type,
@@ -1324,13 +1434,53 @@ impl AgentRunner {
                                 .green()
                                 .bold()
                         ));
-                        let assessment = continuation_controller
+                        let mut assessment = continuation_controller
                             .assess_completion(
                                 &effective_task,
                                 &runtime.state,
                                 self.tool_registry.tracker_adopted_for_request(),
                             )
                             .await?;
+
+                        if self.tool_registry.completion_verification_pending()
+                            && !matches!(assessment, CompletionAssessment::Continue { .. })
+                        {
+                            let mut commands = match &assessment {
+                                CompletionAssessment::Verify { commands } => commands.clone(),
+                                _ => Vec::new(),
+                            };
+                            if commands.is_empty() {
+                                commands = self.tool_registry.missing_required_completion_verifiers();
+                            }
+                            if commands.is_empty() {
+                                let override_command =
+                                    self.config().agent.harness.verification.default_verifier_override.as_deref();
+                                commands = override_command
+                                    .filter(|command| {
+                                        crate::tools::tool_intent::classify_shell_activity(
+                                            tools::EXEC_COMMAND,
+                                            &json!({"cmd":command}),
+                                        ) == crate::tools::tool_intent::ShellActivity::Verification
+                                    })
+                                    .map(str::to_owned)
+                                    .or_else(|| {
+                                        crate::tools::tool_intent::default_verifier_for_workspace(&self._workspace)
+                                    })
+                                    .into_iter()
+                                    .collect();
+                            }
+                            if commands.is_empty() {
+                                runtime.state.outcome = TaskOutcome::failed(
+                                    self.tool_registry.unverified_completion_reason(),
+                                    vec![],
+                                    None,
+                                    None,
+                                );
+                                should_write_blocked_handoff = true;
+                                break;
+                            }
+                            assessment = CompletionAssessment::Verify { commands };
+                        }
 
                         // Verify requires running verification commands before
                         // re-dispatching the after_verification result through the
@@ -1345,9 +1495,13 @@ impl AgentRunner {
                                 None,
                                 None,
                             );
-                            let verification_results =
-                                self.run_verification_commands(commands, &mut event_recorder).await?;
+                            let verification_results = self
+                                .run_verification_commands(commands, &mut event_recorder, &mut runtime)
+                                .await?;
                             self.emit_verification_outcome(&mut event_recorder, commands, &verification_results);
+                            if matches!(runtime.state.outcome, TaskOutcome::Cancelled) {
+                                break;
+                            }
 
                             let post_verification =
                                 continuation_controller.after_verification(&verification_results).await?;
@@ -1618,7 +1772,20 @@ impl AgentRunner {
             }
 
             runtime.state.finalize_outcome(self.max_turns);
+            if runtime.state.outcome.is_success() && self.tool_registry.completion_verification_pending() {
+                runtime.state.is_completed = false;
+                runtime.state.outcome =
+                    TaskOutcome::failed(self.tool_registry.unverified_completion_reason(), vec![], None, None);
+                should_write_blocked_handoff = true;
+            }
 
+            if self.tool_registry.completion_verification_pending() && !runtime.state.outcome.is_success() {
+                runtime.state.warnings.push(format!(
+                    "{} Blocker: {}",
+                    self.tool_registry.unverified_completion_reason(),
+                    runtime.state.outcome.description()
+                ));
+            }
             let total_duration_ms = run_started_at.elapsed().as_millis();
 
             // Agent execution completed
@@ -1768,6 +1935,7 @@ impl AgentRunner {
 mod tests {
     use super::{prepare_responses_request_messages, record_terminal_turn_event, tool_loop_limit_reached};
     use crate::core::agent::events::ExecEventRecorder;
+    use crate::core::agent::runtime::AgentRuntime;
     use crate::core::agent::session::AgentSessionState;
     use crate::core::agent::state::should_apply_local_tool_result_clearing;
     use crate::core::agent::task::TaskOutcome;
@@ -1934,5 +2102,162 @@ mod tests {
 
         assert_eq!(previous_response_id, None);
         assert_eq!(request_messages.as_ref(), current_messages.as_slice());
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn headless_verification_waits_for_yielded_terminal_pass_and_failure() {
+        use super::super::tests::make_runner;
+        use crate::config::loader::VTCodeConfig;
+        use tempfile::TempDir;
+        for exit_code in [0, 7] {
+            let temp = TempDir::new().unwrap();
+            let mut cfg = VTCodeConfig::default();
+            cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
+            cfg.agent.harness.inspection.mode = vtcode_config::core::agent::InspectionMode::Warn;
+            cfg.commands.allow_list.push("./rustc".into());
+            let script = temp.path().join("rustc");
+            std::fs::write(&script, format!("#!/bin/sh\nsleep 1.2\nprintf 'terminal-evidence'\nexit {exit_code}\n"))
+                .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let runner = Box::pin(make_runner(&temp, cfg, "yielded-verifier")).await;
+            let command = "./rustc --version".to_string();
+            let mut recorder = ExecEventRecorder::new("verification", None, None);
+            let mut runtime = AgentRuntime::new(AgentSessionState::new("verification".into(), 3, 3, 10000), None, None);
+            let results = runner
+                .run_verification_commands(&[command], &mut recorder, &mut runtime)
+                .await
+                .unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].success, exit_code == 0, "{results:?}");
+            assert_eq!(results[0].exit_code, Some(exit_code));
+            assert!(results[0].output.contains("terminal-evidence"), "{:?}", results[0]);
+            assert!(runner.tool_registry.in_progress_exec_sessions(8).await.is_empty());
+        }
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn headless_verification_resumes_current_model_check_but_not_stale_checks() {
+        use super::super::tests::make_runner;
+        use crate::config::loader::VTCodeConfig;
+        use std::os::unix::fs::PermissionsExt;
+        for (exit_code, later_edit) in [(0, false), (7, false), (0, true)] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut cfg = VTCodeConfig::default();
+            cfg.commands.allow_list.push("./rustc".into());
+            let script = temp.path().join("rustc");
+            std::fs::write(&script, format!(
+                "#!/bin/sh\nprintf 'launched\\n' >> launches\nwhile [ ! -f release ]; do sleep 0.02; done\nprintf terminal-evidence\nexit {exit_code}\n"
+            )).unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let runner = Box::pin(make_runner(&temp, cfg, "resumed-verifier")).await;
+            runner.tool_registry.allow_all_tools().await.unwrap();
+            runner.tool_registry.restore_completion_verification_debt();
+            let command = "./rustc --version";
+            let launched = runner
+                .tool_registry
+                .execute_tool(
+                    crate::config::constants::tools::EXEC_COMMAND,
+                    serde_json::json!({"cmd":command,"background":true,"yield_time_ms":50}),
+                )
+                .await
+                .unwrap();
+            let session_id = crate::tools::command_args::session_id_text(&launched).expect("yielded check");
+            assert_eq!(runner.tool_registry.pending_completion_verifier_session(command).as_deref(), Some(session_id));
+            if later_edit {
+                let edit = runner
+                    .tool_registry
+                    .execute_tool(
+                        crate::config::constants::tools::APPLY_PATCH,
+                        serde_json::json!({
+                            "input":"*** Begin Patch\n*** Add File: later.rs\n+fn changed() {}\n*** End Patch"
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                assert!(edit.get("error").is_none(), "{edit}");
+                assert!(runner.tool_registry.pending_completion_verifier_session(command).is_none());
+            }
+            std::fs::write(temp.path().join("release"), "ready").unwrap();
+            let mut runtime = AgentRuntime::new(AgentSessionState::new("verification".into(), 3, 3, 10000), None, None);
+            let mut recorder = ExecEventRecorder::new("verification", None, None);
+            let results = runner
+                .run_verification_commands(&[command.into()], &mut recorder, &mut runtime)
+                .await
+                .unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].exit_code, Some(exit_code));
+            assert_eq!(results[0].success, exit_code == 0);
+            assert!(results[0].output.contains("terminal-evidence"), "{results:?}");
+            let launch_count = std::fs::read_to_string(temp.path().join("launches")).unwrap().lines().count();
+            assert_eq!(launch_count, if later_edit { 2 } else { 1 }, "only stale checks need a new launch");
+            assert_eq!(runner.tool_registry.completion_verification_pending(), exit_code != 0);
+            if later_edit {
+                runner.tool_registry.terminate_harness_exec_session(session_id).await.unwrap();
+                runner.tool_registry.close_harness_exec_session(session_id).await.unwrap();
+            }
+            assert!(runner.tool_registry.in_progress_exec_sessions(8).await.is_empty());
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn headless_verification_cancellation_and_execution_limit_remain_unverified_and_cleanup() {
+        use super::super::tests::make_runner;
+        use crate::config::loader::VTCodeConfig;
+        use crate::core::agent::steering::SteeringMessage;
+        use std::os::unix::fs::PermissionsExt;
+        for cancel in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut cfg = VTCodeConfig::default();
+            cfg.commands.allow_list.push("./rustc".into());
+            cfg.timeouts.long_running_command_ceiling_seconds = 15;
+            let script = temp.path().join("rustc");
+            std::fs::write(&script, "#!/bin/sh\nsleep 30\nprintf unexpected\n").unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let runner = Box::pin(make_runner(&temp, cfg, "cancelled-verifier")).await;
+            if cancel {
+                let launched = runner
+                    .tool_registry
+                    .execute_harness_command_session(serde_json::json!({
+                        "action":"run", "command":"./rustc --version", "background":true, "yield_time_ms":50
+                    }))
+                    .await
+                    .unwrap();
+                assert!(crate::tools::command_args::session_id_text(&launched).is_some(), "{launched}");
+                assert!(
+                    runner
+                        .tool_registry
+                        .pending_completion_verifier_session("./rustc --version")
+                        .is_some()
+                );
+            }
+            let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+            let registry = runner.tool_registry.clone();
+            let stop = tokio::spawn(async move {
+                if cancel {
+                    while registry.in_progress_exec_sessions(1).await.is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                    sender.send(SteeringMessage::SteerStop).unwrap();
+                }
+            });
+            let mut runtime =
+                AgentRuntime::new(AgentSessionState::new("verification".into(), 3, 3, 10000), None, Some(receiver));
+            let mut recorder = ExecEventRecorder::new("verification", None, None);
+            let results = runner
+                .run_verification_commands(&["./rustc --version".into(), "pwd".into()], &mut recorder, &mut runtime)
+                .await
+                .unwrap();
+            stop.await.unwrap();
+            assert_eq!(results.len(), 1, "stop on the first unsuccessful verifier");
+            assert!(!results[0].success);
+            assert_eq!(results[0].exit_code, None);
+            assert!(results[0].output.contains(if cancel { "cancelled" } else { "execution limit" }), "{results:?}");
+            assert!(runner.tool_registry.in_progress_exec_sessions(8).await.is_empty());
+            if cancel {
+                assert_eq!(runtime.state.outcome, TaskOutcome::Cancelled);
+            }
+        }
     }
 }

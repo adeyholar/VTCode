@@ -818,7 +818,9 @@ pub(crate) fn block_mutation_until_verification(
     tool_name: &str,
     args_val: &serde_json::Value,
 ) -> Result<MutationVerificationResult> {
-    if !mutation_blocked_until_verification(repeated_tool_attempts, tool_name, args_val) {
+    if ctx.tool_registry.is_completion_verifier_call(tool_name, args_val)
+        || !mutation_blocked_until_verification(repeated_tool_attempts, tool_name, args_val)
+    {
         return Ok(MutationVerificationResult::Allowed);
     }
 

@@ -2,119 +2,7 @@
 
 use super::*;
 
-fn path_targets_plan_artifact(path: &str) -> bool {
-    let normalized = path.trim().replace('\\', "/");
-    normalized == ".vtcode/plans"
-        || normalized.starts_with(".vtcode/plans/")
-        || normalized.contains("/.vtcode/plans/")
-        || normalized == "/tmp/vtcode-plans"
-        || normalized.starts_with("/tmp/vtcode-plans/")
-        || normalized.contains("/tmp/vtcode-plans/")
-}
-
-fn path_is_docs_only(path: &str) -> bool {
-    let normalized = path.trim().replace('\\', "/");
-    let lower = normalized.to_ascii_lowercase();
-    let file_name = lower.rsplit('/').next().unwrap_or_default();
-    // Well-known prose filenames count only with a docs extension or no
-    // extension at all, so `README.py` and `docs/script.py` stay code edits.
-    let stem = file_name.split('.').next().unwrap_or_default();
-    if matches!(stem, "readme" | "changelog" | "license") {
-        let ext = file_name.rsplit('.').next().unwrap_or_default();
-        if ext == stem || matches!(ext, "md" | "mdx" | "txt" | "rst") {
-            return true;
-        }
-    }
-    matches!(file_name.rsplit('.').next(), Some("md" | "mdx" | "txt" | "rst"))
-}
-
-/// Docs-only writes are low-risk prose edits. They neither trip nor clear the
-/// anti-blind gate: while pending they stay allowed (warn-only), and they never
-/// increment `consecutive_mutations`. Mixed docs+code patches, empty path sets,
-/// and exec-tool mutations fail closed as code edits.
-pub(crate) fn is_docs_only_write(name: &str, args: &serde_json::Value) -> bool {
-    use vtcode_core::config::constants::tools as tool_names;
-    use vtcode_core::tools::names::canonical_tool_name;
-    use vtcode_core::tools::tool_intent::file_operation_action;
-
-    let canonical = canonical_tool_name(name);
-    let is_file_write = matches!(
-        canonical,
-        tool_names::APPLY_PATCH
-            | tool_names::WRITE_FILE
-            | tool_names::EDIT_FILE
-            | tool_names::CREATE_FILE
-            | tool_names::SEARCH_REPLACE
-            | tool_names::DELETE_FILE
-            | tool_names::MOVE_FILE
-            | tool_names::COPY_FILE
-            | tool_names::UNIFIED_FILE
-    );
-    if !is_file_write {
-        return false;
-    }
-    if canonical == tool_names::UNIFIED_FILE
-        && file_operation_action(args)
-            .map(|action| action.eq_ignore_ascii_case("read"))
-            .unwrap_or(false)
-    {
-        return false;
-    }
-    let mut paths = vtcode_core::tools::apply_patch::mutation_target_paths(canonical, args);
-    // `mutation_target_paths` SINGULAR_KEYS lacks camelCase `filePath`
-    // (covered by `is_plan_artifact_write`); supplement it so the same
-    // call is not docs-only via `path` but blocked via `filePath`.
-    // Duplicates are harmless: every path must still be docs-only.
-    if let Some(extra) = args.get("filePath").and_then(|value| value.as_str()) {
-        let trimmed = extra.trim();
-        if !trimmed.is_empty() {
-            paths.push(PathBuf::from(trimmed));
-        }
-    }
-    if paths.is_empty() {
-        return false;
-    }
-    paths.iter().all(|path| path.to_str().is_some_and(path_is_docs_only))
-}
-
-pub(crate) fn is_plan_artifact_write(name: &str, args: &serde_json::Value) -> bool {
-    use vtcode_core::config::constants::tools as tool_names;
-    use vtcode_core::tools::names::canonical_tool_name;
-    use vtcode_core::tools::tool_intent::file_operation_action;
-
-    let canonical = canonical_tool_name(name);
-    match canonical {
-        tool_names::TASK_TRACKER => true,
-        tool_names::UNIFIED_FILE => {
-            if !file_operation_action(args)
-                .map(|action| action.eq_ignore_ascii_case("read"))
-                .unwrap_or(false)
-            {
-                [
-                    "path",
-                    "file_path",
-                    "filepath",
-                    "filePath",
-                    "target_path",
-                    "destination",
-                    "destination_path",
-                ]
-                .iter()
-                .filter_map(|key| args.get(*key).and_then(|value| value.as_str()))
-                .any(path_targets_plan_artifact)
-            } else {
-                false
-            }
-        }
-        tool_names::WRITE_FILE | tool_names::EDIT_FILE | tool_names::CREATE_FILE | tool_names::SEARCH_REPLACE => {
-            ["path", "file_path", "filepath", "filePath"]
-                .iter()
-                .filter_map(|key| args.get(*key).and_then(|value| value.as_str()))
-                .any(path_targets_plan_artifact)
-        }
-        _ => false,
-    }
-}
+pub(crate) use vtcode_core::tools::tool_intent::{is_docs_only_write, is_plan_artifact_write};
 
 fn is_execution_tool(name: &str) -> bool {
     use vtcode_core::config::constants::tools as tool_names;
@@ -201,11 +89,32 @@ pub(crate) fn mutation_blocked_until_verification(
 /// while the gate is pending. Completed unverified checker sequences queue
 /// [`PIPED_VERIFICATION_DIRECTIVE`] independently of gate state; that coaching
 /// alone never changes this return value or grants fix-up edits.
+#[cfg(test)]
 pub(crate) fn update_repetition_tracker(
     loop_tracker: &mut LoopTracker,
     outcome: &ToolPipelineOutcome,
     name: &str,
     args: &serde_json::Value,
+) -> bool {
+    update_repetition_tracker_inner(loop_tracker, outcome, name, args, false)
+}
+
+pub(crate) fn update_repetition_tracker_for_registry(
+    loop_tracker: &mut LoopTracker,
+    outcome: &ToolPipelineOutcome,
+    name: &str,
+    args: &serde_json::Value,
+    registry: &vtcode_core::tools::ToolRegistry,
+) -> bool {
+    update_repetition_tracker_inner(loop_tracker, outcome, name, args, registry.is_completion_verifier_call(name, args))
+}
+
+fn update_repetition_tracker_inner(
+    loop_tracker: &mut LoopTracker,
+    outcome: &ToolPipelineOutcome,
+    name: &str,
+    args: &serde_json::Value,
+    registered_verifier: bool,
 ) -> bool {
     if matches!(&outcome.status, ToolExecutionStatus::Cancelled) {
         return false;
@@ -339,7 +248,12 @@ pub(crate) fn update_repetition_tracker(
         // piped only into `head`/`tail` executes standalone, so its truthful
         // exit status is the verifier's and it counts as verification.
         let executed = shell_args_as_executed(canonical_name, args);
-        match classify_shell_activity(canonical_name, &executed) {
+        let activity = if registered_verifier {
+            ShellActivity::Verification
+        } else {
+            classify_shell_activity(canonical_name, &executed)
+        };
+        match activity {
             ShellActivity::Inspection => {
                 loop_tracker.consecutive_navigations = loop_tracker.consecutive_navigations.saturating_add(1);
                 loop_tracker.nav_signatures.insert(navigation_signature_key);

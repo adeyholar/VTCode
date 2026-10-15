@@ -27,6 +27,10 @@ impl ToolRegistry {
                 .tracker_adopted
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        if !is_mcp && tool_name == tools::TASK_TRACKER && self.tracker_adopted_for_request() {
+            self.observe_required_completion_verifiers(&value);
+        }
+        self.observe_completion_mutation(tool_name, args, &value);
         // Dynamic context discovery: spool large outputs to files
         let mut value = value;
         if tool_intent::is_spool_file_read_command(tool_name, args) {

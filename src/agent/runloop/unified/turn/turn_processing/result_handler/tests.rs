@@ -340,6 +340,79 @@ async fn exhausted_budget_blocks_verification_without_reminder_rounds() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn required_custom_verifiers_cross_the_interactive_gate_and_preserve_repair_accounting() {
+    use std::os::unix::fs::PermissionsExt;
+    use vtcode_core::config::constants::tools;
+
+    for harness_issued in [false, true] {
+        for exit_code in [0, 7] {
+            let mut backing = TestTurnProcessingBacking::new(8).await;
+            let marker = {
+                let ctx = backing.turn_processing_context();
+                let script = ctx.tool_registry.workspace_root().join("verify.sh");
+                let marker = ctx.tool_registry.workspace_root().join("verifier-ran");
+                std::fs::write(&script, format!("#!/bin/sh\ntouch verifier-ran\nexit {exit_code}\n")).unwrap();
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+                ctx.tool_registry.allow_all_tools().await.unwrap();
+                let mut commands = ctx.tool_registry.commands_config();
+                commands.allow_list.push("./verify.sh".into());
+                ctx.tool_registry.apply_commands_config(&commands);
+                let tracker = ctx
+                    .tool_registry
+                    .execute_tool(
+                        tools::TASK_TRACKER,
+                        serde_json::json!({
+                            "action":"create", "title":"Custom check", "items":[{
+                                "description":"Verify", "status":"completed", "verify":["./verify.sh"]
+                            }]
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                assert!(tracker.get("error").is_none(), "{tracker}");
+                ctx.tool_registry.restore_completion_verification_debt();
+                marker
+            };
+            let mut tracker = LoopTracker::new();
+            tracker.mark_verification_pending();
+            let mut modified = BTreeSet::new();
+            if harness_issued {
+                let outcome = drive_pending_texts(&mut backing, &mut tracker, &mut modified, 6).await;
+                assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+            } else {
+                drive_model_tool_call(
+                    &mut backing,
+                    &mut tracker,
+                    &mut modified,
+                    tools::EXEC_COMMAND,
+                    r#"{"cmd":"./verify.sh"}"#,
+                )
+                .await;
+            }
+            assert!(marker.exists(), "the required verifier must execute through the pending gate");
+            assert_eq!(tracker.verification_is_pending(), exit_code != 0);
+            assert_eq!(
+                backing
+                    .turn_processing_context()
+                    .tool_registry
+                    .completion_verification_pending(),
+                exit_code != 0
+            );
+            assert_eq!(tracker.consecutive_mutations, 0, "a declared check is not a repair edit");
+            assert_eq!(
+                tracker.fix_edits_remaining,
+                if exit_code == 0 {
+                    0
+                } else {
+                    super::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE
+                }
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn harness_waits_for_a_running_verifier_instead_of_starting_another() {
     use std::os::unix::fs::PermissionsExt;
     let mut backing = TestTurnProcessingBacking::new(8).await;
@@ -1444,4 +1517,36 @@ async fn denied_interview_retries_plain_text_once_before_approval() {
     .await
     .expect("denied interview response should schedule synthesis");
     assert!(matches!(first, TurnHandlerOutcome::Continue));
+}
+
+#[tokio::test]
+async fn completion_verification_short_edit_arms_gate_without_completion_wording() {
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    backing.set_verification_override_for_test("rustc --version");
+    let mut tracker = LoopTracker::new();
+    let mut modified = BTreeSet::new();
+    drive_model_tool_call(
+        &mut backing,
+        &mut tracker,
+        &mut modified,
+        "apply_patch",
+        r#"{"input":"*** Begin Patch\n*** Add File: main.rs\n+fn main() {}\n*** End Patch"}"#,
+    )
+    .await;
+    assert!(!tracker.verification_is_pending(), "one edit must not trip the six-edit pacing checkpoint");
+    assert!(
+        backing
+            .turn_processing_context()
+            .tool_registry
+            .completion_verification_pending()
+    );
+    let outcome = drive_pending_texts(&mut backing, &mut tracker, &mut modified, 4).await;
+    assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+    assert!(!tracker.verification_is_pending());
+    assert!(
+        !backing
+            .turn_processing_context()
+            .tool_registry
+            .completion_verification_pending()
+    );
 }

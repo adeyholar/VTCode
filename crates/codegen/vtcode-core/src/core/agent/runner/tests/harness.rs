@@ -1042,3 +1042,70 @@ async fn refusal_explanation_falls_back_to_trimmed_content() {
         )
     );
 }
+
+#[tokio::test]
+async fn headless_changed_code_cannot_skip_verification_with_continuation_off_or_neutral_text() {
+    for verifier in [None, Some("rustc --version")] {
+        let temp = TempDir::new().unwrap();
+        let mut cfg = VTCodeConfig::default();
+        cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
+        cfg.agent.harness.continuation_policy = vtcode_config::core::agent::ContinuationPolicy::Off;
+        cfg.agent.harness.verification.default_verifier_override = verifier.map(str::to_owned);
+        cfg.automation.full_auto.max_turns = 3;
+        let mut runner = Box::pin(make_runner(&temp, cfg, "short-edit")).await;
+        runner.enable_full_auto(&[tools::APPLY_PATCH.into()]).await;
+        runner.tool_registry.allow_all_tools().await.unwrap();
+        let provider = RecordingQueuedProvider::new(vec![
+            tool_call_response(
+                tools::APPLY_PATCH,
+                json!({"input":"*** Begin Patch\n*** Add File: main.rs\n+fn main() {}\n*** End Patch"}),
+            ),
+            text_response("Applied the requested change."),
+        ]);
+        runner.provider_client = Box::new(provider.clone());
+        let result = Box::pin(runner.execute_task(&task("One code edit", "exec-task"), &[]))
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{error}; requests: {:?}",
+                    provider
+                        .recorded_requests()
+                        .iter()
+                        .map(|request| &request.messages)
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert!(workspace_root(&temp).join("main.rs").exists(), "{:?}", result.outcome);
+        assert_eq!(result.outcome.is_success(), verifier.is_some(), "{:?}", result.outcome);
+        if verifier.is_none() {
+            assert!(result.outcome.description().contains("Unverified"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn headless_completion_reuses_a_fresh_model_run_check() {
+    let temp = TempDir::new().unwrap();
+    let mut cfg = VTCodeConfig::default();
+    cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
+    cfg.agent.harness.continuation_policy = vtcode_config::core::agent::ContinuationPolicy::Off;
+    let mut runner = Box::pin(make_runner(&temp, cfg, "reuse-verifier")).await;
+    runner
+        .enable_full_auto(&[tools::APPLY_PATCH.into(), tools::EXEC_COMMAND.into()])
+        .await;
+    runner.tool_registry.allow_all_tools().await.unwrap();
+    runner.provider_client = Box::new(QueuedProvider::new(vec![
+        tool_call_response(
+            tools::APPLY_PATCH,
+            json!({"input":"*** Begin Patch\n*** Add File: main.rs\n+fn main() {}\n*** End Patch"}),
+        ),
+        tool_call_response(tools::EXEC_COMMAND, json!({"cmd":"rustc --version"})),
+        text_response("The task is complete."),
+    ]));
+    let result = Box::pin(runner.execute_task(&task("Reuse verifier", "exec-task"), &[]))
+        .await
+        .unwrap();
+    assert_eq!(result.outcome, TaskOutcome::Success);
+    assert!(!harness_events(&result).contains(&HarnessEventKind::VerificationStarted));
+    assert!(workspace_root(&temp).join("main.rs").exists());
+}

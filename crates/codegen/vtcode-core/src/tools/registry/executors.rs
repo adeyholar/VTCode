@@ -450,6 +450,17 @@ impl ToolRegistry {
         args: Value,
         exec_settlement_mode: ExecSettlementMode,
     ) -> Result<Value> {
+        let launch = self.begin_completion_verifier(&args);
+        let result = self.execute_command_session_observed(args.clone(), exec_settlement_mode).await;
+        self.observe_completion_verifier(launch, &args, &result);
+        result
+    }
+
+    async fn execute_command_session_observed(
+        &self,
+        args: Value,
+        exec_settlement_mode: ExecSettlementMode,
+    ) -> Result<Value> {
         let args = crate::tools::command_args::normalize_shell_args(&args).map_err(|error| anyhow!(error))?;
 
         let action_str =
@@ -689,22 +700,30 @@ impl ToolRegistry {
     pub(super) async fn execute_write_stdin(&self, args: Value, settlement_mode: ExecSettlementMode) -> Result<Value> {
         let (args, dispatch) = normalize_write_stdin_args(&args)?;
 
-        let response = match dispatch {
-            crate::tools::command_args::WriteStdinDispatch::Write => {
-                self.execute_command_session_write_for_tool(args, tools::WRITE_STDIN).await
-            }
-            crate::tools::command_args::WriteStdinDispatch::Poll => {
-                self.execute_command_session_poll_for_tool(args, settlement_mode, tools::WRITE_STDIN)
-                    .await
-            }
-            crate::tools::command_args::WriteStdinDispatch::Wait => self.execute_command_session_wait(args).await,
-            crate::tools::command_args::WriteStdinDispatch::Inspect => self.execute_command_session_inspect(args).await,
-            crate::tools::command_args::WriteStdinDispatch::Terminate => {
-                self.execute_command_session_terminate(args).await
-            }
-            crate::tools::command_args::WriteStdinDispatch::Close => self.execute_command_session_close(args).await,
-        }?;
-        Ok(response)
+        let observed_args = args.clone();
+        let result = async {
+            let response = match dispatch {
+                crate::tools::command_args::WriteStdinDispatch::Write => {
+                    self.execute_command_session_write_for_tool(args, tools::WRITE_STDIN).await
+                }
+                crate::tools::command_args::WriteStdinDispatch::Poll => {
+                    self.execute_command_session_poll_for_tool(args, settlement_mode, tools::WRITE_STDIN)
+                        .await
+                }
+                crate::tools::command_args::WriteStdinDispatch::Wait => self.execute_command_session_wait(args).await,
+                crate::tools::command_args::WriteStdinDispatch::Inspect => {
+                    self.execute_command_session_inspect(args).await
+                }
+                crate::tools::command_args::WriteStdinDispatch::Terminate => {
+                    self.execute_command_session_terminate(args).await
+                }
+                crate::tools::command_args::WriteStdinDispatch::Close => self.execute_command_session_close(args).await,
+            }?;
+            Ok(response)
+        }
+        .await;
+        self.observe_completion_verifier(None, &observed_args, &result);
+        result
     }
 
     pub(super) fn send_pty_input_executor(&self, args: Value) -> BoxFuture<'_, Result<Value>> {

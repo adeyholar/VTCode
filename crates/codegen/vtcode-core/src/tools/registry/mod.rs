@@ -10,6 +10,7 @@ mod catalog_facade;
 mod cgp_facade;
 mod circuit_breaker;
 mod commands_facade;
+mod completion_verification;
 mod config_helpers;
 mod distributed;
 mod dual_output;

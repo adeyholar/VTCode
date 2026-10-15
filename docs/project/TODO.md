@@ -11,3 +11,7 @@ gui
 --
 
 computer use
+
+---
+
+add /fast command to enable `ultrafast` mode for compatible OpenAI models. check existing ultrafast service tier and logic setup and build the necessary integration for it.

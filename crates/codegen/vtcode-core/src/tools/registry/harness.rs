@@ -17,6 +17,7 @@ use super::execution_history::HarnessContextSnapshot;
 pub struct HarnessContext {
     session_id: Arc<ArcSwap<String>>,
     task_id: Arc<ArcSwapOption<String>>,
+    pub(super) completion_verification: Arc<parking_lot::Mutex<super::completion_verification::CompletionVerification>>,
     pub(super) tracker_adopted: Arc<AtomicBool>,
     pub(super) decision_validator:
         Arc<parking_lot::RwLock<Option<crate::core::agent::events::DecisionEvidenceValidator>>>,
@@ -42,6 +43,7 @@ impl Default for HarnessContext {
             session_id: Arc::new(ArcSwap::from_pointee(session_id)),
             task_id: Arc::new(ArcSwapOption::empty()),
             tracker_adopted: Arc::default(),
+            completion_verification: Arc::default(),
             decision_validator: Arc::default(),
         }
     }
@@ -54,6 +56,7 @@ impl HarnessContext {
             session_id: Arc::new(ArcSwap::from_pointee(session_id.into())),
             task_id: Arc::new(ArcSwapOption::empty()),
             tracker_adopted: Arc::default(),
+            completion_verification: Arc::default(),
             decision_validator: Arc::default(),
         }
     }

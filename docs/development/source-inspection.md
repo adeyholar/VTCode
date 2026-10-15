@@ -11,7 +11,8 @@ require rereading every touched file in advisory mode.
 mode = "warn" # default; "enforce" blocks missing exposure, "off" disables this guard
 ```
 
-The six-mutation **Verification checkpoint** remains independent. Run an
+The six-mutation **Verification checkpoint** remains independent. Successful
+completion after any code change also requires [fresh verification](completion-verification.md). Run an
 appropriate build, test, lint, or documentation check after a bounded change.
 In strict mode, passing verification never authorizes an unseen edit, including
 a repair after a failed verifier. Advisory mode permits missing exposure without
@@ -21,6 +22,7 @@ changing the independent verification, sandbox, approval, or command policies.
 
 | Operation | Strict-mode required inspection |
 | --- | --- |
+| Successful completion after code changes | Fresh terminal verifier exit zero after the last edit; required tracker checks pass |
 | Local patch | Original context/removal lines and resolved anchor |
 | Insertion or append | Adjacent source at the insertion boundary |
 | Literal edit | Source selected by the replacement matcher |

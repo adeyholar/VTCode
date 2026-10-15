@@ -210,6 +210,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Extension Boundaries in VT Code?", "How does Why This Exists work?",
     "How does Default Extension Order work?"
 
+- **File**: `docs/development/completion-verification.md`
+  - **Content**: Fresh verification before successful completion
+  - **Topics**: Research provenance
+  - **User Questions**: "What can you tell me about Fresh verification before successful completion?", "How does
+    Research provenance work?"
+
 - **File**: `docs/development/fuzzing.md`
   - **Content**: Fuzzing Guide
   - **Topics**: Scope, Oracles, Fuzzer-first fixes, Basic Commands, Corpus and Artifacts

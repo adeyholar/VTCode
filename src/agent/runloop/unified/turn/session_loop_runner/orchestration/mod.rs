@@ -498,6 +498,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 &runtime.state.messages,
             ),
         );
+        tool_registry.restore_completion_verification_from_history(&runtime.state.messages);
         let durable_session_id = tool_registry.harness_context_snapshot().session_id;
         if let Some(envelope) = vtcode_core::compaction::memory_envelope::load_latest_memory_envelope_async(
             config.workspace.as_path(),

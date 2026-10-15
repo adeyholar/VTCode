@@ -3308,3 +3308,26 @@ fn promoted_listing_repeat_counts_toward_low_signal_telemetry() {
     assert_eq!(tracker.consecutive_low_signal_navigations, 1);
     assert_eq!(tracker.max_coarse_listing_count(), 3);
 }
+
+#[test]
+fn verification_completion_after_a_later_edit_cannot_clear_the_checkpoint() {
+    let mut tracker = LoopTracker::new();
+    tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD - 1;
+    tracker.pending_verifier_session_id = Some("old-check".into());
+    tracker.record_successful_mutation();
+    assert!(tracker.verification_is_pending());
+    let terminal = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+        output: json!({"exit_code":0}),
+        stdout: None,
+        modified_files: vec![],
+        command_success: true,
+    });
+    update_repetition_tracker(
+        &mut tracker,
+        &terminal,
+        tools::WRITE_STDIN,
+        &json!({"session_id":"old-check","chars":""}),
+    );
+    assert!(tracker.verification_is_pending());
+    assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
+}

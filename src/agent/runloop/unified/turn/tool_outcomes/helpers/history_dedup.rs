@@ -319,7 +319,7 @@ pub(super) fn error_text_indicates_lost_session(error: &str) -> bool {
 /// follow-ups carry a `session_id`, not command text, so they never classify
 /// as [`ShellActivity::Verification`]. A missing-session failure on one of
 /// them therefore needs its own lost-result branch in
-/// [`update_repetition_tracker`]: the verifier output it was waiting on died
+/// [`update_repetition_tracker_for_registry`]: the verifier output it was waiting on died
 /// with the session. Fresh `run` calls are excluded: a run creates its
 /// session, so it cannot lose a prior verifier's result.
 pub(super) fn is_session_follow_up(canonical_name: &str, args: &serde_json::Value) -> bool {

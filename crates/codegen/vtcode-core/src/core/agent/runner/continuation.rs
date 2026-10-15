@@ -275,7 +275,13 @@ impl ContinuationController {
     }
 
     pub(super) async fn after_verification(&mut self, results: &[VerificationResult]) -> Result<CompletionAssessment> {
-        let first_failure = results.iter().find(|result| !result.success);
+        if results.is_empty() {
+            return Ok(CompletionAssessment::Continue {
+                reason: "Unverified: no verification results were observed.".to_string(),
+                prompt: "Run a verifier and observe its terminal exit before completing changed code.".to_string(),
+            });
+        }
+        let first_failure = results.iter().find(|result| !result.success || result.exit_code != Some(0));
         if let Some(failure) = first_failure {
             let summary = build_verification_failure_summary(failure);
             if self.manages_internal_scaffold {
@@ -298,11 +304,7 @@ impl ContinuationController {
         }
 
         if self.manages_internal_scaffold {
-            let summary = if results.is_empty() {
-                "Verification passed.".to_string()
-            } else {
-                format!("Verification passed: {}", format_command_list(results))
-            };
+            let summary = format!("Verification passed: {}", format_command_list(results));
             self.update_internal_step(3, "completed", None, Some(summary), None).await?;
         }
 
@@ -554,7 +556,7 @@ fn format_command_list(results: &[VerificationResult]) -> String {
 fn build_verification_failure_summary(failure: &VerificationResult) -> String {
     match failure.exit_code {
         Some(code) => format!("Verification failed: {} (exit code {}).", failure.command, code),
-        None => format!("Verification failed: {}.", failure.command),
+        None => format!("Unverified: {} produced no terminal verdict.", failure.command),
     }
 }
 
@@ -882,5 +884,24 @@ mod tests {
         assert!(handoff("Permission denied for exec_command. Next step: retry after access is granted."));
         assert!(handoff("I hit the tool-call safety fuse mid-verification; policy block."));
         assert!(!handoff("## Status\nBlocked by turn budget. Next step: read design/diff.rs."));
+    }
+    #[tokio::test]
+    async fn empty_or_missing_terminal_verification_results_cannot_be_accepted() {
+        let temp = TempDir::new().unwrap();
+        let mut controller = make_controller(&temp, ContinuationPolicy::Off, false);
+        for results in [
+            vec![],
+            vec![VerificationResult {
+                command: "cargo check".into(),
+                success: true,
+                exit_code: None,
+                output: "still running".into(),
+            }],
+        ] {
+            assert!(matches!(
+                controller.after_verification(&results).await.unwrap(),
+                CompletionAssessment::Continue { .. }
+            ));
+        }
     }
 }

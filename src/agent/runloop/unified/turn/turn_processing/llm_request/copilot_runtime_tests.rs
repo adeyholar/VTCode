@@ -748,7 +748,7 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
     safety_validator.start_turn();
     let traj = TrajectoryLogger::new(temp.path());
     let mut harness_state =
-        HarnessTurnState::new(TurnRunId("run-test".to_string()), TurnId("turn-test".to_string()), 8, 60, 0);
+        HarnessTurnState::new(TurnRunId("run-test".to_string()), TurnId("turn-test".to_string()), 10, 60, 0);
     harness_state.record_assistant_text_response();
     harness_state.record_assistant_text_response();
     let tools = Arc::new(vec![
@@ -959,4 +959,60 @@ async fn copilot_blocks_mutating_tool_calls_while_verification_is_pending() {
             "patch": "*** Begin Patch\n*** Add File: resumed.txt\n+mutation is unblocked\n*** End Patch\n"
         }),
     ));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        use vtcode_core::config::constants::tools;
+        let script = temp.path().join("verify.sh");
+        let marker = temp.path().join("custom-check-ran");
+        runtime_host.tool_registry.allow_all_tools().await.unwrap();
+        let mut commands = runtime_host.tool_registry.commands_config();
+        commands.allow_list.push("./verify.sh".into());
+        runtime_host.tool_registry.apply_commands_config(&commands);
+        let tracker = runtime_host
+            .tool_registry
+            .execute_tool(
+                tools::TASK_TRACKER,
+                json!({
+                    "action":"create", "title":"Native custom check", "items":[{
+                        "description":"Verify", "status":"completed", "verify":["./verify.sh"]
+                    }]
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(tracker.get("error").is_none(), "{tracker}");
+        runtime_host.tool_registry.restore_completion_verification_debt();
+        runtime_host.loop_tracker.as_deref_mut().unwrap().mark_verification_pending();
+        for exit_code in [7, 0] {
+            std::fs::write(&script, format!("#!/bin/sh\ntouch custom-check-ran\nexit {exit_code}\n")).unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let response = runtime_host
+                .handle_vtcode_tool_call(
+                    &mut renderer,
+                    vtcode_core::copilot::CopilotToolCallRequest {
+                        tool_call_id: format!("custom-verifier-{exit_code}"),
+                        tool_name: tools::EXEC_COMMAND.into(),
+                        arguments: json!({"cmd":"./verify.sh"}),
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(marker.exists(), "{response:?}");
+            std::fs::remove_file(&marker).unwrap();
+            assert_eq!(matches!(response, CopilotToolCallResponse::Success(_)), exit_code == 0);
+            let tracker = runtime_host.loop_tracker.as_deref().unwrap();
+            assert_eq!(tracker.verification_is_pending(), exit_code != 0);
+            assert_eq!(
+                tracker.fix_edits_remaining,
+                if exit_code == 0 {
+                    0
+                } else {
+                    crate::agent::runloop::unified::turn::tool_outcomes::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE
+                }
+            );
+            assert_eq!(runtime_host.tool_registry.completion_verification_pending(), exit_code != 0);
+        }
+    }
 }

@@ -509,6 +509,9 @@ pub(crate) async fn run_turn_loop(
     let mut turn_usage = HarnessUsage::default();
     // Optimization: Interned signatures with exponential backoff for loop detection
     let mut repeated_tool_attempts = LoopTracker::with_verification_snapshot(ctx.session_stats.verification_snapshot());
+    if ctx.session_stats.verification_snapshot().0 {
+        ctx.tool_registry.restore_completion_verification_debt();
+    }
     if repeated_tool_attempts.verification_is_pending() {
         repeated_tool_attempts.verification_warning_emitted = true;
         let has_recent_verification_directive = working_history.iter().rev().take(8).any(|message| {
@@ -1618,6 +1621,17 @@ pub(crate) async fn run_turn_loop(
         result = stop;
         pending_primary_agent = None;
         pending_plan_execution_target = None;
+    }
+    if !ctx.is_planning_active()
+        && matches!(result, TurnLoopResult::Completed { plan_approved_execution_pending: false })
+        && ctx.tool_registry.completion_verification_pending()
+    {
+        repeated_tool_attempts.mark_verification_pending();
+        ctx.session_stats
+            .set_verification_snapshot(repeated_tool_attempts.verification_snapshot());
+        result = TurnLoopResult::Blocked {
+            reason: Some(ctx.tool_registry.unverified_completion_reason()),
+        };
     }
     ctx.session_stats.preflight_recovery.finish_corrective_turn();
     if ctx.session_stats.preflight_recovery.exhausted()
