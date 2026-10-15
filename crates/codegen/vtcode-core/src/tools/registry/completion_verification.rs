@@ -329,8 +329,15 @@ impl ToolRegistry {
                 )
             })
             .unwrap_or_else(|| " No terminal verifier evidence was observed.".to_string());
+        let remaining = state.required_commands.iter().find(|command| !state.command_passed(command));
+        let required = remaining.map_or_else(String::new, |command| {
+            let preview = vtcode_commons::formatting::truncate_within(command, 1024, "...");
+            format!(
+                " Next required tracker check: `{preview}`. Run this exact command; a different passing check does not satisfy it."
+            )
+        });
         format!(
-            "Verification is still pending: Unverified: changed code requires fresh verification before successful completion.{evidence}"
+            "Verification is still pending: Unverified: changed code requires fresh verification before successful completion.{evidence}{required}"
         )
     }
 

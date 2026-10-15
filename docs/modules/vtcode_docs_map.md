@@ -212,9 +212,9 @@ below based on the topic area.
 
 - **File**: `docs/development/completion-verification.md`
   - **Content**: Fresh verification before successful completion
-  - **Topics**: Research provenance
+  - **Topics**: Implementation boundaries, Research provenance
   - **User Questions**: "What can you tell me about Fresh verification before successful completion?", "How does
-    Research provenance work?"
+    Implementation boundaries work?", "How does Research provenance work?"
 
 - **File**: `docs/development/fuzzing.md`
   - **Content**: Fuzzing Guide

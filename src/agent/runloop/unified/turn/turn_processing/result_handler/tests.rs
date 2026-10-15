@@ -338,6 +338,97 @@ async fn exhausted_budget_blocks_verification_without_reminder_rounds() {
     assert_eq!(ctx.session_stats.verification_consecutive_failures(), 0);
 }
 
+#[tokio::test]
+async fn required_verifier_recovery_advances_checks_instead_of_repeating_the_default() {
+    use vtcode_core::config::constants::tools;
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    let mut cfg = vtcode_core::config::loader::VTCodeConfig::default();
+    cfg.agent.harness.verification.auto_execute = false;
+    cfg.agent.harness.verification.default_verifier_override = Some("rustc --version".into());
+    backing.set_vt_cfg_for_test(cfg);
+    let mut tracker = LoopTracker::new();
+    tracker.mark_verification_pending();
+    let mut ctx = backing.turn_processing_context();
+    ctx.tool_registry.allow_all_tools().await.unwrap();
+    let output = ctx.tool_registry.execute_tool(tools::TASK_TRACKER, serde_json::json!({
+        "action":"create", "items":[{"description":"Check README", "verify":["rustc --version", "rustc --help"]}]
+    })).await.unwrap();
+    assert!(output.get("error").is_none(), "{output}");
+    ctx.tool_registry.restore_completion_verification_debt();
+    let first = ctx
+        .tool_registry
+        .execute_tool(tools::EXEC_COMMAND, serde_json::json!({"cmd":"rustc --version"}))
+        .await
+        .unwrap();
+    assert_eq!(first["exit_code"], 0);
+    assert_eq!(
+        super::helpers::resolve_pending_verifier_command(ctx.vt_cfg, ctx.tool_registry, ctx.working_history).as_deref(),
+        Some("rustc --help")
+    );
+    for _ in 0..2 {
+        assert!(matches!(
+            ctx.handle_pending_verification_text_response(&mut tracker, "Still checking.")
+                .unwrap(),
+            super::PendingVerificationTextOutcome::Continue
+        ));
+    }
+    let directive = ctx.working_history.last().unwrap().content.as_text();
+    assert!(directive.contains("rustc --help"), "{directive}");
+    assert!(!directive.contains("rustc --version"), "{directive}");
+    assert_eq!(ctx.session_stats.verification_consecutive_failures(), 0);
+}
+
+#[tokio::test]
+async fn harness_required_verifiers_report_progress_and_finish_without_repeating_checks() {
+    use vtcode_core::config::constants::tools;
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    backing.set_verification_override_for_test("rustc --invalid-fallback");
+    {
+        let ctx = backing.turn_processing_context();
+        ctx.tool_registry.allow_all_tools().await.unwrap();
+        let output = ctx
+            .tool_registry
+            .execute_tool(
+                tools::TASK_TRACKER,
+                serde_json::json!({
+                    "action":"create", "items":[{"description":"Check", "verify":["rustc --version", "rustc --help"]}]
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(output.get("error").is_none(), "{output}");
+        ctx.tool_registry.restore_completion_verification_debt();
+    }
+    let mut tracker = LoopTracker::new();
+    tracker.mark_verification_pending();
+    let mut modified = BTreeSet::new();
+    for command in ["rustc --version", "rustc --help"] {
+        let mut ctx = backing.turn_processing_context();
+        let history_start = ctx.working_history.len();
+        let outcome =
+            super::execute_harness_auto_verification(&mut ctx, &mut tracker, &mut modified, 1, 8, 4, command.into())
+                .await
+                .unwrap();
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        assert!(ctx.tool_registry.completion_verifier_passed(command));
+        if command == "rustc --version" {
+            assert!(tracker.verification_is_pending());
+            assert!(ctx.working_history[history_start..].iter().any(|message| {
+                message.role == uni::MessageRole::System
+                    && message
+                        .content
+                        .as_text()
+                        .contains("Next required tracker check: `rustc --help`")
+            }));
+            assert!(tracker.should_auto_execute_verifier());
+        } else {
+            assert!(!tracker.verification_is_pending());
+            assert!(!ctx.tool_registry.completion_verification_pending());
+        }
+        assert_eq!(ctx.session_stats.verification_consecutive_failures(), 0);
+    }
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn required_custom_verifiers_cross_the_interactive_gate_and_preserve_repair_accounting() {

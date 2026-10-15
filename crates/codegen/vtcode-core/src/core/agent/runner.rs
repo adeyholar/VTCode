@@ -69,6 +69,7 @@ mod tool_rejection;
 mod tool_types;
 mod types;
 mod validation;
+mod verification;
 mod workspace_detection;
 
 /// Attach an eagerly initialized MCP client to the runner's tool registry.

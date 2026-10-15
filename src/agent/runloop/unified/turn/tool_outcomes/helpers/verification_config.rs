@@ -146,6 +146,17 @@ pub(crate) fn resolve_harness_verifier_command(
         .or_else(|| vtcode_core::tools::tool_intent::default_verifier_for_workspace(workspace_root))
 }
 
+/// Recovery must advance mandatory checks before suggesting a generic project check.
+pub(crate) fn resolve_pending_verifier_command(
+    vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>,
+    registry: &vtcode_core::tools::ToolRegistry,
+    history: &[uni::Message],
+) -> Option<String> {
+    registry
+        .next_required_completion_verifier()
+        .or_else(|| resolve_harness_verifier_command(vt_cfg, registry.workspace_root().as_path(), history))
+}
+
 fn configured_verifier(vt_cfg: Option<&vtcode_core::config::loader::VTCodeConfig>) -> Option<String> {
     if let Some(override_command) = vt_cfg
         .and_then(|cfg| cfg.agent.harness.verification.default_verifier_override.as_deref())

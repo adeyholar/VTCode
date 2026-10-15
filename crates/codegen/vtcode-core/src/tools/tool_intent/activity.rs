@@ -72,7 +72,15 @@ fn is_verification_invocation(words: &[String]) -> bool {
                 .iter()
                 .enumerate()
                 .skip(1)
-                .find(|(_, word)| !matches!(word.as_str(), "--yes" | "-y" | "--no-install"))
+                .find(|(_, word)| {
+                    !matches!(word.as_str(), "--yes" | "-y" | "--no-install")
+                        && !word.strip_prefix("--loglevel=").is_some_and(|level| {
+                            matches!(
+                                level,
+                                "silent" | "error" | "warn" | "notice" | "http" | "info" | "verbose" | "silly"
+                            )
+                        })
+                })
                 .map(|(index, _)| index);
             package_index.is_some_and(|index| {
                 let Some(package) = command_words.get(index) else {
@@ -943,6 +951,7 @@ mod tests {
             "markdownlint-cli2 README.md",
             "npx --yes markdownlint-cli2 README.md",
             "npx --no-install markdownlint-cli2@0.23.3 README.md",
+            "npx --yes --loglevel=error markdownlint-cli2@0.23.3 --config .markdownlint-cli2.jsonc ':README.md'",
             "npx -y markdownlint-cli2 README.md && cargo check --locked",
             "python3 scripts/check_markdown.py",
             "python ./scripts/check_markdown.py",
@@ -960,6 +969,9 @@ mod tests {
             "npx --yes markdownlint-cli2 --fix=true README.md",
             "markdownlint-cli2 --version",
             "npx --package evil markdownlint-cli2 README.md",
+            "npx --loglevel=error --package evil markdownlint-cli2 README.md",
+            "npx --loglevel=error markdownlint-cli2 --fix README.md",
+            "npx --loglevel=unknown markdownlint-cli2 README.md",
             "npx markdownlint-cli2@evil README.md",
             "npx markdownlint-cli2 README.md && rm README.md",
             "python3 scripts/check_markdown.py --fix",

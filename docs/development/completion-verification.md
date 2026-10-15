@@ -32,6 +32,14 @@ checks. Eligible declared custom checks count as verification rather than
 invalidating their own verdict as mutations; command admission remains unchanged.
 The interactive checkpoint shares this classification, including yielded custom
 checks and the bounded repair allowance after failure.
+Recovery directives and blocked handoffs select the next missing tracker command
+before a configured or detected project verifier. Partial success names the next
+required check, so a passing generic build does not cause repeated recovery when
+a different command remains unsatisfied. Run required commands exactly; changing
+options or grouping checks into a different shell command does not establish the
+same execution identity. Preserve verification metadata when updating task status.
+Recognized `npx --loglevel=<level>` options change logging only: a Markdown lint
+check remains verification, while `--fix` still counts as a mutation.
 Native terminal adapters may supply empty argv and environment containers.
 Nonempty launch context still cannot receive command-only verification credit.
 Otherwise the harness uses the existing configured verifier override and project
@@ -55,6 +63,23 @@ status. Report the command, observed evidence, and blocker. A passing build
 establishes a build result; behavioral correctness still needs an appropriate
 regression or exercised user flow. Automatic coverage selection, browser checks,
 and fingerprints for external workspace changes are outside this policy.
+
+## Implementation boundaries
+
+The registry owns freshness and required-check evidence.
+`core/agent/runner/verification.rs` owns headless command execution, bounded
+waiting, cancellation, and cleanup; its private tests exercise the runner method.
+The interactive session's `session_loop_runner/verification_recovery.rs` owns
+cross-turn recovery selection and queue admission. The session loop retains
+rendering and Exit/continue control flow.
+Request projection regressions live in `llm_request/request_builder/tests.rs`;
+verification, checker-session, and recovery suites live under
+`tool_outcomes/helpers/tests/`, sharing private parent fixtures.
+
+Recovery attempts count only after the follow-up queue accepts them. A full
+queue publishes no directive and preserves prior attempts and failure evidence;
+it cannot reset the episode or refill recovery budgets. The accepted directive
+is appended after queue admission, preserving existing queued user input order.
 
 ## Research provenance
 

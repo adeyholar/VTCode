@@ -204,9 +204,8 @@ impl TurnProcessingContext<'_> {
         let max_attempts = helpers::verification_in_turn_attempts(self.vt_cfg);
         if repeated_tool_attempts.record_verification_auto_recovery_with_limit(max_attempts) {
             let attempt = repeated_tool_attempts.verification_auto_recovery_attempts();
-            let workspace_root = self.tool_registry.workspace_root();
             let default_verifier =
-                helpers::resolve_harness_verifier_command(self.vt_cfg, workspace_root.as_path(), self.working_history);
+                helpers::resolve_pending_verifier_command(self.vt_cfg, self.tool_registry, self.working_history);
             let directive = vtcode_core::tools::tool_intent::verification_recovery_directive(
                 default_verifier.as_deref(),
                 attempt,
@@ -253,13 +252,8 @@ impl TurnProcessingContext<'_> {
             && self.session_stats.verification_consecutive_failures() < max_failures
             && repeated_tool_attempts.should_auto_execute_verifier()
         {
-            let command = self.tool_registry.next_required_completion_verifier().or_else(|| {
-                helpers::resolve_harness_verifier_command(
-                    self.vt_cfg,
-                    self.tool_registry.workspace_root().as_path(),
-                    self.working_history,
-                )
-            });
+            let command =
+                helpers::resolve_pending_verifier_command(self.vt_cfg, self.tool_registry, self.working_history);
             return command.or_else(|| {
                 repeated_tool_attempts
                     .pending_verifier_session_id
@@ -406,6 +400,10 @@ pub(crate) async fn execute_harness_auto_verification(
         } else if t_ctx_inner.ctx.tool_registry.completion_verification_pending() {
             // A required check remains, or this verifier predates a later edit.
             t_ctx_inner.repeated_tool_attempts.mark_verification_pending();
+            t_ctx_inner
+                .ctx
+                .working_history
+                .push(uni::Message::system(t_ctx_inner.ctx.tool_registry.unverified_completion_reason()));
         } else {
             t_ctx_inner.ctx.session_stats.record_verification_auto_success();
             t_ctx_inner.ctx.working_history.push(uni::Message::system(format!(

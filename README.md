@@ -60,15 +60,18 @@ Explore a codebase, plan changes, run tools, and review edits, in the interactiv
 `vtcode exec`. You pick the model and the permissions; the runtime handles context management, tool calls, and
 execution policy.
 
-| At a glance      | What you get                                                                              |
-| ---------------- | ----------------------------------------------------------------------------------------- |
-| **Planning**     | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs.             |
-| **Safety**       | [Auditable command policy](./docs/security/SECURITY_MODEL.md) and sandboxing.             |
-| **Self-correct** | [HOVER loop](./docs/development/hypothesis-revision-validation.md): Hypothesize, Observe, |
-|                  | Verify, Evaluate, Revise, Repeat on tool mismatch.                                        |
-| **Long runs**    | [Headless exec](./docs/user-guide/exec-mode.md) with compaction, resumption, and logs.    |
-| **Integrations** | [MCP](./docs/guides/mcp-integration.md), Skills, plugins, and editor bridges.             |
-| **Models**       | [Hosted or local providers](./docs/README.md#provider-index), chosen per task.            |
+<!-- markdownlint-disable MD013 -->
+
+| At a glance      | What you get                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------   |
+| **Planning**     | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs.                                                                |
+| **Safety**       | [Auditable command policy](./docs/security/SECURITY_MODEL.md) and sandboxing.                                                                |
+| **Self-correct** | [HOVER loop](./docs/development/hypothesis-revision-validation.md): Hypothesize, Observe, Verify, Evaluate, Revise, Repeat on tool mismatch. |
+| **Long runs**    | [Headless exec](./docs/user-guide/exec-mode.md) with compaction, resumption, and logs.                                                       |
+| **Integrations** | [MCP](./docs/guides/mcp-integration.md), Skills, plugins, and editor bridges.                                                                |
+| **Models**       | [Hosted or local providers](./docs/README.md#provider-index), chosen per task.                                                               |
+
+<!-- markdownlint-enable MD013 -->
 
 ```mermaid
 flowchart LR
@@ -115,6 +118,13 @@ prerequisites, other install methods, and optional search-tool setup.
 
 > [!NOTE]
 > Windows artifacts are best-effort and may lag behind macOS/Linux.
+
+On Windows, install with PowerShell:
+
+<!-- markdownlint-disable-next-line MD013 -->
+```powershell
+irm https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.ps1 | iex
+```
 
 ### 2. Configure your project
 
@@ -221,8 +231,10 @@ Use `vtcode continue --session-id <id>` to fork an earlier session.
 
 Enable these only when you need them; none are required for the quick start.
 
+<!-- markdownlint-disable MD013 -->
+
 | Integration                                   | What it gives you                                                                                                                                                                                                                                                                 |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------   |
 | [MCP](./docs/guides/mcp-integration.md)       | Connect external tools and data sources.                                                                                                                                                                                                                                          |
 | [Agent Skills](./docs/skills/SKILLS_GUIDE.md) | Load reusable prompt packages on demand.                                                                                                                                                                                                                                          |
 | [Plugins](./docs/guides/agent-plugins.md)     | Extend the agent with plugin manifests.                                                                                                                                                                                                                                           |
@@ -230,18 +242,24 @@ Enable these only when you need them; none are required for the quick start.
 | [WebMCP](./docs/user-guide/webmcp.md)         | Pair the TUI with an authenticated browser editor via `/webmcp pair <origin>`; the hosted app ([site](https://vtcode.vinhnx.chatgpt.site/), [mirror](https://vinhnx.github.io/VTCode/)) connects through this bridge. See the [deployment reference](./docs/reference/webmcp.md). |
 | [Memcode MCP](./docs/guides/memcode-mcp.md)   | Carry context between tasks; see the [design write-up](https://memcode.in/blogs/vt-code-memory-across-threads).                                                                                                                                                                   |
 
+<!-- markdownlint-enable MD013 -->
+
 ## Documentation
 
 Guides grouped by task. The full catalog lives in the [documentation index](./docs/INDEX.md), the
 [docs overview](./docs/README.md), and the [Wiki](https://github.com/vinhnx/VTCode/wiki):
 
+<!-- markdownlint-disable MD013 -->
+
 | Goal                 | Guides                                                                                                                                                                                                                                                                                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------                                                                  |
 | Get started          | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [FAQ](./docs/FAQ.md) · [Compatibility](./docs/COMPATIBILITY.md)                                                              |
 | Work in the TUI      | [TUI](./docs/user-guide/interactive-mode.md) · [Command reference](./docs/user-guide/commands.md) · [Planning](./docs/guides/planning-workflow.md) · [Turn diffs](./docs/development/diff-preview.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) · [Safety](./docs/security/SECURITY_MODEL.md)                                   |
 | Automate             | [Exec mode](./docs/user-guide/exec-mode.md) · [Full automation](./docs/guides/full-automation.md) · [Decisions probe](./docs/guides/decisions-probe.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [Hooks](./docs/guides/hooks-guide.md)                                                                                        |
 | Extend and integrate | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Memcode](./docs/guides/memcode-mcp.md)                                                                                      |
 | Develop and evaluate | [Development](./docs/development/README.md) · [Testing](./docs/development/testing.md) · [Evals](./docs/guides/eval.md) · [Architecture](./docs/ARCHITECTURE.md) · [HOVER](./docs/development/hypothesis-revision-validation.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) |
+
+<!-- markdownlint-enable MD013 -->
 
 ## Development
 
