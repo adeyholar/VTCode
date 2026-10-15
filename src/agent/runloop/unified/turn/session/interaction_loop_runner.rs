@@ -240,6 +240,7 @@ pub(super) async fn run_interaction_loop_impl(
             editor_open_sender: ctx.editor_open_sender,
             editor_open_dispatcher: ctx.editor_open_dispatcher.clone(),
             exec_sessions: Some(ctx.tool_registry.exec_session_manager()),
+            tool_registry: Some(ctx.tool_registry.clone()),
             background_completion_notify: ctx.background_completion_notify.clone(),
             exec_completion_notify: ctx.exec_completion_notify.clone(),
             webmcp_prompt_receiver: ctx.webmcp_prompt_receiver,

@@ -493,6 +493,82 @@ async fn completion_verification_waits_for_mutating_sessions_before_accepting_ch
     assert!(!registry.completion_verification_pending());
 }
 
+#[cfg(all(unix, feature = "tui"))]
+#[tokio::test]
+async fn completion_verification_bulk_termination_reconciles_only_gone_sessions() {
+    use crate::tools::pty::PtySize;
+    use hashbrown::HashMap;
+    let dir = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+    // Spawn sessions under the registry's canonical workspace root: on macOS
+    // the tempdir path goes through the `/var` → `/private/var` symlink and
+    // the session guard rejects non-canonical working dirs.
+    let workspace = registry.workspace_root().clone();
+    let manager = registry.exec_session_manager();
+    let size = PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    };
+    let spawn = |id: &str| vec!["/bin/sh".to_string(), "-c".to_string(), format!("sleep 30 # {id}")];
+    manager
+        .create_pty_session(
+            "foreground-mutator".to_string().into(),
+            spawn("foreground-mutator"),
+            workspace.clone(),
+            size,
+            HashMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    manager
+        .create_pty_session_for_managed_background(
+            "background-mutator".to_string().into(),
+            spawn("background-mutator"),
+            workspace.clone(),
+            size,
+            HashMap::new(),
+            None,
+            HashMap::new(),
+            false,
+        )
+        .await
+        .unwrap();
+    for session in ["foreground-mutator", "background-mutator"] {
+        registry.observe_completion_mutation(
+            tools::EXEC_COMMAND,
+            &json!({"cmd":"cargo fmt"}),
+            &json!({"session_id":session}),
+        );
+    }
+    assert!(registry.completion_verification_pending());
+    registry.terminate_active_exec_sessions_async().await.unwrap();
+    let live: Vec<String> = manager
+        .list_sessions()
+        .await
+        .into_iter()
+        .map(|session| session.id.to_string())
+        .collect();
+    assert!(!live.contains(&"foreground-mutator".to_string()), "foreground session must be gone: {live:?}");
+    assert!(live.contains(&"background-mutator".to_string()), "background session is preserved: {live:?}");
+    assert!(registry.completion_verification_pending(), "the preserved background mutator still owns the gate");
+    registry.terminate_all_exec_sessions_async().await.unwrap();
+    assert!(
+        registry.completion_verification_pending(),
+        "terminated mutators release the session block, not the code debt"
+    );
+    let args = json!({"action":"run", "command":"cargo check"});
+    let launch = registry.begin_completion_verifier(&args);
+    assert!(launch.is_some());
+    registry.observe_completion_verifier(launch, &args, &Ok(json!({"exit_code":0})));
+    assert!(
+        !registry.completion_verification_pending(),
+        "a fresh check after bulk termination must satisfy the gate"
+    );
+}
+
 #[tokio::test]
 async fn completion_verification_restored_mutators_create_debt_without_live_handles() {
     use crate::llm::provider::{Message, ToolCall};
@@ -562,6 +638,24 @@ async fn completion_verification_code_targets_cannot_use_prose_or_planning_exemp
         assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), "changed\n");
         assert!(registry.completion_verification_pending(), "code target {path}: {output}");
         assert!(!registry.completion_verifier_passed("rustc --version"));
+    }
+}
+
+#[test]
+fn completion_verification_temp_plans_root_matches_real_temp_dir() {
+    use crate::tools::tool_intent::tmp_plans_dir;
+    let root = tmp_plans_dir();
+    let root_str = root.to_str().expect("temp plans root must be UTF-8").to_owned();
+    for path in [
+        root_str.clone(),
+        format!("{root_str}/draft.md"),
+        format!("{root_str}/workspace-slug/draft.md"),
+    ] {
+        assert!(
+            tool_intent::is_plan_artifact_write(tools::WRITE_FILE, &json!({"path": path})),
+            "{path} must classify as a plan artifact under {}",
+            root.display()
+        );
     }
 }
 
@@ -833,4 +927,38 @@ async fn completion_verification_native_terminal_adapter_observes_yielded_verdic
         assert_eq!(registry.completion_verifier_passed("./rustc --version"), exit_code == 0);
         assert_eq!(registry.completion_verification_pending(), exit_code != 0);
     }
+}
+
+#[tokio::test]
+async fn completion_verification_bulk_termination_releases_mutators_without_erasing_debt() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+    for session in ["formatter-a", "formatter-b"] {
+        registry.observe_completion_mutation(
+            tools::EXEC_COMMAND,
+            &json!({"cmd":"cargo fmt"}),
+            &json!({"session_id":session}),
+        );
+    }
+    assert!(registry.completion_verification_pending());
+    // Terminating an unrelated session changes nothing.
+    registry.observe_completion_exec_sessions_terminated(&["unrelated".to_owned()]);
+    assert!(registry.completion_verification_pending());
+    // Releasing one mutator leaves the other pending.
+    registry.observe_completion_exec_sessions_terminated(&["formatter-a".to_owned()]);
+    assert!(registry.completion_verification_pending());
+    // Releasing the last mutator keeps code debt but unblocks fresh verification.
+    registry.observe_completion_exec_sessions_terminated(&["formatter-b".to_owned()]);
+    assert!(
+        registry.completion_verification_pending(),
+        "terminated mutators release the session block, not the code debt"
+    );
+    let args = json!({"action":"run", "command":"cargo check"});
+    let launch = registry.begin_completion_verifier(&args);
+    assert!(launch.is_some());
+    registry.observe_completion_verifier(launch, &args, &Ok(json!({"exit_code":0})));
+    assert!(
+        !registry.completion_verification_pending(),
+        "a fresh check after bulk termination must satisfy the gate"
+    );
 }

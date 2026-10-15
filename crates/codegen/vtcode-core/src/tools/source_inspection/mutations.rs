@@ -1,4 +1,5 @@
 use super::*;
+use crate::tools::PatchError;
 use crate::tools::editing::{Patch, PatchOperation};
 
 /// A resolved replacement from the same matcher used by patch application.
@@ -213,7 +214,14 @@ impl SourceInspection {
                     let path =
                         vtcode_commons::paths::ensure_path_within_workspace_resolved(&root.join(path), root).await?;
                     if tokio::fs::try_exists(&path).await? {
-                        anyhow::bail!("new file already exists: {}", path.display());
+                        // Typed error: the canonical planner produces the same
+                        // "invalid patch operation" contract, so pre-write
+                        // inspection must not replace it with a plain string.
+                        return Err(PatchError::InvalidOperation {
+                            path: path.to_string_lossy().into_owned(),
+                            reason: "new file already exists".to_owned(),
+                        }
+                        .into());
                     }
                     prepared.push(PreparedPatchCredit::Created { path, content: content.clone() });
                 }
@@ -232,7 +240,15 @@ impl SourceInspection {
                     } else {
                         source.clone()
                     };
-                    let before = tokio::fs::read_to_string(&source).await?;
+                    let before = match tokio::fs::read_to_string(&source).await {
+                        Ok(before) => before,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            // Typed error: the canonical planner reports the
+                            // same contract; pre-write inspection must match it.
+                            return Err(PatchError::MissingFile { path: path.clone() }.into());
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
                     let inspection =
                         crate::tools::editing::patch::inspection_replacements(&source, &before, chunks, path).await?;
                     if !chunks.is_empty() {

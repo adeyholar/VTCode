@@ -225,6 +225,8 @@ pub enum InlineEvent {
     /// Submit text from the WebMCP bridge without interpreting slash commands.
     WebmcpSubmit(SubmittedInput),
     QueueSubmit(SubmittedInput),
+    /// Mid-turn steer from external embedders (mirrors the core protocol's
+    /// reserved steering path).
     Steer(SubmittedInput),
     ProcessLatestQueued,
     /// Edit the newest queued input (pop into input buffer)

@@ -21,10 +21,10 @@ pub struct SubmittedInput {
     pub text: String,
     pub attachments: Vec<ContentPart>,
     /// Whether this submission may be merged with other queued text-only
-    /// submissions of the same agent into a single model turn. Ctrl+Enter sets
-    /// this when it queues while busy; busy plain-Enter queues as its own
-    /// non-batchable turn and plain-Enter slash commands stay a one-per-turn
-    /// dispatch.
+    /// submissions of the same agent into a single model turn. Ctrl+Enter and
+    /// Tab set this when they queue plain text while busy; busy plain-Enter
+    /// queues as its own non-batchable turn and slash commands stay a
+    /// one-per-turn dispatch.
     pub batchable: bool,
 }
 
@@ -202,6 +202,9 @@ define_inline_message_commands! {
 pub enum InlineEvent {
     Submit(SubmittedInput),
     QueueSubmit(SubmittedInput),
+    /// Mid-turn steer from external embedders. The built-in TUI no longer
+    /// emits this (busy input queues via `QueueSubmit`); the variant and its
+    /// handlers stay as the reserved external steering path.
     Steer(SubmittedInput),
     ProcessLatestQueued,
     /// Edit the newest queued input (pop into input buffer)

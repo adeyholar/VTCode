@@ -53,6 +53,7 @@ struct InlineEventLoop<'a> {
     editor_open_sender: &'a EditorOpenRequestSender,
     editor_open_dispatcher: Arc<EditorOpenDispatcher>,
     exec_sessions: Option<vtcode_core::tools::exec_session::ExecSessionManager>,
+    tool_registry: Option<vtcode_core::tools::registry::ToolRegistry>,
     background_completion_notify: Option<Arc<Notify>>,
     exec_completion_notify: Option<Arc<Notify>>,
     webmcp_prompt_receiver: &'a mut Option<tokio::sync::mpsc::Receiver<String>>,
@@ -96,6 +97,7 @@ impl<'a> InlineEventLoop<'a> {
             editor_open_sender,
             editor_open_dispatcher,
             exec_sessions,
+            tool_registry,
             background_completion_notify,
             exec_completion_notify,
             webmcp_prompt_receiver,
@@ -131,6 +133,7 @@ impl<'a> InlineEventLoop<'a> {
             editor_open_sender,
             editor_open_dispatcher,
             exec_sessions,
+            tool_registry,
             background_completion_notify,
             exec_completion_notify,
             webmcp_prompt_receiver,
@@ -305,6 +308,9 @@ impl<'a> InlineEventLoop<'a> {
         if let Some(exec_sessions) = self.exec_sessions.clone() {
             context.set_exec_session_manager(exec_sessions);
         }
+        if let Some(tool_registry) = self.tool_registry.clone() {
+            context.set_tool_registry(tool_registry);
+        }
         let action = context.process_event(event, &mut self.queue).await?;
         self.queue.flush_sync();
         if let Some((source, image_count)) = interjection
@@ -419,6 +425,7 @@ pub(crate) struct InlineEventLoopResources<'a> {
     pub editor_open_sender: &'a EditorOpenRequestSender,
     pub editor_open_dispatcher: Arc<EditorOpenDispatcher>,
     pub exec_sessions: Option<vtcode_core::tools::exec_session::ExecSessionManager>,
+    pub tool_registry: Option<vtcode_core::tools::registry::ToolRegistry>,
     pub background_completion_notify: Option<Arc<Notify>>,
     pub exec_completion_notify: Option<Arc<Notify>>,
     pub webmcp_prompt_receiver: &'a mut Option<tokio::sync::mpsc::Receiver<String>>,
@@ -657,6 +664,7 @@ mod tests {
             editor_open_sender: &editor_open_sender,
             editor_open_dispatcher: Arc::new(EditorOpenDispatcher::new(true)),
             exec_sessions: None,
+            tool_registry: None,
             background_completion_notify: None,
             exec_completion_notify: None,
             webmcp_prompt_receiver: &mut webmcp_prompt_receiver,
@@ -736,6 +744,7 @@ mod tests {
             editor_open_sender: &editor_open_sender,
             editor_open_dispatcher: Arc::new(EditorOpenDispatcher::new(true)),
             exec_sessions: None,
+            tool_registry: None,
             background_completion_notify: None,
             exec_completion_notify: None,
             webmcp_prompt_receiver: &mut webmcp_prompt_receiver,

@@ -1,4 +1,5 @@
 <!-- markdownlint-disable MD013 -->
+
 # AGENTS.md
 
 Keep this file concise and under 150 lines. Root guidance belongs here; detailed explanations belong in `docs/`, skills, `.vtcode/memory/`, or crate-local `AGENTS.md` files. Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/prompts/runtime_guidance.rs`. Keep this file and module `AGENTS.md` files focused on project and maintainer guidance; dynamically loaded instruction files are user-controlled context, not a security boundary. This workflow is repo-only: do not copy it to other projects or into shipped prompts.
@@ -26,6 +27,7 @@ Keep this file concise and under 150 lines. Root guidance belongs here; detailed
 - Treat the sandbox/exec boundary as a primary adversarial surface: use sandbox-aware launch paths and add adversarial regression coverage for command injection, path/symlink escape, environment leakage, and fail-closed behavior.
 - **All built-in themes must meet WCAG AA 4.5:1 contrast** for foreground and all accent fields against background. Validate with `cargo nextest run -p vtcode-ui -E 'test(theme)'`. See `.vtcode/memory/gotchas.md` for catppuccin-latte special-case.
 - **Every new major feature must update docs**: user-facing behavior → `docs/development/` guide + a table row/section in the relevant quick-reference; agent-facing tool surface → prompt guidance (`crates/codegen/vtcode-core/src/prompts/guidelines.rs`) + schema (`crates/common/vtcode-utility-tool-specs`); runtime contract → `vtcode-exec-events::ThreadEvent`. No feature is "done" until the docs it changes are updated and the AGENTS.md detailed-guides links still resolve.
+- DO NOT read or modify user's TODO.md (docs/project/TODO.md). This file is for the user's personal task management and should remain private and untouched by the agents.
 
 ## Self-Debugging (VT Code fixing itself)
 

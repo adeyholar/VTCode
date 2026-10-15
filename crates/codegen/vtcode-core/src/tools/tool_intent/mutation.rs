@@ -2,6 +2,18 @@
 
 use std::path::{Component, Path, PathBuf};
 
+/// Staging root for workspace-less plan artifacts (`$TMPDIR/vtcode-plans`).
+/// Single source of truth shared by mutation accounting, planning admission,
+/// and plan-state staging, so the exemption always matches the real temp dir
+/// (e.g. `/var/folders/...` on macOS) instead of a `/tmp` literal.
+pub fn tmp_plans_dir() -> PathBuf {
+    std::env::temp_dir().join("vtcode-plans")
+}
+
+fn tmp_plans_root_normalized() -> String {
+    tmp_plans_dir().to_string_lossy().replace('\\', "/")
+}
+
 fn path_targets_plan_artifact(path: &str) -> bool {
     let normalized = path.trim().replace('\\', "/");
     // This helper has no workspace to resolve traversal or symlinks against.
@@ -9,12 +21,16 @@ fn path_targets_plan_artifact(path: &str) -> bool {
     if Path::new(&normalized).components().any(|part| part == Component::ParentDir) {
         return false;
     }
-    normalized == ".vtcode/plans"
+    if normalized == ".vtcode/plans"
         || normalized.starts_with(".vtcode/plans/")
         || normalized.contains("/.vtcode/plans/")
-        || normalized == "/tmp/vtcode-plans"
-        || normalized.starts_with("/tmp/vtcode-plans/")
-        || normalized.contains("/tmp/vtcode-plans/")
+    {
+        return true;
+    }
+    let tmp_root = tmp_plans_root_normalized();
+    normalized == tmp_root
+        || normalized.starts_with(&format!("{tmp_root}/"))
+        || normalized.contains(&format!("{tmp_root}/"))
 }
 
 fn path_is_docs_only(path: &str) -> bool {

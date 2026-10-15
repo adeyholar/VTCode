@@ -458,6 +458,23 @@ impl ToolRegistry {
         self.observe_completion_mutation_from(name, args, output, MutationEvidenceSource::Live);
     }
 
+    /// Retire verification bookkeeping for exec sessions removed by bulk
+    /// cleanup paths (`terminate_*_exec_sessions_async`, TUI force-cancel)
+    /// that bypass per-call observation. Without this, a terminated mutating
+    /// session stays in `pending_mutation_sessions` forever and every later
+    /// turn reports unverified completion even after fresh checks pass.
+    /// Reuses the single-session cleanup contract (retire the pending boundary
+    /// and any live verifier handle); unknown or still-live ids are harmless
+    /// no-ops. Callers must pass only sessions that are actually gone so a
+    /// live mutator is never released early.
+    pub(super) fn observe_completion_exec_sessions_terminated(&self, session_ids: &[String]) {
+        for session_id in session_ids {
+            let args = serde_json::json!({"action":"close", "session_id":session_id});
+            let result: anyhow::Result<Value> = Ok(serde_json::json!({"success":true}));
+            self.observe_completion_verifier(None, &args, &result);
+        }
+    }
+
     fn observe_completion_mutation_from(
         &self,
         name: &str,

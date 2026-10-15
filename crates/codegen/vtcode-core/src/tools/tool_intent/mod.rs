@@ -2,7 +2,7 @@
 //! action extraction for unified tool surfaces.
 
 mod mutation;
-pub use mutation::{is_docs_only_write, is_plan_artifact_write};
+pub use mutation::{is_docs_only_write, is_plan_artifact_write, tmp_plans_dir};
 
 pub mod actions;
 pub mod activity;

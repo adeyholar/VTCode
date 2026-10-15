@@ -42,6 +42,7 @@ pub(crate) struct InlineEventContext<'a> {
     editor_open_sender: Option<EditorOpenRequestSender>,
     editor_open_dispatcher: Option<Arc<EditorOpenDispatcher>>,
     exec_sessions: Option<ExecSessionManager>,
+    tool_registry: Option<vtcode_core::tools::registry::ToolRegistry>,
     harness_emitter: Option<&'a HarnessEventEmitter>,
 }
 
@@ -109,11 +110,16 @@ impl<'a> InlineEventContext<'a> {
             editor_open_sender: None,
             editor_open_dispatcher: None,
             exec_sessions: None,
+            tool_registry: None,
         }
     }
 
     pub(crate) fn set_exec_session_manager(&mut self, exec_sessions: ExecSessionManager) {
         self.exec_sessions = Some(exec_sessions);
+    }
+
+    pub(crate) fn set_tool_registry(&mut self, tool_registry: vtcode_core::tools::registry::ToolRegistry) {
+        self.tool_registry = Some(tool_registry);
     }
 
     pub(crate) fn set_editor_open_sink(
@@ -407,17 +413,28 @@ impl<'a> InlineEventContext<'a> {
     /// sessions are user-owned and stay untouched.
     async fn handle_force_cancel_pty_session(&mut self) -> Result<InlineLoopAction> {
         self.state.reset_interrupt_state();
-        let Some(exec_sessions) = self.exec_sessions.clone() else {
+        if self.tool_registry.is_none() && self.exec_sessions.is_none() {
             self.state
                 .renderer()
                 .line(MessageStyle::Warning, "No exec session manager is available to force-cancel.")?;
             return Ok(self.input_processor().passive());
-        };
-
+        }
         self.state
             .renderer()
             .line(MessageStyle::Status, "Force-cancelling foreground exec sessions...")?;
-        let (stopped, closed, failed) = exec_sessions.force_cancel_foreground_sessions().await;
+        // Prefer the registry-owned path so force-cancelled mutating sessions
+        // retire their verification boundary instead of stranding it. The
+        // manager-direct path is the fallback when no registry is wired; it
+        // cannot observe verification bookkeeping.
+        let (stopped, closed, failed) = if let Some(registry) = self.tool_registry.clone() {
+            registry.force_cancel_foreground_sessions_and_observe_cleanup().await
+        } else if let Some(exec_sessions) = self.exec_sessions.clone() {
+            exec_sessions.force_cancel_foreground_sessions().await
+        } else {
+            // Unreachable: availability was checked above. Fall through to
+            // the passive action without touching any session.
+            return Ok(self.input_processor().passive());
+        };
         if stopped + closed + failed == 0 {
             self.state
                 .renderer()

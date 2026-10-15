@@ -75,11 +75,18 @@ fn resolved_service_tier<'a>(model: &str, explicit: Option<&'a str>, default: Op
     use vtcode_config::core::OpenAIServiceTier;
     use vtcode_config::models::{Provider, ProviderModelSupport};
 
-    trimmed_non_empty(explicit.or(default)).filter(|value| {
-        Provider::OpenAI.supports_service_tier(model)
-            && OpenAIServiceTier::parse(value)
-                .is_none_or(|tier| Provider::OpenAI.supports_service_tier_value(model, tier))
-    })
+    let value = trimmed_non_empty(explicit.or(default))?;
+    if !Provider::OpenAI.supports_service_tier(model) {
+        tracing::debug!(model, tier = value, "dropping service tier: model supports no service tier");
+        return None;
+    }
+    if let Some(tier) = OpenAIServiceTier::parse(value)
+        && !Provider::OpenAI.supports_service_tier_value(model, tier)
+    {
+        tracing::debug!(model, tier = value, "dropping service tier: tier unsupported for model");
+        return None;
+    }
+    Some(value)
 }
 
 #[cfg(test)]

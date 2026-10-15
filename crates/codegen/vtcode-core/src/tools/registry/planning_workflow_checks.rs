@@ -9,7 +9,7 @@ use vtcode_commons::canonicalize;
 use super::ToolRegistry;
 use crate::tools::tool_intent::{ToolIntent, classify_tool_intent};
 
-/// Canonical `/tmp/vtcode-plans` directory, resolved once per process.
+/// Canonical temp `vtcode-plans` directory, resolved once per process.
 static CANONICAL_TMP_PLANS: OnceLock<PathBuf> = OnceLock::new();
 
 /// Tools that can write a plan file. Hoisted to a `const` so
@@ -56,7 +56,7 @@ impl ToolRegistry {
     /// Check if a tool is allowed to run in planning workflow without switching modes.
     ///
     /// Returns true for non-mutating tools and plan-safe exceptions like
-    /// writing to active plan storage (`/tmp/vtcode-plans/` by default) or read-only unified tool actions.
+    /// writing to active plan storage (the shared temp plans root) or read-only unified tool actions.
     pub fn is_planning_active_allowed(&self, tool_name: &str, args: &Value) -> bool {
         let intent = classify_tool_intent(tool_name, args);
         self.is_planning_active_allowed_with_intent(tool_name, args, &intent)
@@ -165,7 +165,7 @@ impl ToolRegistry {
             return true;
         }
 
-        let tmp_plans = std::env::temp_dir().join("vtcode-plans");
+        let tmp_plans = crate::tools::tool_intent::tmp_plans_dir();
         let canonical_tmp =
             CANONICAL_TMP_PLANS.get_or_init(|| canonicalize(&tmp_plans).unwrap_or_else(|_| tmp_plans.clone()));
 
