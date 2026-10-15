@@ -2,6 +2,39 @@ use super::*;
 use serde_json::json;
 
 #[tokio::test]
+async fn required_inspections_accept_successful_and_chains_without_masked_status_or_context_changes() {
+    for (command, passes) in [
+        ("sed -n '35,90p' README.md && sed -n '90,240p' README.md", true),
+        ("sed -n '35,90p' README.md; true", false),
+        ("sed -n '35,90p' README.md || true", false),
+        ("! sed -n '35,90p' README.md && true", false),
+        ("! (false && sed -n '35,90p' README.md) && true", false),
+        ("sed -n '35,90p' README.md | cat", false),
+        ("cd other && sed -n '35,90p' README.md", false),
+        ("sed -n '35,90p' README.md && rm README.md", false),
+        ("echo \"sed -n '35,90p' README.md\" && true", false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+        registry.restore_completion_verification_debt();
+        registry.set_required_completion_verifiers(vec!["sed -n '35,90p' README.md".into()]);
+        let args = json!({"cmd":command});
+        let id = registry.begin_completion_verifier(&args);
+        registry.observe_completion_verifier(id, &args, &Ok(json!({"exit_code":0})));
+        assert_eq!(registry.completion_verification_pending(), !passes, "{command}");
+        if passes {
+            for index in 0..40 {
+                let optional = json!({"cmd":format!("cargo check -p optional_{index}")});
+                let id = registry.begin_completion_verifier(&optional);
+                registry.observe_completion_verifier(id, &optional, &Ok(json!({"exit_code":1})));
+            }
+            assert!(!registry.completion_verification_pending(), "required chain evidence must stay pinned");
+            registry.restore_completion_verification_debt();
+        }
+    }
+}
+
+#[tokio::test]
 async fn completion_verification_bulk_status_sync_retains_required_checks() {
     for planning in [false, true] {
         let dir = tempfile::tempdir().unwrap();
@@ -86,6 +119,61 @@ fn completion_verification_all_required_tracker_checks_must_pass() {
         let id = state.launch(command.into());
         state.observe(id, &json!({"exit_code":0}));
         assert_eq!(state.pending(), pending);
+    }
+}
+
+#[test]
+fn completion_verification_bounds_superseded_chain_evidence_per_requirement() {
+    let mut state = CompletionVerification::default();
+    state.mutate();
+    state.required_commands = vec!["cargo check".into(), "cargo clippy".into()];
+    let both = state.launch("cargo check && cargo clippy".into());
+    state.observe(both, &json!({"exit_code":0}));
+    let live = state.launch("cargo check && printf 'live'".into());
+    state.observe(live, &json!({"session_id":"older-live-chain"}));
+    for index in 0..64 {
+        let id = state.launch(format!("cargo check && printf 'check-{index}'"));
+        state.observe(id, &json!({"exit_code":0}));
+        assert!(!state.pending(), "the older chain still owns the clippy verdict");
+        assert!(state.evidence.len() <= OPTIONAL_EVIDENCE_LIMIT + 3);
+    }
+    assert_eq!(state.evidence.len(), OPTIONAL_EVIDENCE_LIMIT + 3);
+    assert!(state.evidence.iter().any(|entry| entry.identity == live));
+    state.observe(live, &json!({"exit_code":7}));
+    assert_eq!(state.evidence.len(), OPTIONAL_EVIDENCE_LIMIT + 2);
+    assert!(!state.pending(), "the older live failure cannot override the latest check verdict");
+    let latest = state.launch("cargo check && printf 'latest'".into());
+    state.observe(latest, &json!({"exit_code":7}));
+    assert!(state.pending(), "an older pass cannot override the latest failure");
+    assert!(state.command_passed("cargo clippy"));
+    assert!(!state.command_passed("cargo check"));
+}
+
+#[tokio::test]
+async fn completion_verification_resumes_required_segments_of_live_chains() {
+    for exit_code in [0, 7] {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+        registry.restore_completion_verification_debt();
+        registry.set_required_completion_verifiers(vec!["cargo check".into(), "cargo clippy".into()]);
+        let args = json!({"cmd":"cargo check && cargo clippy"});
+        let launch = registry.begin_completion_verifier(&args);
+        assert!(launch.is_some());
+        registry.observe_completion_verifier(launch, &args, &Ok(json!({"session_id":"owned-chain"})));
+        for required in ["cargo check", "cargo clippy"] {
+            assert_eq!(registry.pending_completion_verifier_session(required).as_deref(), Some("owned-chain"));
+            assert!(!registry.completion_verifier_passed(required));
+        }
+        registry.observe_completion_verifier(
+            None,
+            &json!({"action":"wait", "session_id":"owned-chain"}),
+            &Ok(json!({"session_id":"owned-chain", "exit_code":exit_code})),
+        );
+        assert_eq!(registry.completion_verification_pending(), exit_code != 0);
+        for required in ["cargo check", "cargo clippy"] {
+            assert!(registry.pending_completion_verifier_session(required).is_none());
+            assert_eq!(registry.completion_verifier_passed(required), exit_code == 0);
+        }
     }
 }
 

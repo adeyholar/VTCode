@@ -97,7 +97,13 @@ impl ToolExecutionHistory {
         // CRITICAL FIX: Only count SUCCESSFUL calls to avoid cascade blocking
         let mut identical_count = 0;
         let is_tracker = tool_name == tools::TASK_TRACKER;
+        let tracker_start = is_tracker
+            .then(|| self.tracker_loop_start.read().ok().and_then(|start| *start))
+            .flatten();
         for record in &recent {
+            if tracker_start.is_some_and(|start| record.timestamp < start) {
+                break;
+            }
             if !record.success {
                 continue;
             }

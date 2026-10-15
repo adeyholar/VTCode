@@ -100,6 +100,7 @@ form `index: 0` is reserved for checklist-level completion with `status: "comple
 positive flat indices or positive hierarchical `index_path` values such as `2.1`. Use `items` for bulk synchronization
 rather than an item index. Bulk synchronization replaces the full checklist and its progress. Omitted metadata is
 preserved only for descriptions that occur exactly once in both the old and new lists, including after reordering.
+Matching ignores surrounding whitespace, including child indentation in the flat mirror after leaving planning mode.
 Explicit metadata replaces individual fields; empty `files`/`verify` arrays and an empty `outcome` clear them.
 Renamed or new steps need their own metadata. Duplicate descriptions with existing metadata require explicit
 `files`, `outcome`, and `verify` to avoid transferring verification requirements to the wrong task. Send
@@ -113,8 +114,15 @@ they must not replay earlier results from read-only caches or conversation histo
 progress totals and the changed item. Request `action: "list"` only when the full current checklist is needed.
 Reuse successful results rather than repeating unchanged updates. Repeat limits apply to consecutive successful
 identical tracker calls; a different successful operation resets that streak, while failed calls do not.
-Identical indexed or bulk updates return `status: "unchanged"` with current totals and retain artifact modification
-times. Tracker files are published atomically; reads and no-op updates do not rewrite identical mirrors.
+Genuine request boundaries start a fresh tracker streak without deleting execution records;
+internal recovery turns retain it. Repeated observations of the same checklist count as navigation,
+including across output-budget changes. When verification is pending, the harness runs the missing
+check through the normal execution pipeline. Otherwise one correction asks the agent to update the
+indexed task; continued unchanged polling ends with a blocked handoff.
+Identical indexed or bulk updates return `status: "unchanged"` with current totals and retain modification times
+for identical artifacts. Planning updates still repair missing or stale mirrors and the embedded tracker.
+Tracker artifacts use the shared private atomic writer (owner read/write on Unix); symlink redirects are rejected.
+Reads and no-op updates do not rewrite identical mirrors.
 All tracker artifacts are read before an update is published. Reported publication failures roll back earlier
 writes; detected concurrent edits are preserved and rollback failures remain visible in the error.
 

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use hashbrown::HashSet;
 use std::path::{Path, PathBuf};
 
-use vtcode_commons::fs::write_file_atomic_with_context;
+use vtcode_commons::fs::write_private_file_atomic;
 
 pub(crate) struct TrackerArtifact {
     pub path: PathBuf,
@@ -46,7 +46,13 @@ pub(crate) async fn write_tracker_artifact(path: &Path, content: &str, context: 
     if read_tracker_artifact(path, context).await?.as_deref() == Some(content) {
         return Ok(());
     }
-    write_file_atomic_with_context(path, content, context).await
+    publish_tracker_artifact(path, content, context).await
+}
+
+async fn publish_tracker_artifact(path: &Path, content: &str, context: &str) -> Result<()> {
+    write_private_file_atomic(path, content)
+        .await
+        .with_context(|| format!("Failed to write {context}: {}", path.display()))
 }
 
 async fn rollback_artifacts(published: &[TrackerArtifact]) -> Result<()> {
@@ -61,7 +67,7 @@ async fn rollback_artifacts(published: &[TrackerArtifact]) -> Result<()> {
                 );
             }
             if let Some(previous) = &artifact.previous {
-                write_file_atomic_with_context(&artifact.path, previous, artifact.context).await
+                publish_tracker_artifact(&artifact.path, previous, artifact.context).await
             } else {
                 tokio::fs::remove_file(&artifact.path)
                     .await
@@ -102,7 +108,7 @@ pub(crate) async fn persist_tracker_artifacts(artifacts: Vec<TrackerArtifact>) -
             if read_tracker_artifact(&artifact.path, artifact.context).await? != artifact.previous {
                 bail!("Tracker artifact changed before publication: {}", artifact.path.display());
             }
-            write_file_atomic_with_context(&artifact.path, &artifact.content, artifact.context).await?;
+            publish_tracker_artifact(&artifact.path, &artifact.content, artifact.context).await?;
             published += 1;
         }
         Ok(())
@@ -146,6 +152,31 @@ mod tests {
         assert!(format!("{error:#}").contains("child.md"));
         assert_eq!(std::fs::read_to_string(existing).unwrap(), "old checklist");
         assert!(!parent_file.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlinked_tracker_parent_is_rejected_and_prior_publication_is_rolled_back() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.md");
+        let redirected = dir.path().join("redirected");
+        let outside_file = outside.path().join("tracker.md");
+        std::fs::write(&first, "original first").unwrap();
+        std::fs::write(&outside_file, "outside contents").unwrap();
+        symlink(outside.path(), &redirected).unwrap();
+        let error = persist_tracker_artifacts(vec![
+            artifact(&first, "new first").await,
+            artifact(&redirected.join("tracker.md"), "must not escape").await,
+        ])
+        .await
+        .unwrap_err();
+        let diagnostic = format!("{error:#}");
+        assert!(diagnostic.contains("symlink"), "{diagnostic}");
+        assert_eq!(std::fs::read_to_string(first).unwrap(), "original first");
+        assert_eq!(std::fs::read_to_string(outside_file).unwrap(), "outside contents");
     }
 
     #[tokio::test]

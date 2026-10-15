@@ -645,6 +645,24 @@ fn tracker_streak_rule_does_not_change_other_tool_loop_detection() {
 }
 
 #[test]
+fn fresh_tracker_request_excludes_old_polls_without_erasing_records_or_other_limits() {
+    let history = ToolExecutionHistory::new(20);
+    history.set_loop_detection_limits(8, 2);
+    let args = json!({"action":"list"});
+    for _ in 0..2 {
+        history.add_record(loop_test_record(tools::TASK_TRACKER, args.clone()));
+    }
+    assert!(history.detect_loop(tools::TASK_TRACKER, &args).detected);
+    history.begin_tracker_request();
+    assert_eq!(history.get_recent_records(20).len(), 2);
+    assert_eq!(history.detect_loop(tools::TASK_TRACKER, &args).repeat_count, 0);
+    for _ in 0..2 {
+        history.add_record(loop_test_record(tools::TASK_TRACKER, args.clone()));
+    }
+    assert!(history.detect_loop(tools::TASK_TRACKER, &args).detected);
+}
+
+#[test]
 fn code_search_loop_identity_normalises_query_filters_and_limit() {
     let history = ToolExecutionHistory::new(10);
     history.set_loop_detection_limits(5, 2);

@@ -18,10 +18,11 @@ sessions must settle before completion; their settlement invalidates checks run
 while they were active. Internal turns and prompt compaction retain runtime
 verdicts. Restored history can establish debt, but never restores live ownership
 of archived process handles or credits historical passing output as a new verdict.
-Required checker verdicts and running session identities are protected from
-optional-check eviction. The registry retains up to 32 optional checker entries
-in addition to required entries, and reapplies that bound when requirements are
-released. A newer attempt for the same command supersedes older evidence;
+The newest evidence covering each required checker and its running session identities
+are protected from optional-check eviction. Superseded chain variants become optional;
+the registry retains up to 32 optional checker entries in addition to pinned entries,
+and reapplies that bound when sessions settle or requirements are released.
+A newer attempt for the same command supersedes older evidence;
 retention never makes a check fresh after another code edit.
 
 Qualifying model-run checks can satisfy completion. Adopted tracker verification
@@ -35,19 +36,24 @@ checks and the bounded repair allowance after failure.
 Recovery directives and blocked handoffs select the next missing tracker command
 before a configured or detected project verifier. Partial success names the next
 required check, so a passing generic build does not cause repeated recovery when
-a different command remains unsatisfied. Run required commands exactly; changing
-options or grouping checks into a different shell command does not establish the
-same execution identity. Preserve verification metadata when updating task status.
+a different command remains unsatisfied. Required commands may run standalone or
+as unchanged segments of a statically proven pure `&&` chain. A terminal exit zero
+credits those segments; changed arguments, directory changes, dynamic syntax,
+mutating tails, pipelines, negation, subshells, `;`, and `||` do not gain segment credit. Nonzero or
+running chains remain unverified. Preserve verification metadata when updating task status.
 Recognized `npx --loglevel=<level>` options change logging only: a Markdown lint
 check remains verification, while `--fix` still counts as a mutation.
+The repository's `python3 scripts/check_docs_links.py` is also a verifier, so a
+successful link check does not create new mutation debt of its own.
 Native terminal adapters may supply empty argv and environment containers.
 Nonempty launch context still cannot receive command-only verification credit.
 Otherwise the harness uses the existing configured verifier override and project
 detection. Disabling tracker continuation does not disable changed-code
 verification. An empty verification list never proves changed code verified.
 
-A yielded command has no verdict. Headless verification resumes a matching owned
-session from the current mutation generation before starting another command.
+A yielded command has no verdict. Interactive and headless verification resume an
+owned session covering the requested check in the current mutation generation before
+starting another command, including a check inside a qualifying `&&` chain.
 It follows that session through existing wait facilities, under the command
 execution ceiling,
 and checks cancellation between waits. Required commands run sequentially and
@@ -73,8 +79,22 @@ The interactive session's `session_loop_runner/verification_recovery.rs` owns
 cross-turn recovery selection and queue admission. The session loop retains
 rendering and Exit/continue control flow.
 Request projection regressions live in `llm_request/request_builder/tests.rs`;
-verification, checker-session, and recovery suites live under
+its private `history_projection.rs` retires expired turn restrictions and older
+execution handoffs, and compresses identical older tracker observations. Current
+restrictions, user messages, distinct tracker states, and tool-call/result IDs are
+preserved. This projection never rewrites durable history.
+Verification, checker-session, and recovery suites live under
 `tool_outcomes/helpers/tests/`, sharing private parent fixtures.
+
+Interactive tool-bearing responses share bounded verification recovery: repeated
+tracker observations, six inspections, or six batches without advancing the next
+required check schedule the missing verifier through the existing tool pipeline.
+Passing unrelated checks does not reset this progress window. Real edits, tracker
+updates, and advancement to another required command do reset it; a harness
+attempt leaves a bounded diagnostic/repair window after failure. Existing cancellation,
+permissions, failure limits, and execution budgets still apply. Without pending
+verification, repeated unchanged tracker polls get one tool-enabled correction;
+continued polling ends blocked rather than automatically queuing the same work.
 
 Recovery attempts count only after the follow-up queue accepts them. A full
 queue publishes no directive and preserves prior attempts and failure evidence;

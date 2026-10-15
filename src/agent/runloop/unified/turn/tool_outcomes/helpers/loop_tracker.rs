@@ -87,6 +87,10 @@ pub(crate) struct LoopTracker {
     pub consecutive_navigations: usize,
     /// Number of times navigation-loop recovery has fired in this session.
     pub navigation_loop_recoveries: usize,
+    /// One tool-enabled correction for repeated unchanged tracker observations.
+    pub tracker_observation_warning_emitted: bool,
+    last_required_verifier: Option<vtcode_core::types::CompactStr>,
+    unchanged_required_verifier_batches: u8,
     /// Consecutive low-signal navigation outcomes in this turn.
     pub consecutive_low_signal_navigations: u8,
     /// Total low-signal navigation outcomes in this turn.
@@ -133,6 +137,9 @@ impl LoopTracker {
             verifier_failed_notice_pending: false,
             consecutive_navigations: 0,
             navigation_loop_recoveries: 0,
+            tracker_observation_warning_emitted: false,
+            last_required_verifier: None,
+            unchanged_required_verifier_batches: 0,
             consecutive_low_signal_navigations: 0,
             total_low_signal_navigations: 0,
             low_signal_tool_calls: 0,
@@ -266,6 +273,12 @@ impl LoopTracker {
         self.low_signal_attempts.values().map(|(count, _)| *count).max().unwrap_or(0)
     }
 
+    pub(crate) fn tracker_observations_stalled(&self) -> bool {
+        self.low_signal_attempts
+            .iter()
+            .any(|(signature, (count, _))| signature.starts_with("task_tracker:") && *count >= 2)
+    }
+
     /// Highest repeat count among coarse directory-listing families
     /// (`exec::inspection::<base>::<root>` with base `ls`/`find`/`fd`), taking
     /// the max across binary+root pairs. Repeated bare listings of the same
@@ -384,6 +397,19 @@ impl LoopTracker {
         self.verification_pending = true;
     }
 
+    /// Generic passing checks do not advance a still-missing required check.
+    /// Keep this separate from the pacing gate, which those checks may clear.
+    pub(crate) fn record_required_verifier_progress(&mut self, command: Option<String>) -> bool {
+        if command.is_none() || self.last_required_verifier.as_deref() != command.as_deref() {
+            self.unchanged_required_verifier_batches = 0;
+        }
+        self.last_required_verifier = command.map(Into::into);
+        if self.last_required_verifier.is_some() {
+            self.unchanged_required_verifier_batches = self.unchanged_required_verifier_batches.saturating_add(1);
+        }
+        usize::from(self.unchanged_required_verifier_batches) >= BLIND_EDITING_THRESHOLD
+    }
+
     /// One-shot accessor for the lost-verification-result notice queued by
     /// [`update_repetition_tracker_for_registry`]. Handlers consume it after the tool
     /// response lands so the directive never splits an assistant batch.
@@ -415,6 +441,7 @@ impl LoopTracker {
 
     pub(super) fn record_successful_mutation(&mut self) {
         self.clear_navigation_evidence();
+        self.record_required_verifier_progress(None);
         // A verifier launched before this edit cannot clear the pacing checkpoint.
         self.pending_verifier_session_id = None;
         // Consume the fix-up window first: repair edits must not grow the
@@ -461,6 +488,7 @@ impl LoopTracker {
     /// gate; the flag only prevents a second harness execution this turn.
     pub(crate) fn record_auto_verification_executed(&mut self) {
         self.auto_verification_executed = true;
+        self.record_required_verifier_progress(None);
     }
 
     pub(crate) fn mark_verification_complete(&mut self) {

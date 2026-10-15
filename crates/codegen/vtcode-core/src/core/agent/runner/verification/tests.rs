@@ -39,7 +39,14 @@ async fn headless_verification_resumes_current_model_check_but_not_stale_checks(
     use super::super::tests::make_runner;
     use crate::config::loader::VTCodeConfig;
     use std::os::unix::fs::PermissionsExt;
-    for (exit_code, later_edit) in [(0, false), (7, false), (0, true)] {
+    for (exit_code, later_edit, chained) in [
+        (0, false, false),
+        (7, false, false),
+        (0, true, false),
+        (0, false, true),
+        (7, false, true),
+        (0, true, true),
+    ] {
         let temp = tempfile::tempdir().unwrap();
         let mut cfg = VTCodeConfig::default();
         cfg.commands.allow_list.push("./rustc".into());
@@ -52,11 +59,16 @@ async fn headless_verification_resumes_current_model_check_but_not_stale_checks(
         runner.tool_registry.allow_all_tools().await.unwrap();
         runner.tool_registry.restore_completion_verification_debt();
         let command = "./rustc --version";
+        let launched_command = if chained {
+            "./rustc --version && printf 'chain-tail'"
+        } else {
+            command
+        };
         let launched = runner
             .tool_registry
             .execute_tool(
                 crate::config::constants::tools::EXEC_COMMAND,
-                serde_json::json!({"cmd":command,"background":true,"yield_time_ms":50}),
+                serde_json::json!({"cmd":launched_command,"background":true,"yield_time_ms":50}),
             )
             .await
             .unwrap();

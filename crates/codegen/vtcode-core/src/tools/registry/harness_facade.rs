@@ -13,6 +13,7 @@ impl ToolRegistry {
     /// Begin a genuine request, optionally restoring adoption from its persisted
     /// history or explicit continuation. Internal turns must not reset this latch.
     pub fn begin_tracker_request(&self, adopted: bool) {
+        self.execution_history.begin_tracker_request();
         if !adopted {
             self.set_required_completion_verifiers(Vec::new());
         }

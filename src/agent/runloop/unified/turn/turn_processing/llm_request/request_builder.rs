@@ -348,6 +348,11 @@ pub(super) async fn build_turn_request(
         .normalize_history_for_request(ctx.working_history)
         .into_owned();
     omit_expired_preflight_directives(&mut normalized_history);
+    history_projection::project_runtime_history(
+        &mut normalized_history,
+        ctx.is_planning_active(),
+        ctx.is_approved_plan_execution(),
+    );
     // Local stand-in for Anthropic `clear_tool_uses` when the wire will not
     // carry native context edits. Request-only: durable history is untouched.
     if let Some(vt_cfg) = ctx.vt_cfg
@@ -586,3 +591,5 @@ fn omit_expired_preflight_directives(messages: &mut Vec<uni::Message>) {
 
 #[cfg(test)]
 mod tests;
+
+mod history_projection;

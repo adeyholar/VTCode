@@ -251,6 +251,7 @@ pub struct ToolExecutionHistory {
     detect_window: Arc<std::sync::atomic::AtomicUsize>,
     identical_limit: Arc<std::sync::atomic::AtomicUsize>,
     rate_limit_per_minute: Arc<std::sync::atomic::AtomicUsize>,
+    tracker_loop_start: Arc<RwLock<Option<SystemTime>>>,
 }
 
 impl ToolExecutionHistory {
@@ -264,6 +265,7 @@ impl ToolExecutionHistory {
             records: Arc::new(RwLock::new(VecDeque::with_capacity(max_records))),
             workspace_root: Arc::new(workspace_root),
             max_records,
+            tracker_loop_start: Arc::new(RwLock::new(None)),
             detect_window: Arc::new(std::sync::atomic::AtomicUsize::new(DEFAULT_LOOP_DETECT_WINDOW)),
             identical_limit: Arc::new(std::sync::atomic::AtomicUsize::new(defaults::DEFAULT_MAX_REPEATED_TOOL_CALLS)),
             rate_limit_per_minute: Arc::new(std::sync::atomic::AtomicUsize::new(
@@ -280,6 +282,12 @@ impl ToolExecutionHistory {
         records.push_back(record);
         while records.len() > self.max_records {
             records.pop_front();
+        }
+    }
+
+    pub(super) fn begin_tracker_request(&self) {
+        if let Ok(mut start) = self.tracker_loop_start.write() {
+            *start = Some(SystemTime::now());
         }
     }
 

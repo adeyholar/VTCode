@@ -56,9 +56,8 @@ Plan, build, and review with hosted or local models, sandboxed tools, and resuma
 
 ## Overview
 
-Explore a codebase, plan changes, run tools, and review edits, in the interactive TUI or headless with
-`vtcode exec`. You pick the model and the permissions; the runtime handles context management, tool calls, and
-execution policy.
+Explore a codebase, plan and review changes, and run tools in the interactive TUI or headlessly with `vtcode exec`.
+Choose the model and permission level; VT Code manages context, tool calls, and execution policy.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -83,17 +82,17 @@ flowchart LR
     E -->|match| D[Done]
 ```
 
-Legend: **H** states the expected outcome; **O** collects bounded tool evidence; **V** checks exit
-status and verifier result; **E** compares expectation against evidence; **R** applies an
-evidence-supported correction. `mismatch` (non-zero exit, empty search, stale patch, failed verifier,
-repeated evidence) loops back with corrected arguments; `match` exits to `Done`. Rereads alone are not
-revision. Full acceptance table: [HOVER validation](./docs/development/hypothesis-revision-validation.md).
+Legend: **H** states the expected outcome, **O** gathers bounded evidence, **V** checks the exit status
+and verifier result, **E** compares them, and **R** applies an evidence-supported correction. A
+`mismatch` (non-zero exit, empty search, stale patch, failed verifier, or repeated evidence) loops back
+with corrected arguments; a `match` exits to `Done`. Rereads alone are not revision. See the full
+[HOVER acceptance table](./docs/development/hypothesis-revision-validation.md).
 
 The rest of this page covers installation, configuration, a first task, and the deeper topics.
 
 ## Quick start
 
-Requirements: macOS, Linux, or Windows/WSL. Installing with Cargo also requires Rust 1.98.1+ (edition 2024).
+Requirements: macOS, Linux, or Windows/WSL. Cargo installs require Rust 1.98.1+ (edition 2024).
 
 ### 1. Install
 
@@ -102,8 +101,8 @@ Requirements: macOS, Linux, or Windows/WSL. Installing with Cargo also requires 
 curl -fsSL https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.sh | bash
 ```
 
-On macOS and Linux, the installer also installs `ripgrep` and `ast-grep` by default. Prefer Homebrew or Cargo if you
-want to manage the installation yourself:
+On macOS and Linux, the installer also installs `ripgrep` and `ast-grep` by default. To manage installation yourself,
+use Homebrew or Cargo:
 
 ```bash
 brew trust vinhnx/tap
@@ -114,7 +113,7 @@ cargo install vtcode
 ```
 
 Run `vtcode --version` to verify the installation. The [installation guide](./docs/installation/README.md) covers
-prerequisites, other install methods, and optional search-tool setup.
+prerequisites, other install methods, and optional search tools.
 
 > [!NOTE]
 > Windows artifacts are best-effort and may lag behind macOS/Linux.
@@ -128,8 +127,8 @@ irm https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.ps1 | i
 
 ### 2. Configure your project
 
-From your project directory, scaffold the project configuration and agent instructions, then add credentials for your
-chosen provider. For example, with OpenAI:
+From your project directory, scaffold the configuration and agent instructions, then add credentials for your chosen
+provider. For example, to use OpenAI:
 
 ```bash
 cd path/to/your/project
@@ -137,8 +136,8 @@ vtcode init                # scaffolds config + AGENTS.md; review before committ
 vtcode secret add openai   # stores your OpenAI API key in secure storage
 ```
 
-Replace `openai` with your provider. `vtcode secret add` uses secure storage (OS keyring or encrypted file).
-Alternatively, set credentials in environment variables or a workspace `.env` file, or use `vtcode login` for a
+Replace `openai` with your provider. `vtcode secret add` uses secure storage (OS keyring or encrypted file). You can
+also set credentials in environment variables or a workspace `.env` file, or use `vtcode login` if your provider has a
 supported login flow. See
 [Getting started](./docs/user-guide/getting-started.md) and [Provider guides](./docs/providers/PROVIDER_GUIDES.md) for
 provider-specific instructions.
@@ -159,21 +158,21 @@ provider-specific instructions.
 vtcode   # open the interactive TUI in your project
 ```
 
-Start with a focused request, such as "Explain how this project handles authentication." Review proposed changes and
-test results before committing. See [Usage](#usage) for automation and session commands, or take the
+Try a focused request, such as "Explain how this project handles authentication." Review proposed changes and test
+results before committing. See [Usage](#usage) for automation and session commands, or follow the
 [guided tour](./docs/user-guide/getting-started.md).
 
 ## Usage
 
 ### Interactive
 
-Use `vtcode` to explore, plan, and implement changes in the TUI. For larger tasks, begin with
-[read-only planning](./docs/guides/planning-workflow.md), then review the
-[turn diff](./docs/development/diff-preview.md) before committing. The
-[interactive guide](./docs/user-guide/interactive-mode.md) covers controls.
+Use `vtcode` to explore, plan, and implement changes in the TUI. For larger tasks, start with
+[read-only planning](./docs/guides/planning-workflow.md) and review the
+[turn diff](./docs/development/diff-preview.md) before committing. See the
+[interactive guide](./docs/user-guide/interactive-mode.md) for controls.
 
-After a task, `/explain` reviews outcome, changes, decisions, verification, and review priorities without another
-model call:
+After a task, `/explain` summarizes the outcome, changes, decisions, verification, and review priorities without
+another model call:
 
 - `/explain --details` adds evidence.
 - `/explain diagram` shows execution relationships.
@@ -184,7 +183,7 @@ Scopes and report options: [explanation usage](./docs/user-guide/commands.md#exe
 
 ### Headless
 
-Use `ask` for a tool-free answer, `exec` for a tool-enabled coding task, and `review` to inspect uncommitted changes:
+Use `ask` for tool-free answers, `exec` for tool-enabled coding tasks, and `review` to inspect uncommitted changes:
 
 ```bash
 vtcode ask "explain Rc vs Arc"    # one-shot answer, no session, no tools
@@ -277,8 +276,8 @@ graph LR
     CORE --> UI[vtcode-ui]
 ```
 
-Building requires Rust 1.98.1+ (edition 2024); tests need `cargo-nextest`. The full 23-crate map lives in the
-[architecture guide](./docs/ARCHITECTURE.md).
+To build, use Rust 1.98.1+ (edition 2024); to run tests, install `cargo-nextest`. See the
+[architecture guide](./docs/ARCHITECTURE.md) for the full 23-crate map.
 
 Context handling separates session history from provider request projections. Local clearing protects complete recent
 tool batches; headless runs estimate the cleared projection before automatic compaction. See

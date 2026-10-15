@@ -123,6 +123,34 @@ fn update_repetition_tracker_inner(
     let canonical_name = canonical_tool_name(name);
     let signature_key = signature_key_for(canonical_name, args);
     loop_tracker.record(signature_key.clone());
+    if canonical_name == vtcode_core::config::constants::tools::TASK_TRACKER {
+        if let ToolExecutionStatus::Success { output, .. } = &outcome.status {
+            if matches!(
+                output.get("status").and_then(serde_json::Value::as_str),
+                Some("created" | "replaced" | "updated" | "added")
+            ) {
+                loop_tracker.reset_navigation_window(true);
+                loop_tracker.tracker_observation_warning_emitted = false;
+                loop_tracker.record_required_verifier_progress(None);
+            } else if args.get("action").and_then(serde_json::Value::as_str) == Some("list")
+                || output.get("status").and_then(serde_json::Value::as_str) == Some("unchanged")
+            {
+                let state = output.get("checklist").unwrap_or(output);
+                let observation = signature_key_for(canonical_name, state);
+                loop_tracker.record_low_signal(observation.clone());
+                loop_tracker.nav_signatures.insert(observation);
+                loop_tracker.consecutive_navigations = loop_tracker.consecutive_navigations.saturating_add(1);
+                loop_tracker.record_navigation_signal(true);
+            } else {
+                loop_tracker.reset_navigation_window(false);
+            }
+        } else if args.get("action").and_then(serde_json::Value::as_str) == Some("list") {
+            loop_tracker.record_low_signal("task_tracker:rejected_observation".to_string());
+            loop_tracker.consecutive_navigations = loop_tracker.consecutive_navigations.saturating_add(1);
+            loop_tracker.record_navigation_signal(true);
+        }
+        return false;
+    }
     let session_id = vtcode_core::tools::command_args::session_id_text(args);
     let targets_pending_verifier = loop_tracker
         .pending_verifier_session_id

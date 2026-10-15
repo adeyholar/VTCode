@@ -21,6 +21,187 @@ fn prepared_command_tool_call() -> PreparedAssistantToolCall {
     ))
 }
 
+async fn drive_tracker_poll(
+    backing: &mut TestTurnProcessingBacking,
+    tracker: &mut LoopTracker,
+    modified: &mut BTreeSet<std::path::PathBuf>,
+    step: usize,
+) -> TurnHandlerOutcome {
+    let mut ctx = backing.turn_processing_context();
+    let calls = vec![PreparedAssistantToolCall::new(uni::ToolCall::function(
+        format!("poll-{step}"),
+        "task_tracker".into(),
+        serde_json::json!({"action":"list"}).to_string(),
+    ))];
+    handle_turn_processing_result(HandleTurnProcessingResultParams {
+        ctx: &mut ctx,
+        processing_result: TurnProcessingResult::ToolCalls {
+            tool_calls: calls,
+            assistant_text: "I will finish the last step.".into(),
+            reasoning: vec![],
+            reasoning_details: None,
+        },
+        response_streamed: false,
+        step_count: step,
+        repeated_tool_attempts: tracker,
+        turn_modified_files: modified,
+        max_tool_loops: 20,
+        tool_repeat_limit: 3,
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn tracker_polling_runs_missing_verifier_then_can_complete_without_more_lists() {
+    use vtcode_core::config::constants::tools;
+    let mut backing = TestTurnProcessingBacking::new(20).await;
+    let mut tracker = LoopTracker::new();
+    let mut modified = BTreeSet::new();
+    {
+        let ctx = backing.turn_processing_context();
+        ctx.tool_registry.allow_all_tools().await.unwrap();
+        ctx.tool_registry
+            .execute_tool(
+                tools::TASK_TRACKER,
+                serde_json::json!({
+                    "action":"create", "items":[{"description":"Check README", "verify":["rustc --version"]}]
+                }),
+            )
+            .await
+            .unwrap();
+        ctx.tool_registry.restore_completion_verification_debt();
+    }
+    for step in 1..=2 {
+        let outcome = drive_tracker_poll(&mut backing, &mut tracker, &mut modified, step).await;
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        let ctx = backing.turn_processing_context();
+        assert_eq!(ctx.tool_registry.completion_verification_pending(), step == 1);
+    }
+    let ctx = backing.turn_processing_context();
+    assert!(ctx.working_history.iter().any(|m| m.role == uni::MessageRole::Tool
+        && m.tool_call_id.as_deref() == Some(super::helpers::HARNESS_AUTO_VERIFY_CALL_ID)));
+    let done = ctx
+        .tool_registry
+        .execute_tool(
+            tools::TASK_TRACKER,
+            serde_json::json!({
+                "action":"update", "index":1, "status":"completed"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(done["checklist"]["completed"], 1);
+    assert!(!ctx.tool_registry.completion_verification_pending());
+    assert!(!tracker.verification_is_pending());
+}
+
+#[tokio::test]
+async fn tracker_polling_stops_when_verification_is_disabled_or_correction_is_ignored() {
+    use vtcode_core::config::constants::tools;
+    for pending in [false, true] {
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut cfg = vtcode_core::config::loader::VTCodeConfig::default();
+        cfg.agent.harness.verification.auto_execute = false;
+        backing.set_vt_cfg_for_test(cfg);
+        let mut tracker = LoopTracker::new();
+        let mut modified = BTreeSet::new();
+        {
+            let ctx = backing.turn_processing_context();
+            ctx.tool_registry.allow_all_tools().await.unwrap();
+            ctx.tool_registry
+                .execute_tool(
+                    tools::TASK_TRACKER,
+                    serde_json::json!({
+                        "action":"create","items":[{"description":"Check README","verify":["rustc --version"]}]
+                    }),
+                )
+                .await
+                .unwrap();
+            if pending {
+                ctx.tool_registry.restore_completion_verification_debt();
+            }
+        }
+        let limit = if pending { 2 } else { 4 };
+        for step in 1..=limit {
+            let outcome = drive_tracker_poll(&mut backing, &mut tracker, &mut modified, step).await;
+            if step < limit {
+                assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+            } else {
+                assert!(matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })));
+            }
+        }
+        let ctx = backing.turn_processing_context();
+        assert!(
+            !ctx.working_history
+                .iter()
+                .any(|m| m.tool_call_id.as_deref() == Some(super::helpers::HARNESS_AUTO_VERIFY_CALL_ID))
+        );
+        assert_eq!(ctx.tool_registry.completion_verification_pending(), pending);
+    }
+}
+
+#[tokio::test]
+async fn unrelated_passing_verifiers_cannot_starve_the_required_check() {
+    use vtcode_core::config::constants::tools;
+    let mut backing = TestTurnProcessingBacking::new(20).await;
+    let mut tracker = LoopTracker::new();
+    let mut modified = BTreeSet::new();
+    {
+        let ctx = backing.turn_processing_context();
+        ctx.tool_registry.allow_all_tools().await.unwrap();
+        ctx.tool_registry
+            .execute_tool(
+                tools::TASK_TRACKER,
+                serde_json::json!({
+                    "action":"create","items":[{"description":"Check README","verify":["rustc --help"]}]
+                }),
+            )
+            .await
+            .unwrap();
+        ctx.tool_registry.restore_completion_verification_debt();
+    }
+    for step in 1..=6 {
+        let outcome = {
+            let mut ctx = backing.turn_processing_context();
+            let call = PreparedAssistantToolCall::new(uni::ToolCall::function(
+                format!("unrelated-{step}"),
+                tools::EXEC_COMMAND.into(),
+                serde_json::json!({"cmd":format!("rustc --version && printf 'unrelated-{step}'")}).to_string(),
+            ));
+            handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::ToolCalls {
+                    tool_calls: vec![call],
+                    assistant_text: String::new(),
+                    reasoning: vec![],
+                    reasoning_details: None,
+                },
+                response_streamed: false,
+                step_count: step,
+                repeated_tool_attempts: &mut tracker,
+                turn_modified_files: &mut modified,
+                max_tool_loops: 20,
+                tool_repeat_limit: 3,
+            })
+            .await
+            .unwrap()
+        };
+        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+        let ctx = backing.turn_processing_context();
+        assert_eq!(ctx.tool_registry.completion_verification_pending(), step < 6);
+    }
+    let ctx = backing.turn_processing_context();
+    assert!(ctx.tool_registry.completion_verifier_passed("rustc --help"));
+    assert_eq!(
+        ctx.working_history
+            .iter()
+            .filter(|m| m.tool_call_id.as_deref() == Some(super::helpers::HARNESS_AUTO_VERIFY_CALL_ID))
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn suppresses_result_claims_before_run_tool_output() {
     let tool_calls = vec![prepared_command_tool_call()];

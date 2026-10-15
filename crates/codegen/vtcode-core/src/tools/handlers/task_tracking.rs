@@ -63,7 +63,7 @@ pub(crate) fn parse_task_items(
     let mut previous_by_description = HashMap::new();
     for item in previous {
         previous_by_description
-            .entry(item.description)
+            .entry(item.description.trim())
             .and_modify(|metadata| *metadata = None)
             .or_insert(Some(item.metadata));
     }
@@ -96,7 +96,7 @@ pub(crate) fn parse_task_items(
         if previous_metadata.is_none()
             && previous
                 .iter()
-                .any(|item| item.description == description && item.metadata != &TaskStepMetadata::default())
+                .any(|item| item.description.trim() == description && item.metadata != &TaskStepMetadata::default())
             && !matches!(item, TaskItemInput::Structured(input) if input.files.is_some() && input.outcome.is_some() && input.verify.is_some())
         {
             bail!(

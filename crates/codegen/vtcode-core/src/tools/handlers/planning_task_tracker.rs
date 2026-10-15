@@ -661,16 +661,12 @@ impl PlanningTaskTrackerTool {
         document: &PlanTaskDocument,
         message: String,
     ) -> Result<Value> {
-        if previous == document {
-            let tracker_file = self.tracker_file().await?;
-            return Ok(self.success_payload(
-                "unchanged",
-                "Checklist already matches requested state.".to_string(),
-                &tracker_file,
-                document,
-            ));
-        }
-        self.persist_document_and_payload("updated", message, document).await
+        let (status, message) = if previous == document {
+            ("unchanged", "Checklist already matches requested state.".to_string())
+        } else {
+            ("updated", message)
+        };
+        self.persist_document_and_payload(status, message, document).await
     }
 
     async fn handle_list(&self) -> Result<Value> {

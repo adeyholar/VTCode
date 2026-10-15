@@ -399,10 +399,28 @@ pub(crate) async fn handle_turn_balancer(
             ctx.renderer
                 .line(MessageStyle::Warning, ANTI_BLIND_EDITING_WARNING)
                 .unwrap_or(());
-            ctx.working_history
-                .push(uni::Message::system(ANTI_BLIND_EDITING_DIRECTIVE.to_string()));
+            let directive = if ctx.tool_registry.completion_verification_pending() {
+                ctx.tool_registry.unverified_completion_reason()
+            } else {
+                ANTI_BLIND_EDITING_DIRECTIVE.to_string()
+            };
+            ctx.working_history.push(uni::Message::system(directive));
             repeated_tool_attempts.verification_warning_emitted = true;
         }
+        return TurnHandlerOutcome::Continue;
+    }
+
+    if !ctx.is_planning_active() && repeated_tool_attempts.tracker_observations_stalled() {
+        if repeated_tool_attempts.tracker_observation_warning_emitted {
+            return TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+                reason: Some("Tracker observation stalled after one bounded correction. Repeated unchanged lists or rejected polls do not advance the task; the latest tracker and tool evidence are retained.".to_string()),
+            });
+        }
+        repeated_tool_attempts.tracker_observation_warning_emitted = true;
+        repeated_tool_attempts.reset_after_balancer_recovery();
+        ctx.working_history.push(uni::Message::system(
+            "Tracker observation repeated unchanged state. Use the latest result; do not list again. Perform the next incomplete task or its missing verification, then call task_tracker action=update with that item's index and actual status. If its work and checks already passed, mark it completed now. Do not repeat inspections or announce the same next action. One tool-enabled correction remains before a blocked handoff.".to_string(),
+        ));
         return TurnHandlerOutcome::Continue;
     }
 
@@ -774,6 +792,46 @@ mod tests {
                 .iter()
                 .any(|message| { message.content.as_text().contains(ANTI_BLIND_EDITING_DIRECTIVE) })
         );
+    }
+
+    #[tokio::test]
+    async fn unchanged_tracker_polls_get_one_correction_then_terminal_handoff() {
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut ctx = backing.turn_processing_context();
+        let mut tracker = LoopTracker::new();
+        for round in 0..2 {
+            let status = if round == 0 {
+                ToolExecutionStatus::Success {
+                    output: json!({"status":"ok", "checklist":{"items":[{"index":3,"status":"in_progress"}]}}),
+                    stdout: None,
+                    modified_files: vec![],
+                    command_success: true,
+                }
+            } else {
+                ToolExecutionStatus::Failure {
+                    error: vtcode_core::tools::registry::ToolExecutionError::new(
+                        tool_names::TASK_TRACKER,
+                        vtcode_core::tools::registry::ToolErrorType::PolicyViolation,
+                        "identical tracker polls blocked",
+                    ),
+                }
+            };
+            let outcome = ToolPipelineOutcome::from_status(status);
+            for _ in 0..2 {
+                update_repetition_tracker(&mut tracker, &outcome, tool_names::TASK_TRACKER, &json!({"action":"list"}));
+            }
+            let result = super::handle_turn_balancer(&mut ctx, 2 + round * 2, &mut tracker, 20, 3).await;
+            if round == 0 {
+                assert!(matches!(result, TurnHandlerOutcome::Continue));
+                assert!(!ctx.is_recovery_active(), "correction must retain usable tools");
+                assert!(tracker.tracker_observation_warning_emitted);
+            } else {
+                let TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) }) = result else {
+                    panic!("unchanged polls must not schedule another correction");
+                };
+                assert!(!crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_is_recoverable_block(Some(&reason)));
+            }
+        }
     }
 
     #[tokio::test]

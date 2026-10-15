@@ -78,7 +78,10 @@ and embedded plan before any write, checks for intervening changes, and restores
 published files in reverse order after a reported failure. Rollback preserves
 detected concurrent edits and reports restoration errors alongside the original
 failure. Plan-draft persistence shares this writer. Each file is atomic; rollback
-applies to reported publication failures.
+applies to reported publication failures. Publication and rollback reuse the commons
+private atomic writer so replacement files stay private and symlink redirects fail
+closed. Unchanged planning updates still reconcile missing or stale projections;
+content comparisons preserve identical artifacts and their modification times.
 
 The standard tracker loads a local snapshot for each action instead of maintaining
 a second in-memory checklist. Planning calls delegate once to the planning adapter.

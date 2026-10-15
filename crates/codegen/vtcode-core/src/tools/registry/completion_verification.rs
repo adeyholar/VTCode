@@ -61,21 +61,34 @@ impl CompletionVerification {
     }
 
     fn prune_optional_evidence(&mut self) {
-        let required: HashSet<_> = self
-            .required_commands
-            .iter()
-            .map(|command| executed_command_identity(command))
-            .collect();
+        let mut pinned = HashSet::new();
+        for command in &self.required_commands {
+            let command = executed_command_identity(command);
+            let mut newest = true;
+            for entry in self
+                .evidence
+                .iter()
+                .rev()
+                .filter(|entry| command_covers_required(&entry.command, &command))
+            {
+                // Keep the newest verdict for each requirement and retain live
+                // handles until their terminal result or cleanup is observed.
+                if newest || entry.session_id.is_some() {
+                    pinned.insert(entry.identity);
+                }
+                newest = false;
+            }
+        }
         let mut to_remove = self
             .evidence
             .iter()
-            .filter(|entry| !required.contains(&entry.command))
+            .filter(|entry| !pinned.contains(&entry.identity))
             .count()
             .saturating_sub(OPTIONAL_EVIDENCE_LIMIT);
         // Required verdicts and yielded handles remain available until their
         // command is replaced or released by the tracker.
         self.evidence.retain(|entry| {
-            if to_remove == 0 || required.contains(&entry.command) {
+            if to_remove == 0 || pinned.contains(&entry.identity) {
                 true
             } else {
                 to_remove -= 1;
@@ -96,6 +109,7 @@ impl CompletionVerification {
         {
             evidence.session_id = None;
             evidence.exit_code = None;
+            self.prune_optional_evidence();
             return;
         }
         if evidence
@@ -111,6 +125,7 @@ impl CompletionVerification {
         } else if let Some(session_id) = command_args::session_id_text(output) {
             evidence.session_id = Some(session_id.to_owned());
         }
+        self.prune_optional_evidence();
     }
 
     fn command_passed(&self, command: &str) -> bool {
@@ -118,7 +133,7 @@ impl CompletionVerification {
         self.evidence
             .iter()
             .rev()
-            .find(|entry| entry.command == command)
+            .find(|entry| command_covers_required(&entry.command, &command))
             .is_some_and(|entry| entry.generation == self.generation && entry.exit_code == Some(0))
     }
 
@@ -126,7 +141,7 @@ impl CompletionVerification {
         let command = executed_command_identity(command);
         self.required_commands
             .iter()
-            .any(|required| executed_command_identity(required) == command)
+            .any(|required| command_covers_required(&command, &executed_command_identity(required)))
     }
 
     fn pending(&self) -> bool {
@@ -153,6 +168,11 @@ fn executed_command_identity(command: &str) -> String {
         .unwrap_or_else(|| command.to_owned())
         .trim()
         .to_owned()
+}
+
+fn command_covers_required(command: &str, required: &str) -> bool {
+    command == required
+        || (command.contains("&&") && tool_intent::activity::shell_command_covers_required_check(command, required))
 }
 
 fn is_session_cleanup(args: &Value) -> bool {
@@ -287,7 +307,7 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// Only a live verifier launched against the current generation may be resumed.
+    /// Resume a current-generation verifier covering the requested check.
     pub fn pending_completion_verifier_session(&self, command: &str) -> Option<String> {
         let command = executed_command_identity(command);
         let state = self.harness_context.completion_verification.lock();
@@ -295,7 +315,7 @@ impl ToolRegistry {
             .evidence
             .iter()
             .rev()
-            .find(|entry| entry.command == command && entry.generation == state.generation)
+            .find(|entry| command_covers_required(&entry.command, &command) && entry.generation == state.generation)
             .and_then(|entry| entry.session_id.clone())
     }
 
@@ -429,6 +449,7 @@ impl ToolRegistry {
                     entry.session_id = None;
                     entry.exit_code = None;
                 }
+                state.prune_optional_evidence();
             }
         }
     }

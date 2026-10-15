@@ -49,7 +49,12 @@ fn python_verification_arguments(arguments: &[String]) -> bool {
     });
     match target.map(String::as_str) {
         Some("-m") => arguments.next().is_some_and(|module| module == "pytest"),
-        Some(script) => Path::new(script).ends_with("scripts/check_markdown.py") && arguments.next().is_none(),
+        Some(script) => {
+            ["scripts/check_markdown.py", "scripts/check_docs_links.py"]
+                .iter()
+                .any(|known| Path::new(script).ends_with(known))
+                && arguments.next().is_none()
+        }
         None => false,
     }
 }
@@ -826,7 +831,9 @@ fn shell_uses_only_and_chaining(command: &str) -> bool {
             continue;
         }
         match character {
-            ';' | '\n' | '|' => return false,
+            // Token extraction walks nested commands and drops negation;
+            // neither shape proves each check actually returned success.
+            ';' | '\n' | '|' | '!' | '(' | ')' => return false,
             '&' => {
                 let next_is_and = chars.get(index + 1) == Some(&'&');
                 if !next_is_and {
@@ -848,6 +855,29 @@ fn shell_uses_only_and_chaining(command: &str) -> bool {
     }
 
     true
+}
+
+/// Match required checks within a statically proven, status-preserving chain.
+/// This is evidence accounting only; execution and permission gates still apply.
+pub(crate) fn shell_command_covers_required_check(command: &str, required: &str) -> bool {
+    if !shell_uses_only_and_chaining(command) || !shell_uses_only_and_chaining(required) {
+        return false;
+    }
+    let Some(segments) = static_shell_command_words(command) else {
+        return false;
+    };
+    let Some(required_segments) = static_shell_command_words(required) else {
+        return false;
+    };
+    if segments.iter().any(|words| {
+        words.first().is_some_and(|word| word == "cd")
+            || (!is_verification_invocation(words) && !command_words_are_readonly(words))
+    }) {
+        return false;
+    }
+    segments
+        .windows(required_segments.len())
+        .any(|window| window == required_segments)
 }
 
 /// Classify a shell call without weakening the authoritative mutation guard.
@@ -955,6 +985,8 @@ mod tests {
             "npx -y markdownlint-cli2 README.md && cargo check --locked",
             "python3 scripts/check_markdown.py",
             "python ./scripts/check_markdown.py",
+            "python3 scripts/check_docs_links.py",
+            "python ./scripts/check_docs_links.py",
         ] {
             assert!(shell_command_is_admitted_verification_attempt(&exec_command(command)), "{command}");
             assert_eq!(
@@ -978,6 +1010,8 @@ mod tests {
             "python3 scripts/check_markdown.py --list",
             "python3 scripts/check_markdown.py --help",
             "python3 other/check_markdown.py",
+            "python3 scripts/check_docs_links.py --help",
+            "python3 other/check_docs_links.py",
         ] {
             assert!(!shell_command_is_admitted_verification_attempt(&exec_command(command)), "{command}");
         }

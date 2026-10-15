@@ -320,7 +320,7 @@ pub(crate) async fn execute_harness_auto_verification(
     use vtcode_core::config::constants::tools as tool_names;
 
     // A fresh internal turn may still own the previous turn's verifier. Reuse
-    // only an exact command match from this runtime, never archived handles.
+    // a current-generation execution covering this check, never archived handles.
     repeated_tool_attempts.pending_verifier_session_id =
         ctx.tool_registry.pending_completion_verifier_session(&command);
 
@@ -509,6 +509,41 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                     "turn metric"
                 );
                 return Ok(res);
+            }
+
+            // Tool-bearing responses reset the text cap. Repeated polls and
+            // inspections must still reach bounded self-verification.
+            let required_stalled = params.repeated_tool_attempts.record_required_verifier_progress(
+                params
+                    .ctx
+                    .tool_registry
+                    .completion_verification_pending()
+                    .then(|| params.ctx.tool_registry.next_required_completion_verifier())
+                    .flatten(),
+            );
+            if !params.ctx.is_planning_active()
+                && (params.repeated_tool_attempts.verification_is_pending()
+                    || params.ctx.tool_registry.completion_verification_pending())
+                && (required_stalled
+                    || params.repeated_tool_attempts.tracker_observations_stalled()
+                    || params.repeated_tool_attempts.consecutive_navigations >= helpers::BLIND_EDITING_THRESHOLD)
+            {
+                params.repeated_tool_attempts.mark_verification_pending();
+                if let Some(command) = params.ctx.try_harness_auto_verify(params.repeated_tool_attempts) {
+                    return execute_harness_auto_verification(
+                        params.ctx,
+                        params.repeated_tool_attempts,
+                        params.turn_modified_files,
+                        params.step_count,
+                        params.max_tool_loops,
+                        params.tool_repeat_limit,
+                        command,
+                    )
+                    .await;
+                }
+                return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+                    reason: Some(params.ctx.tool_registry.unverified_completion_reason()),
+                }));
             }
 
             let balancer_outcome = handle_turn_balancer(

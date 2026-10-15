@@ -6,6 +6,64 @@ mod verification_recovery;
 mod verifier_sessions;
 
 #[test]
+fn unrelated_successful_checks_cannot_refill_required_verifier_progress() {
+    let mut tracker = LoopTracker::new();
+    for attempt in 1..=BLIND_EDITING_THRESHOLD {
+        tracker.mark_verification_complete();
+        assert_eq!(
+            tracker.record_required_verifier_progress(Some("cargo clippy".into())),
+            attempt == BLIND_EDITING_THRESHOLD
+        );
+    }
+    assert!(
+        !tracker.record_required_verifier_progress(Some("cargo check".into())),
+        "advancing to another check starts a new window"
+    );
+    tracker.record_successful_mutation();
+    assert!(
+        !tracker.record_required_verifier_progress(Some("cargo check".into())),
+        "real edits start a new verification generation"
+    );
+}
+
+#[test]
+fn tracker_observations_cannot_reset_navigation_or_verification_progress() {
+    let mut tracker = LoopTracker::with_verification_snapshot((true, 1));
+    let output = json!({"status":"ok", "checklist":{"items":[{"index":3,"status":"in_progress"}]}});
+    let observed = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+        output,
+        stdout: None,
+        modified_files: vec![],
+        command_success: true,
+    });
+    for budget in [1000, 2000] {
+        update_repetition_tracker(
+            &mut tracker,
+            &observed,
+            tools::TASK_TRACKER,
+            &json!({"action":"list","max_output_tokens":budget}),
+        );
+    }
+    assert!(tracker.tracker_observations_stalled());
+    assert_eq!(tracker.consecutive_navigations, 2);
+    assert_eq!(tracker.verification_snapshot(), (true, 1));
+    let progress = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+        output: json!({"status":"updated"}),
+        stdout: None,
+        modified_files: vec![],
+        command_success: true,
+    });
+    update_repetition_tracker(
+        &mut tracker,
+        &progress,
+        tools::TASK_TRACKER,
+        &json!({"action":"update","index":3,"status":"completed"}),
+    );
+    assert!(!tracker.tracker_observations_stalled());
+    assert_eq!(tracker.verification_snapshot(), (true, 1));
+}
+
+#[test]
 fn rejected_verifier_does_not_grant_repair_edits() {
     for kind in [
         vtcode_core::tools::registry::ToolErrorType::InvalidParameters,

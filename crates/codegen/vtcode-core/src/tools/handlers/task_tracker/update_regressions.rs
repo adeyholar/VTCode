@@ -197,6 +197,104 @@ async fn hierarchical_bulk_updates_preserve_child_metadata() {
 }
 
 #[tokio::test]
+async fn bulk_sync_after_leaving_planning_preserves_indented_step_metadata() {
+    let (_temp, state, tool) = setup_tracker(true).await;
+    tool.execute(json!({"action":"create", "items":[
+        "Inspect", {"description":"  Read README", "files":["README.md"],
+        "outcome":"Checked documentation", "verify":["cargo check"]}, "Review"
+    ]}))
+    .await
+    .unwrap();
+    state.disable();
+    let updated = tool
+        .execute(json!({"action":"update", "items":[
+            "[x] Inspect", "  [x] Read README", "[~] Review"
+        ]}))
+        .await
+        .unwrap();
+    let child = &updated["checklist"]["items"][1];
+    assert_eq!(child["files"], json!(["README.md"]));
+    assert_eq!(child["outcome"], "Checked documentation");
+    assert_eq!(child["verify"], json!(["cargo check"]));
+}
+
+#[tokio::test]
+async fn indented_duplicate_descriptions_require_explicit_metadata_after_planning() {
+    let (_temp, state, tool) = setup_tracker(true).await;
+    tool.execute(json!({"action":"create", "items":[
+        {"description":"Review", "verify":["parent verifier"]},
+        {"description":"  Review", "verify":["child verifier"]}
+    ]}))
+    .await
+    .unwrap();
+    state.disable();
+    let error = tool
+        .execute(json!({"action":"update", "items":["[x] Review"]}))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Ambiguous task description"));
+    let unchanged = tool.execute(json!({"action":"list"})).await.unwrap();
+    assert_eq!(unchanged["checklist"]["items"][0]["verify"], json!(["parent verifier"]));
+    assert_eq!(unchanged["checklist"]["items"][1]["verify"], json!(["child verifier"]));
+}
+
+#[tokio::test]
+async fn unchanged_planning_update_repairs_missing_and_stale_mirrors() {
+    let (temp, state, tool) = setup_tracker(true).await;
+    tool.execute(json!({"action":"create", "items":[{
+        "description":"Verify README", "verify":["cargo check"]
+    }]}))
+    .await
+    .unwrap();
+    let global = temp.path().join(".vtcode/tasks/current_task.md");
+    let expected_global = std::fs::read(&global).unwrap();
+    let plan = state.get_plan_file().await.unwrap();
+    let sidecar = tracker_file_for_plan_file(&plan).unwrap();
+    let original_sidecar = std::fs::read(&sidecar).unwrap();
+    std::fs::remove_file(&global).unwrap();
+    std::fs::write(&plan, "# Preserve this plan prose\n").unwrap();
+    let result = tool
+        .execute(json!({"action":"update", "index":1, "status":"pending"}))
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "unchanged");
+    assert_eq!(std::fs::read(&global).unwrap(), expected_global);
+    assert_eq!(std::fs::read(&sidecar).unwrap(), original_sidecar);
+    let repaired_plan = std::fs::read_to_string(&plan).unwrap();
+    assert!(repaired_plan.starts_with("# Preserve this plan prose\n"));
+    assert!(repaired_plan.contains("Verify README"));
+    assert!(repaired_plan.contains("cargo check"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn tracker_updates_keep_private_artifacts_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for planning in [false, true] {
+        let (temp, state, tool) = setup_tracker(planning).await;
+        tool.execute(json!({"action":"create", "items":["Private task details"]}))
+            .await
+            .unwrap();
+        let plan = state.get_plan_file().await.unwrap();
+        let paths = [
+            temp.path().join(".vtcode/tasks/current_task.md"),
+            tracker_file_for_plan_file(&plan).unwrap(),
+            plan,
+        ];
+        for path in &paths {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        tool.execute(json!({"action":"update", "index":1, "status":"completed"}))
+            .await
+            .unwrap();
+        for path in paths {
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600, "{}", path.display());
+        }
+    }
+}
+
+#[tokio::test]
 async fn failed_standard_create_does_not_publish_a_partial_global_tracker() {
     let temp = TempDir::new().unwrap();
     let state = PlanningWorkflowState::new(temp.path().to_path_buf());

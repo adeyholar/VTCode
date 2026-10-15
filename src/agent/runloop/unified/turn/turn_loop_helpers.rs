@@ -613,7 +613,7 @@ pub(crate) fn is_internal_harness_follow_up(input: &str) -> bool {
 
 const FRESH_TURN_TOOL_GUIDANCE: &str = "Fresh turn: the previous turn's preview budget and tool-free recovery restrictions have expired. Tools are available subject to this turn's catalog, planning mode, safety, verification, and permission checks. Older recovery messages do not disable tools in this turn. If earlier file contents were cleared, recover the needed context with a targeted read or small spool range before editing; do not repeat broad inspections.";
 
-fn is_turn_scoped_tool_restriction(text: &str) -> bool {
+pub(crate) fn is_turn_scoped_tool_restriction(text: &str) -> bool {
     // Inspect the runtime-owned instruction, not bounded evidence that a
     // planning synthesis directive may append beneath it.
     let instruction = text.lines().next().unwrap_or_default().trim().to_ascii_lowercase();

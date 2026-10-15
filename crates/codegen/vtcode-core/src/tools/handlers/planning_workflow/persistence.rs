@@ -15,11 +15,9 @@ use crate::tools::handlers::planning_workflow::artifacts::{
 };
 use crate::tools::handlers::planning_workflow::state::PlanningWorkflowState;
 use crate::tools::handlers::task_tracking::{
-    TrackerArtifact, persist_tracker_artifacts, read_tracker_artifact as read_optional_file,
+    TrackerArtifact, persist_tracker_artifacts, read_tracker_artifact as read_optional_file, write_tracker_artifact,
 };
-use crate::utils::file_utils::{
-    ensure_dir_exists, read_file_with_context, write_file_atomic_with_context, write_file_with_context,
-};
+use crate::utils::file_utils::{ensure_dir_exists, read_file_with_context, write_file_with_context};
 
 #[derive(Debug, Clone)]
 pub struct PersistedPlanDraft {
@@ -68,7 +66,7 @@ pub async fn sync_tracker_into_plan_file(plan_file: &Path, tracker_markdown: &st
     if updated == plan_content {
         return Ok(());
     }
-    write_file_atomic_with_context(plan_file, &updated, "plan file")
+    write_tracker_artifact(plan_file, &updated, "plan file")
         .await
         .with_context(|| format!("Failed to write plan file: {}", plan_file.display()))?;
     Ok(())
