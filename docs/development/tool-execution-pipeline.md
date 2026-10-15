@@ -58,6 +58,36 @@ Targeted mutations invalidate overlapping file reads; pathless command mutations
 invalidate all file reads. Read-only calls retain cached reads. Breaker accounting
 and middleware result semantics remain in their original facade order.
 
+Tracker repeat detection counts the current streak of successful identical calls.
+A different successful operation (including a tracker update or verification call)
+starts a new streak, so earlier polls cannot block a fresh checklist observation.
+Failed calls do not reset the streak; consecutive identical polls or updates still
+hit the configured repeat limit. Tracker calls continue to execute live without
+cached-result replay. Other tools retain their existing rolling-window detection.
+
+For comparison, the upstream [`codex-rs/core/src/tools/handlers/plan.rs`](https://github.com/openai/codex/blob/bb64b894fd67158be0f874872e6d7bfe717e7368/codex-rs/core/src/tools/handlers/plan.rs)
+parses each `update_plan` call and emits its plan event directly. VT Code retains
+its bounded duplicate protection while allowing tracker calls after intervening work.
+
+The two tracker adapters share `task_tracking::parse_task_items` and metadata updates.
+Bulk replacement keeps omitted metadata only for uniquely matching descriptions;
+ambiguous existing metadata requires explicit fields before any state is changed.
+No-op updates return `unchanged` and artifact writes compare contents before atomic
+publication. `task_tracking/persistence.rs` snapshots the sidecar, global mirror,
+and embedded plan before any write, checks for intervening changes, and restores
+published files in reverse order after a reported failure. Rollback preserves
+detected concurrent edits and reports restoration errors alongside the original
+failure. Plan-draft persistence shares this writer. Each file is atomic; rollback
+applies to reported publication failures.
+
+The standard tracker loads a local snapshot for each action instead of maintaining
+a second in-memory checklist. Planning calls delegate once to the planning adapter.
+Required completion verifiers are still observed from the full live tracker result
+before model-facing projection.
+
+Progressive tool descriptions use the builtin contract's 1,500-character limit,
+preserving complete builtin guidance. MCP descriptions retain their separate cap.
+
 The [reentrancy guide](tool-reentrancy.md) describes task isolation and cleanup.
 Keep extraction call sites in their original order; new modules must not bypass
 preflight, safety, policy, snapshot, or settlement behavior.

@@ -290,10 +290,10 @@ below based on the topic area.
 
 - **File**: `docs/development/responses-websocket-streaming.md`
   - **Content**: Responses WebSocket streaming
-  - **Topics**: Lifecycle and cancellation, Continuation, Fallback and service tiers, Request builder ownership, Local
-    verification
-  - **User Questions**: "What can you tell me about Responses WebSocket streaming?", "How does Lifecycle and
-    cancellation work?", "How does Continuation work?"
+  - **Topics**: Inline file inputs, Lifecycle and cancellation, Continuation, Fallback and service tiers, Request
+    builder ownership
+  - **User Questions**: "What can you tell me about Responses WebSocket streaming?", "How does Inline file inputs
+    work?", "How does Lifecycle and cancellation work?"
 
 - **File**: `docs/development/runtime-guidance.md`
   - **Content**: Runtime Guidance and Project Instructions

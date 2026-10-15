@@ -50,7 +50,7 @@ pub(in crate::tools::handlers::planning_workflow) fn extract_embedded_tracker(pl
     }
 }
 
-pub(in crate::tools::handlers::planning_workflow) fn render_plan_with_tracker(
+pub(in crate::tools::handlers) fn render_plan_with_tracker(
     plan_markdown: &str,
     tracker_markdown: Option<&str>,
 ) -> String {

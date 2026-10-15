@@ -7,13 +7,16 @@ VT Code has two distinct prompt sources:
 | Compiled runtime guidance | `crates/codegen/vtcode-core/src/prompts/runtime_guidance.rs`  | Small, universal user-facing behavior included in Default, Minimal, Lightweight, and Specialized profiles | Part of the application runtime                    |
 | Project instruction map   | User/workspace `AGENTS.md`, `CLAUDE.md`, and `.vtcode/rules/` | Project conventions, local architecture, and maintainer workflows                                         | User-controlled context, never a security boundary |
 
-The compiled section is deterministic, cached with the static profile, and kept below its approximate 650-token cap. It
+The compiled section is deterministic, cached with the static profile, and kept below its approximate 850-token cap. It
 must not read, embed, or generate content from repository instruction files. Profile-specific operating details remain
 in the prompt builder; correctness-critical behavior belongs in runtime policy, schemas, tests, or lints.
 
 Repository claims must follow observed code and current metadata. Exact versions and capabilities should be omitted
 when that evidence is unavailable, rather than filled in from model memory. This rule shares the existing runtime
 guidance presence and size tests across prompt profiles; it adds no automatic metadata scans or provider requests.
+
+Attached files supply context, while workspace paths identify the files to read or edit. Compiled guidance
+keeps that distinction explicit: an attached filename does not prove the current on-disk contents.
 
 ## Planning contract ownership
 
@@ -125,7 +128,7 @@ scripts stay subject to planning and execution policy.
 
 Indexed tracker updates send the model checklist totals and the changed item. Explicit list calls retain the complete
 checklist; persistence and UI events keep the full original result. This avoids repeatedly sending unchanged task
-details.
+details. Compiled guidance tells the model to reuse successful tracker results and update only when state changes.
 
 The navigation tracker counts empty successful read-only search pipelines as low-signal results even when a final filter
 such as `head` or `sed` returns exit 0. It uses the existing planning/execution convergence limits; it does not change

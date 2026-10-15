@@ -271,6 +271,11 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
   early drop clear the socket and continuation. See the [development guide](../development/responses-websocket-streaming.md).
 - File inputs are supported for native OpenAI Responses API requests through `input_file` parts.
 - Supported file input fields in VT Code message parts: `file_id`, `file_data`, `file_url`, `filename`.
+- Inline `file_data` is serialized as a MIME-prefixed base64 data URL (for example,
+  `data:text/markdown;base64,...` for `@README.md`); existing data URLs are preserved.
+  Raw base64 in replayed messages is normalized without rewriting stored history. See the
+  [file-input contract](../development/responses-websocket-streaming.md#inline-file-inputs) and
+  [official OpenAI guide](https://developers.openai.com/api/docs/guides/file-inputs).
 - `file_url` is Responses API only; VT Code rejects `file_url` when a request uses Chat Completions.
 - VT Code only upgrades local non-image file refs such as `@report.pdf` and `@"Quarterly Deck.pptx"` into structured
   file attachments for native OpenAI Responses sessions on `api.openai.com`.

@@ -12,8 +12,43 @@ use crate::providers::shared::{
 };
 use hashbrown::HashMap;
 use serde_json::{Value, json};
+use std::borrow::Cow;
+use std::path::Path;
 
 mod cache_diagnostics;
+
+// OpenAI's file-input guide uses MIME-prefixed data URLs for inline files.
+// Normalize at the wire boundary so raw base64 in existing history also works.
+fn inline_file_data_url<'a>(filename: Option<&str>, data: &'a str) -> Cow<'a, str> {
+    let data = data.trim();
+    if data.starts_with("data:") {
+        return Cow::Borrowed(data);
+    }
+
+    let extension = filename
+        .and_then(|name| Path::new(name).extension())
+        .and_then(|ext| ext.to_str());
+    let mime_type = match extension.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "pdf" => "application/pdf",
+        "md" | "markdown" => "text/markdown",
+        "json" => "application/json",
+        "html" | "htm" => "text/html",
+        "xml" => "text/xml",
+        "csv" => "text/csv",
+        "tsv" => "text/tsv",
+        "iif" => "text/x-iif",
+        "doc" | "dot" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "rtf" => "application/rtf",
+        "ppt" | "pps" | "pot" | "ppa" | "pwz" | "wiz" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "xls" | "xla" | "xlb" | "xlc" | "xlm" | "xlt" | "xlw" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        _ => "text/plain",
+    };
+    Cow::Owned(format!("data:{mime_type};base64,{data}"))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ResponsesToolCallKind {
@@ -142,7 +177,10 @@ fn append_user_content_parts(content_parts: &mut Vec<Value>, message_content: &M
                                 map.insert("file_id".to_owned(), json!(id));
                             }
                             if let Some(data) = file_data {
-                                map.insert("file_data".to_owned(), json!(data));
+                                map.insert(
+                                    "file_data".to_owned(),
+                                    json!(inline_file_data_url(filename.as_deref(), data)),
+                                );
                             }
                             if let Some(url) = file_url {
                                 map.insert("file_url".to_owned(), json!(url));

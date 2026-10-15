@@ -2044,8 +2044,109 @@ fn responses_payload_serializes_user_input_file_data() {
     assert!(content.iter().any(|part| {
         part.get("type").and_then(Value::as_str) == Some("input_file")
             && part.get("filename").and_then(Value::as_str) == Some("report.pdf")
-            && part.get("file_data").and_then(Value::as_str) == Some("aGVsbG8=")
+            && part.get("file_data").and_then(Value::as_str) == Some("data:application/pdf;base64,aGVsbG8=")
     }));
+}
+
+#[test]
+fn responses_payload_normalizes_inline_files_without_mutating_history() {
+    let provider = native_openai_provider(models::openai::GPT_6_LUNA);
+    for (filename, data, expected) in [
+        ("README.md", "IyBSZWFkbWUK", "data:text/markdown;base64,IyBSZWFkbWUK"),
+        ("REPORT.PDF", "JVBERi0xLjcK", "data:application/pdf;base64,JVBERi0xLjcK"),
+        ("main.rs", "Zm4gbWFpbigpIHt9", "data:text/plain;base64,Zm4gbWFpbigpIHt9"),
+        ("data.csv", "YSxiCjEsMgo=", "data:text/csv;base64,YSxiCjEsMgo="),
+        ("notes.txt", "data:text/plain;base64,aGVsbG8=", "data:text/plain;base64,aGVsbG8="),
+        ("notes.txt", " aGVsbG8=\n", "data:text/plain;base64,aGVsbG8="),
+        (
+            "report.docx",
+            "UEsDBA==",
+            "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,UEsDBA==",
+        ),
+        (
+            "deck.pptx",
+            "UEsDBA==",
+            "data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,UEsDBA==",
+        ),
+        (
+            "sheet.xlsx",
+            "UEsDBA==",
+            "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,UEsDBA==",
+        ),
+    ] {
+        let request = provider::LLMRequest {
+            messages: vec![provider::Message::user_with_parts(vec![
+                provider::ContentPart::text("use plan mode, refine".to_string()),
+                provider::ContentPart::file_from_data(filename.to_string(), data.to_string()),
+            ])]
+            .into(),
+            model: models::openai::GPT_6_LUNA.to_string(),
+            ..Default::default()
+        };
+        let original_messages = request.messages.clone();
+        let payload = provider.convert_to_openai_responses_format(&request).expect("valid file input");
+        let content = &get_input_array(&payload)[0]["content"];
+        assert_eq!(content[0]["text"], "use plan mode, refine");
+        assert_eq!(content[1]["type"], "input_file");
+        assert_eq!(content[1]["filename"], filename);
+        assert_eq!(content[1]["file_data"], expected);
+        assert_eq!(request.messages, original_messages);
+    }
+}
+
+#[test]
+fn responses_payload_preserves_remote_file_url() {
+    let provider = native_openai_provider(models::openai::GPT_6_LUNA);
+    let request = provider::LLMRequest {
+        messages: vec![provider::Message::user_with_parts(vec![
+            provider::ContentPart::file_from_url("https://example.com/report.pdf".to_string()),
+        ])]
+        .into(),
+        model: models::openai::GPT_6_LUNA.to_string(),
+        ..Default::default()
+    };
+    let payload = provider.convert_to_openai_responses_format(&request).expect("valid URL input");
+    let part = &get_input_array(&payload)[0]["content"][0];
+    assert_eq!(part["type"], "input_file");
+    assert_eq!(part["file_url"], "https://example.com/report.pdf");
+    assert!(part.get("file_data").is_none());
+    assert!(part.get("file_id").is_none());
+}
+
+#[test]
+fn responses_validation_counts_data_url_bytes_without_the_prefix() {
+    let request = provider::LLMRequest {
+        messages: vec![provider::Message::user_with_parts(vec![
+            provider::ContentPart::file_from_data(
+                "notes.txt".to_string(),
+                "data:text/plain;base64,aGVsbG8=".to_string(),
+            ),
+        ])]
+        .into(),
+        model: models::openai::GPT_6_LUNA.to_string(),
+        ..Default::default()
+    };
+    OpenAIProvider::validate_inline_file_inputs_with_limit(&request, 5).expect("five decoded bytes fit");
+    assert!(OpenAIProvider::validate_inline_file_inputs_with_limit(&request, 4).is_err());
+}
+
+#[test]
+fn responses_validation_rejects_malformed_inline_file_data() {
+    let provider = native_openai_provider(models::openai::GPT_6_LUNA);
+    for data in ["not base64!", "data:text/markdown;base64,not base64!"] {
+        let request = provider::LLMRequest {
+            messages: vec![provider::Message::user_with_parts(vec![
+                provider::ContentPart::file_from_data("README.md".to_string(), data.to_string()),
+            ])]
+            .into(),
+            model: models::openai::GPT_6_LUNA.to_string(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            provider.convert_to_openai_responses_format(&request),
+            Err(provider::LLMError::InvalidRequest { .. })
+        ));
+    }
 }
 
 // ─── Hosted Shell Tests ──────────────────────────────────────────────────────

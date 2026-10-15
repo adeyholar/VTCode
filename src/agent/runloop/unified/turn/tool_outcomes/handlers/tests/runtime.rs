@@ -2474,12 +2474,22 @@ async fn tracker_repeated_lists_observe_current_progress_without_replay() {
             expected_completed: 0,
         },
         TrackerCallCase {
+            call_id: "list_before_again",
+            args: json!({"action":"list"}),
+            expected_completed: 0,
+        },
+        TrackerCallCase {
             call_id: "finish_links",
             args: json!({"action":"update", "index":2, "status":"completed"}),
             expected_completed: 1,
         },
         TrackerCallCase {
             call_id: "list_after",
+            args: json!({"action":"list"}),
+            expected_completed: 1,
+        },
+        TrackerCallCase {
+            call_id: "list_after_again",
             args: json!({"action":"list"}),
             expected_completed: 1,
         },

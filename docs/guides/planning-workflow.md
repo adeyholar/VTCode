@@ -98,7 +98,11 @@ the agent is ready for user review.
 Tracker updates use action-aware indices. Standard checklist item indices are positive and 1-based; the compatibility
 form `index: 0` is reserved for checklist-level completion with `status: "completed"`. Planning workflow updates accept
 positive flat indices or positive hierarchical `index_path` values such as `2.1`. Use `items` for bulk synchronization
-rather than an item index. Bulk synchronization replaces the full checklist, including its progress and metadata. Send
+rather than an item index. Bulk synchronization replaces the full checklist and its progress. Omitted metadata is
+preserved only for descriptions that occur exactly once in both the old and new lists, including after reordering.
+Explicit metadata replaces individual fields; empty `files`/`verify` arrays and an empty `outcome` clear them.
+Renamed or new steps need their own metadata. Duplicate descriptions with existing metadata require explicit
+`files`, `outcome`, and `verify` to avoid transferring verification requirements to the wrong task. Send
 complete descriptions with status prefixes or actual objects such as
 `{"description":"Review links","status":"completed"}`. JSON-encoded update commands inside strings are rejected before
 changing the tracker. To change one existing step while preserving its description and metadata, use
@@ -107,6 +111,12 @@ changing the tracker. To change one existing step while preserving its descripti
 Tracker lists and updates execute against live checklist state, including after approval or checklist replacement;
 they must not replay earlier results from read-only caches or conversation history. Use the latest update result for
 progress totals and the changed item. Request `action: "list"` only when the full current checklist is needed.
+Reuse successful results rather than repeating unchanged updates. Repeat limits apply to consecutive successful
+identical tracker calls; a different successful operation resets that streak, while failed calls do not.
+Identical indexed or bulk updates return `status: "unchanged"` with current totals and retain artifact modification
+times. Tracker files are published atomically; reads and no-op updates do not rewrite identical mirrors.
+All tracker artifacts are read before an update is published. Reported publication failures roll back earlier
+writes; detected concurrent edits are preserved and rollback failures remain visible in the error.
 
 Successful tracker updates honor display mode: compact shows header plus the single current task (`▶ …`, first
 `in_progress` leaf else first `pending`/`blocked`; header-only when all done) while expanded shows header plus truncated

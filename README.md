@@ -134,12 +134,14 @@ chosen provider. For example, with OpenAI:
 ```bash
 cd path/to/your/project
 vtcode init                # scaffolds config + AGENTS.md; review before committing
-vtcode secret add openai   # stores an OpenAI API key in your OS keyring
+vtcode secret add openai   # stores your OpenAI API key in secure storage
 ```
 
-Replace `openai` with your provider. Alternatively, set credentials in environment variables or a workspace `.env`
-file, or use `vtcode login` for a supported login flow. See [Getting started](./docs/user-guide/getting-started.md) and
-[Provider guides](./docs/providers/PROVIDER_GUIDES.md) for provider-specific instructions.
+Replace `openai` with your provider. `vtcode secret add` uses secure storage (OS keyring or encrypted file).
+Alternatively, set credentials in environment variables or a workspace `.env` file, or use `vtcode login` for a
+supported login flow. See
+[Getting started](./docs/user-guide/getting-started.md) and [Provider guides](./docs/providers/PROVIDER_GUIDES.md) for
+provider-specific instructions.
 
 > [!NOTE]
 > ChatGPT OAuth reuses the Codex CLI's public client identity via an unofficial compatibility flow; prefer your
@@ -149,7 +151,7 @@ file, or use `vtcode login` for a supported login flow. See [Getting started](./
 <!-- -->
 
 > [!CAUTION]
-> Never commit API keys or put them in `vtcode.toml`.
+> Keep API keys out of Git and `vtcode.toml`. If you use a workspace `.env` file, make sure it is not committed.
 
 ### 3. Run your first task
 

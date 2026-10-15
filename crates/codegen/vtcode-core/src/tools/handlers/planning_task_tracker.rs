@@ -3,19 +3,19 @@
 //! This tracker is intended for Planning workflow only and writes a sidecar markdown
 //! file next to the active plan file (`<plan>.tasks.md`).
 
-use super::planning_workflow::{PlanningWorkflowState, sync_tracker_into_plan_file, tracker_file_for_plan_file};
+use super::planning_workflow::{PlanningWorkflowState, tracker_file_for_plan_file};
 use crate::config::constants::tools;
 use crate::tools::error_helpers::deserialize_tool_args;
 use crate::tools::handlers::task_tracking::{
-    TASK_ITEMS_DESCRIPTION, TaskCounts, TaskItemInput, TaskStepMetadata, TaskTrackingStatus, TaskTreeNode,
-    append_notes, append_notes_section, append_task_step_metadata, apply_metadata_line, compact_task_tree_view,
-    is_bulk_sync_update, metadata_from_input, normalize_optional_text, normalize_string_items,
-    parse_marked_status_prefix, parse_status_prefix, task_files_property_schema, task_items_array_schema,
-    task_status_property_schema, task_verify_property_schema, tracker_schema_allof, validate_action_index_fields,
-    validate_task_item_inputs, validate_update_shape,
+    TASK_ITEMS_DESCRIPTION, TaskCounts, TaskItemInput, TaskMetadataRef, TaskStepMetadata, TaskTrackingStatus,
+    TaskTreeNode, TrackerArtifact, append_notes, append_notes_section, append_task_step_metadata, apply_metadata_input,
+    apply_metadata_line, compact_task_tree_view, is_bulk_sync_update, metadata_from_input, parse_marked_status_prefix,
+    parse_status_prefix, parse_task_items, persist_tracker_artifacts, task_files_property_schema,
+    task_items_array_schema, task_status_property_schema, task_verify_property_schema, tracker_schema_allof,
+    validate_action_index_fields, validate_update_shape,
 };
 use crate::tools::traits::Tool;
-use crate::utils::file_utils::{ensure_dir_exists, read_file_with_context, write_file_with_context};
+use crate::utils::file_utils::read_file_with_context;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ use vtcode_commons::workspace_relative_display;
 
 type PlanTaskStatus = TaskTrackingStatus;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct PlanTaskNode {
     description: String,
     status: PlanTaskStatus,
@@ -36,7 +36,7 @@ struct PlanTaskNode {
     children: Vec<PlanTaskNode>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct PlanTaskDocument {
     title: String,
     items: Vec<PlanTaskNode>,
@@ -165,13 +165,14 @@ fn flatten_items_json(nodes: &[PlanTaskNode]) -> Vec<Value> {
     items
 }
 
-fn flatten_for_global_items(
-    nodes: &[PlanTaskNode],
-    level: usize,
-    out: &mut Vec<(PlanTaskStatus, String, TaskStepMetadata)>,
-) {
+fn flatten_for_global_items(nodes: &[PlanTaskNode], level: usize, out: &mut Vec<FlatTaskLine>) {
     for node in nodes {
-        out.push((node.status, format!("{}{}", "  ".repeat(level), node.description), node.metadata.clone()));
+        out.push(FlatTaskLine {
+            level,
+            status: node.status,
+            description: node.description.clone(),
+            metadata: node.metadata.clone(),
+        });
         flatten_for_global_items(&node.children, level + 1, out);
     }
 }
@@ -390,55 +391,28 @@ fn parse_document_from_markdown(content: &str) -> Option<PlanTaskDocument> {
     Some(PlanTaskDocument { title, items, notes })
 }
 
-fn build_flat_create_lines(items: &[TaskItemInput]) -> Result<Vec<FlatTaskLine>> {
-    validate_task_item_inputs(items)?;
-    items
-        .iter()
-        .filter_map(|raw| match raw {
-            TaskItemInput::Text(raw) => {
-                let level = raw.chars().take_while(|c| *c == ' ').count() / 2;
-                let trimmed = raw.trim();
-                if trimmed.is_empty() {
-                    return None;
-                }
-                let (status, description) = parse_status_prefix(trimmed);
-                if description.trim().is_empty() {
-                    return None;
-                }
-                Some(Ok(FlatTaskLine {
-                    level,
-                    status,
-                    description: description.trim().to_string(),
-                    metadata: TaskStepMetadata::default(),
-                }))
-            }
-            TaskItemInput::Structured(payload) => {
-                let level = payload.description.chars().take_while(|c| *c == ' ').count() / 2;
-                let (parsed_status, description) = parse_status_prefix(payload.description.trim());
-                let description = description.trim().to_string();
-                if description.is_empty() {
-                    return None;
-                }
-                let status = match payload.status.as_deref() {
-                    Some(value) => match PlanTaskStatus::from_str(value) {
-                        Ok(status) => status,
-                        Err(err) => return Some(Err(err)),
-                    },
-                    None => parsed_status,
-                };
-                Some(Ok(FlatTaskLine {
-                    level,
-                    status,
-                    description,
-                    metadata: metadata_from_input(
-                        payload.files.as_deref(),
-                        payload.outcome.as_deref(),
-                        payload.verify.as_deref(),
-                    ),
-                }))
-            }
+fn collect_task_metadata<'a>(nodes: &'a [PlanTaskNode], metadata: &mut Vec<TaskMetadataRef<'a>>) {
+    for node in nodes {
+        metadata.push(TaskMetadataRef {
+            description: &node.description,
+            metadata: &node.metadata,
+        });
+        collect_task_metadata(&node.children, metadata);
+    }
+}
+
+fn build_flat_task_lines(items: &[TaskItemInput], previous: &[PlanTaskNode]) -> Result<Vec<FlatTaskLine>> {
+    let mut previous_metadata = Vec::new();
+    collect_task_metadata(previous, &mut previous_metadata);
+    Ok(parse_task_items(items, &previous_metadata)?
+        .into_iter()
+        .map(|item| FlatTaskLine {
+            level: item.level,
+            status: item.status,
+            description: item.description,
+            metadata: item.metadata,
         })
-        .collect()
+        .collect())
 }
 
 pub struct PlanningTaskTrackerTool {
@@ -534,50 +508,25 @@ impl PlanningTaskTrackerTool {
         Ok(parse_document_from_markdown(&content))
     }
 
-    async fn save_document(&self, document: &PlanTaskDocument) -> Result<PathBuf> {
-        let tracker_file = self.tracker_file().await?;
-        if let Some(parent) = tracker_file.parent() {
-            ensure_dir_exists(parent)
-                .await
-                .with_context(|| format!("Failed to create plans directory: {}", parent.display()))?;
-        }
-        write_file_with_context(&tracker_file, &document.to_markdown(), "plan task tracker file")
-            .await
-            .with_context(|| format!("Failed to write plan task tracker file: {}", tracker_file.display()))?;
-        Ok(tracker_file)
-    }
-
     fn global_task_file(&self) -> Option<PathBuf> {
         self.state
             .workspace_root()
             .map(|workspace| workspace.join(".vtcode").join("tasks").join("current_task.md"))
     }
 
-    async fn mirror_global_task_file(&self, document: &PlanTaskDocument) -> Result<()> {
-        let Some(task_file) = self.global_task_file() else {
-            return Ok(());
-        };
-
-        if let Some(parent) = task_file.parent() {
-            ensure_dir_exists(parent)
-                .await
-                .with_context(|| format!("Failed to create tasks directory: {}", parent.display()))?;
-        }
-
+    fn global_task_markdown(document: &PlanTaskDocument) -> String {
         let mut lines = Vec::new();
         flatten_for_global_items(&document.items, 0, &mut lines);
 
         let mut markdown = format!("# {}\n\n", document.title);
-        for (status, description, metadata) in lines {
-            let _ = writeln!(markdown, "- {} {}", status.flat_checkbox(), description);
-            append_task_step_metadata(&mut markdown, "", &metadata);
+        for line in lines {
+            let _ =
+                writeln!(markdown, "- {} {}{}", line.status.flat_checkbox(), "  ".repeat(line.level), line.description);
+            append_task_step_metadata(&mut markdown, "", &line.metadata);
         }
         append_notes_section(&mut markdown, document.notes.as_deref());
 
-        write_file_with_context(&task_file, &markdown, "task checklist")
-            .await
-            .with_context(|| format!("Failed to write mirrored task checklist file: {}", task_file.display()))?;
-        Ok(())
+        markdown
     }
 
     fn success_payload(
@@ -602,13 +551,20 @@ impl PlanningTaskTrackerTool {
         message: String,
         document: &PlanTaskDocument,
     ) -> Result<Value> {
-        let tracker_file = self.save_document(document).await?;
-        self.mirror_global_task_file(document).await?;
-        if let Some(plan_file) = self.state.get_plan_file().await
-            && tokio::fs::try_exists(&plan_file).await.unwrap_or(false)
-        {
-            sync_tracker_into_plan_file(&plan_file, &document.to_markdown()).await?;
+        let tracker_file = self.tracker_file().await?;
+        let markdown = document.to_markdown();
+        let mut artifacts =
+            vec![TrackerArtifact::new(tracker_file.clone(), markdown.clone(), "plan task tracker file").await?];
+        if let Some(task_file) = self.global_task_file() {
+            artifacts
+                .push(TrackerArtifact::new(task_file, Self::global_task_markdown(document), "task checklist").await?);
         }
+        if let Some(plan_file) = self.state.get_plan_file().await
+            && let Some(artifact) = TrackerArtifact::embedded_plan(plan_file, &markdown).await?
+        {
+            artifacts.push(artifact);
+        }
+        persist_tracker_artifacts(artifacts).await?;
         Ok(self.success_payload(status, message, &tracker_file, document))
     }
 
@@ -618,7 +574,7 @@ impl PlanningTaskTrackerTool {
             bail!("At least one item is required for 'create'. Provide items: [\"step 1\", \"step 2\", ...]");
         }
 
-        let flat_lines = build_flat_create_lines(items)?;
+        let flat_lines = build_flat_task_lines(items, &[])?;
         if flat_lines.is_empty() {
             bail!("No valid task items were provided for create");
         }
@@ -642,10 +598,11 @@ impl PlanningTaskTrackerTool {
             .load_document()
             .await?
             .context("No active plan tracker. Use action='create' first.")?;
+        let previous = document.clone();
 
         if is_bulk_update {
             let input_items = args.items.as_deref().unwrap_or(&[]);
-            let flat_lines = build_flat_create_lines(input_items)?;
+            let flat_lines = build_flat_task_lines(input_items, &document.items)?;
             if flat_lines.is_empty() {
                 bail!("No valid items provided for checklist sync");
             }
@@ -656,11 +613,7 @@ impl PlanningTaskTrackerTool {
             document.notes = append_notes(document.notes.take(), args.notes.as_deref());
 
             return self
-                .persist_document_and_payload(
-                    "updated",
-                    "Checklist synchronized from provided items.".to_string(),
-                    &document,
-                )
+                .persist_update(&previous, &document, "Checklist synchronized from provided items.".to_string())
                 .await;
         }
 
@@ -683,26 +636,41 @@ impl PlanningTaskTrackerTool {
                 .with_context(|| format!("No item at index_path '{index_path}'"))?;
             let old_status = node.status.as_str().to_string();
             node.status = new_status;
-            if let Some(files) = args.files.as_deref() {
-                node.metadata.files = normalize_string_items(Some(files));
-            }
-            if args.outcome.is_some() {
-                node.metadata.outcome = normalize_optional_text(args.outcome.as_deref());
-            }
-            if let Some(verify) = args.verify.as_deref() {
-                node.metadata.verify = normalize_string_items(Some(verify));
-            }
+            apply_metadata_input(
+                &mut node.metadata,
+                args.files.as_deref(),
+                args.outcome.as_deref(),
+                args.verify.as_deref(),
+            );
             (old_status, node.status.as_str().to_string())
         };
 
         document.notes = append_notes(document.notes.take(), args.notes.as_deref());
 
-        self.persist_document_and_payload(
-            "updated",
-            format!("Item {index_path} status changed: {old_status} -> {new_status_str}"),
+        self.persist_update(
+            &previous,
             &document,
+            format!("Item {index_path} status changed: {old_status} -> {new_status_str}"),
         )
         .await
+    }
+
+    async fn persist_update(
+        &self,
+        previous: &PlanTaskDocument,
+        document: &PlanTaskDocument,
+        message: String,
+    ) -> Result<Value> {
+        if previous == document {
+            let tracker_file = self.tracker_file().await?;
+            return Ok(self.success_payload(
+                "unchanged",
+                "Checklist already matches requested state.".to_string(),
+                &tracker_file,
+                document,
+            ));
+        }
+        self.persist_document_and_payload("updated", message, document).await
     }
 
     async fn handle_list(&self) -> Result<Value> {

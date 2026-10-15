@@ -563,6 +563,87 @@ fn readonly_file_operation_calls_use_lower_identical_limit() {
     assert_eq!(history.loop_limit_for(tools::UNIFIED_FILE, &args), 2);
 }
 
+fn loop_test_record(tool_name: &str, args: Value) -> ToolExecutionRecord {
+    ToolExecutionRecord::success(
+        tool_name.to_string(),
+        tool_name.to_string(),
+        false,
+        None,
+        args,
+        json!({"success": true}),
+        make_snapshot(),
+        None,
+        None,
+        None,
+        None,
+        false,
+    )
+}
+
+#[test]
+fn tracker_loop_detection_resets_after_successful_intervening_calls() {
+    let list_args = json!({"action":"list"});
+    let completion_args = json!({"action":"update", "items":["[x] Check README"]});
+    for args in [list_args, completion_args] {
+        for intervening in [
+            loop_test_record(tools::TASK_TRACKER, json!({"action":"update", "index":1, "status":"in_progress"})),
+            loop_test_record(tools::EXEC_COMMAND, json!({"cmd":"cargo check --locked"})),
+            loop_test_record(tools::READ_FILE, json!({"path":"README.md"})),
+        ] {
+            let history = ToolExecutionHistory::new(20);
+            history.set_loop_detection_limits(8, 2);
+            for _ in 0..2 {
+                history.add_record(loop_test_record(tools::TASK_TRACKER, args.clone()));
+            }
+            assert!(history.detect_loop(tools::TASK_TRACKER, &args).detected);
+            history.add_record(intervening);
+            assert_eq!(history.detect_loop(tools::TASK_TRACKER, &args).repeat_count, 0);
+
+            history.add_record(loop_test_record(tools::TASK_TRACKER, args.clone()));
+            let after_one = history.detect_loop(tools::TASK_TRACKER, &args);
+            assert!(!after_one.detected);
+            assert_eq!(after_one.repeat_count, 1);
+            history.add_record(loop_test_record(tools::TASK_TRACKER, args.clone()));
+            let after_two = history.detect_loop(tools::TASK_TRACKER, &args);
+            assert!(after_two.detected);
+            assert_eq!(after_two.repeat_count, 2);
+        }
+    }
+}
+
+#[test]
+fn tracker_loop_detection_does_not_reset_after_failed_calls() {
+    let history = ToolExecutionHistory::new(20);
+    history.set_loop_detection_limits(8, 2);
+    let args = json!({"action":"list"});
+    for _ in 0..2 {
+        history.add_record(loop_test_record(tools::TASK_TRACKER, args.clone()));
+    }
+    for tool_name in [tools::TASK_TRACKER, tools::EXEC_COMMAND] {
+        let mut failure = loop_test_record(tool_name, json!({"action":"update", "index":2, "status":"completed"}));
+        failure.success = false;
+        failure.result = Err("denied by policy".to_string());
+        history.add_record(failure);
+        let result = history.detect_loop(tools::TASK_TRACKER, &args);
+        assert!(result.detected);
+        assert_eq!(result.repeat_count, 2);
+    }
+}
+
+#[test]
+fn tracker_streak_rule_does_not_change_other_tool_loop_detection() {
+    let history = ToolExecutionHistory::new(20);
+    history.set_loop_detection_limits(8, 2);
+    let args = json!({"query":"same search"});
+    for _ in 0..2 {
+        history.add_record(loop_test_record(tools::CODE_SEARCH, args.clone()));
+        history.add_record(loop_test_record(tools::TASK_TRACKER, json!({"action":"list"})));
+    }
+    let result = history.detect_loop(tools::CODE_SEARCH, &args);
+    assert!(result.detected);
+    assert_eq!(result.repeat_count, 2);
+}
+
 #[test]
 fn code_search_loop_identity_normalises_query_filters_and_limit() {
     let history = ToolExecutionHistory::new(10);

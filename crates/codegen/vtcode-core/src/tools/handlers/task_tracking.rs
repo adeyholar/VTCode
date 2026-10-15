@@ -1,8 +1,14 @@
 use std::str::FromStr;
 
 use anyhow::{Result, bail};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+mod persistence;
+pub(crate) use persistence::{
+    TrackerArtifact, persist_tracker_artifacts, read_tracker_artifact, write_tracker_artifact,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct TaskStepMetadata {
@@ -32,6 +38,108 @@ pub struct TaskItemInputObject {
     pub outcome: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_string_list")]
     pub verify: Option<Vec<String>>,
+}
+
+pub(crate) struct TaskMetadataRef<'a> {
+    pub description: &'a str,
+    pub metadata: &'a TaskStepMetadata,
+}
+
+pub(crate) struct ParsedTaskItem {
+    pub level: usize,
+    pub description: String,
+    pub status: TaskTrackingStatus,
+    pub metadata: TaskStepMetadata,
+}
+
+/// Normalize both tracker variants and preserve omitted metadata only when
+/// a description identifies exactly one old step and exactly one new step.
+/// Creates pass no previous items; explicit empty metadata still clears it.
+pub(crate) fn parse_task_items(
+    items: &[TaskItemInput],
+    previous: &[TaskMetadataRef<'_>],
+) -> Result<Vec<ParsedTaskItem>> {
+    validate_task_item_inputs(items)?;
+    let mut previous_by_description = HashMap::new();
+    for item in previous {
+        previous_by_description
+            .entry(item.description)
+            .and_modify(|metadata| *metadata = None)
+            .or_insert(Some(item.metadata));
+    }
+    let mut description_counts = HashMap::new();
+    for item in items {
+        let raw = match item {
+            TaskItemInput::Text(raw) => raw,
+            TaskItemInput::Structured(input) => &input.description,
+        };
+        let (_, description) = parse_status_prefix(raw.trim());
+        *description_counts.entry(description.trim().to_owned()).or_insert(0usize) += 1;
+    }
+
+    let mut parsed_items = Vec::with_capacity(items.len());
+    for item in items {
+        let raw = match item {
+            TaskItemInput::Text(raw) => raw,
+            TaskItemInput::Structured(input) => &input.description,
+        };
+        let (mut status, description) = parse_status_prefix(raw.trim());
+        let description = description.trim().to_owned();
+        if description.is_empty() {
+            continue;
+        }
+        let previous_metadata = if description_counts.get(&description) == Some(&1) {
+            previous_by_description.get(description.as_str()).copied().flatten()
+        } else {
+            None
+        };
+        if previous_metadata.is_none()
+            && previous
+                .iter()
+                .any(|item| item.description == description && item.metadata != &TaskStepMetadata::default())
+            && !matches!(item, TaskItemInput::Structured(input) if input.files.is_some() && input.outcome.is_some() && input.verify.is_some())
+        {
+            bail!(
+                "Ambiguous task description '{description}': provide explicit files, outcome, and verify metadata for duplicate steps. Use empty arrays and an empty outcome to clear them. The checklist was not changed."
+            );
+        }
+        let mut metadata = previous_metadata.cloned().unwrap_or_default();
+        if let TaskItemInput::Structured(input) = item {
+            if let Some(raw_status) = input.status.as_deref() {
+                status = TaskTrackingStatus::from_str(raw_status)?;
+            }
+            apply_metadata_input(
+                &mut metadata,
+                input.files.as_deref(),
+                input.outcome.as_deref(),
+                input.verify.as_deref(),
+            );
+        }
+        parsed_items.push(ParsedTaskItem {
+            level: raw.chars().take_while(|character| *character == ' ').count() / 2,
+            description,
+            status,
+            metadata,
+        });
+    }
+    Ok(parsed_items)
+}
+
+pub(crate) fn apply_metadata_input(
+    metadata: &mut TaskStepMetadata,
+    files: Option<&[String]>,
+    outcome: Option<&str>,
+    verify: Option<&[String]>,
+) {
+    if let Some(files) = files {
+        metadata.files = normalize_string_items(Some(files));
+    }
+    if let Some(outcome) = outcome {
+        metadata.outcome = normalize_optional_text(Some(outcome));
+    }
+    if let Some(verify) = verify {
+        metadata.verify = normalize_string_items(Some(verify));
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -206,7 +314,7 @@ pub(crate) fn validate_action_index_fields(action: &str, index: Option<usize>, i
     Ok(())
 }
 
-pub(crate) const TASK_ITEMS_DESCRIPTION: &str = "Full checklist replacement for create or bulk update, not indexed updates. Send plain descriptions with [x]/[~]/[!]/[ ] status prefixes or actual objects with description and status; never JSON-encoded strings.";
+pub(crate) const TASK_ITEMS_DESCRIPTION: &str = "Full checklist replacement for create or bulk update, not indexed updates. Send plain descriptions with [x]/[~]/[!]/[ ] status prefixes or actual objects with description and status; never JSON-encoded strings. Bulk updates preserve omitted metadata for unique unchanged descriptions. Explicit metadata replaces it; use empty arrays or an empty outcome to clear fields. Duplicate descriptions with existing metadata require explicit files, outcome, and verify.";
 
 /// Shared status values for every task-tracker schema (standard + planning,
 /// top-level and nested item objects). Single source so a future status
@@ -551,11 +659,9 @@ pub fn metadata_from_input(
     outcome: Option<&str>,
     verify: Option<&[String]>,
 ) -> TaskStepMetadata {
-    TaskStepMetadata {
-        files: normalize_string_items(files),
-        outcome: normalize_optional_text(outcome),
-        verify: normalize_string_items(verify),
-    }
+    let mut metadata = TaskStepMetadata::default();
+    apply_metadata_input(&mut metadata, files, outcome, verify);
+    metadata
 }
 
 /// Markers that may trail a task description as inline `Action -> files: [...]

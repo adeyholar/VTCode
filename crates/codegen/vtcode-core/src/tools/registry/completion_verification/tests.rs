@@ -1,6 +1,49 @@
 use super::*;
 use serde_json::json;
 
+#[tokio::test]
+async fn completion_verification_bulk_status_sync_retains_required_checks() {
+    for planning in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+        registry.allow_all_tools().await.unwrap();
+        registry.restore_completion_verification_debt();
+        if planning {
+            let state = registry.planning_workflow_state();
+            let plan_file = state.plans_dir().join("verification.md");
+            std::fs::create_dir_all(plan_file.parent().unwrap()).unwrap();
+            std::fs::write(&plan_file, "# Verification\n").unwrap();
+            state.set_plan_file(Some(plan_file)).await;
+            state.enable();
+            registry.enable_planning();
+        }
+        registry
+            .execute_tool(
+                tools::TASK_TRACKER,
+                json!({"action":"create", "items":[
+                    {"description":"Check build", "verify":["cargo check"]},
+                    {"description":"Check lints", "verify":["cargo clippy"]}
+                ]}),
+            )
+            .await
+            .unwrap();
+        let args = json!({"action":"update", "items":["[x] Check lints", "[x] Check build"]});
+        let output = registry.execute_tool(tools::TASK_TRACKER, args.clone()).await.unwrap();
+        assert_eq!(output["status"], "updated", "{output}");
+        assert_eq!(registry.missing_required_completion_verifiers(), vec!["cargo clippy", "cargo check"]);
+        let verifier_args = json!({"cmd":"cargo check"});
+        let id = registry.begin_completion_verifier(&verifier_args);
+        registry.observe_completion_verifier(id, &verifier_args, &Ok(json!({"exit_code":0})));
+        assert_eq!(registry.missing_required_completion_verifiers(), vec!["cargo clippy"]);
+        registry.begin_tracker_request(false);
+        assert!(!registry.tracker_adopted_for_request());
+        let repeated = registry.execute_tool(tools::TASK_TRACKER, args).await.unwrap();
+        assert_eq!(repeated["status"], "unchanged", "{repeated}");
+        assert!(registry.tracker_adopted_for_request(), "unchanged live updates adopt the new request");
+        assert_eq!(registry.missing_required_completion_verifiers(), vec!["cargo clippy"]);
+    }
+}
+
 #[test]
 fn completion_verification_requires_fresh_terminal_evidence_after_one_five_and_six_edits() {
     for edits in [1, 5, 6] {

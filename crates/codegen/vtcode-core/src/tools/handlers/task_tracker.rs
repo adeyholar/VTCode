@@ -13,30 +13,26 @@
 //! - `add`: Add a new item to an existing checklist
 
 use super::planning_task_tracker::{PlanningTaskTrackerArgs, PlanningTaskTrackerTool};
-use super::planning_workflow::{
-    PlanningWorkflowState, plan_file_for_tracker_file, sync_tracker_into_plan_file, tracker_file_for_plan_file,
-};
+use super::planning_workflow::{PlanningWorkflowState, plan_file_for_tracker_file, tracker_file_for_plan_file};
 use std::str::FromStr;
 
 use crate::config::constants::tools;
 use crate::tools::error_helpers::deserialize_tool_args;
 use crate::tools::handlers::task_tracking::{
-    TASK_ITEMS_DESCRIPTION, TaskCounts, TaskItemInput, TaskStepMetadata, TaskTrackingStatus, TaskTreeNode,
-    append_notes, append_notes_section, append_task_step_metadata, apply_metadata_line, compact_task_tree_view,
-    is_bulk_sync_update, metadata_from_input, normalize_optional_text, normalize_string_items,
-    parse_marked_status_prefix, parse_status_prefix, task_files_property_schema, task_items_array_schema,
-    task_status_property_schema, task_verify_property_schema, tracker_schema_allof, validate_action_index_fields,
-    validate_task_item_inputs, validate_update_shape,
+    TASK_ITEMS_DESCRIPTION, TaskCounts, TaskItemInput, TaskMetadataRef, TaskStepMetadata, TaskTrackingStatus,
+    TaskTreeNode, TrackerArtifact, append_notes, append_notes_section, append_task_step_metadata, apply_metadata_input,
+    apply_metadata_line, compact_task_tree_view, is_bulk_sync_update, metadata_from_input, normalize_optional_text,
+    parse_marked_status_prefix, parse_status_prefix, parse_task_items, persist_tracker_artifacts,
+    task_files_property_schema, task_items_array_schema, task_status_property_schema, task_verify_property_schema,
+    tracker_schema_allof, validate_action_index_fields, validate_update_shape, write_tracker_artifact,
 };
-use crate::utils::file_utils::{ensure_dir_exists, read_file_with_context, write_file_with_context};
+use crate::utils::file_utils::{ensure_dir_exists, read_file_with_context};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use vtcode_commons::workspace_relative_display;
 
 use crate::tools::traits::Tool;
@@ -134,46 +130,24 @@ impl TaskChecklist {
     }
 }
 
-fn parse_input_items(items: &[TaskItemInput]) -> Result<Vec<TaskItem>> {
-    validate_task_item_inputs(items)?;
-    items
+fn parse_input_items(items: &[TaskItemInput], previous: &[TaskItem]) -> Result<Vec<TaskItem>> {
+    let previous_metadata: Vec<_> = previous
         .iter()
-        .filter_map(|item| match item {
-            TaskItemInput::Text(raw) => {
-                let (status, description) = parse_status_prefix(raw);
-                let description = description.trim().to_string();
-                if description.is_empty() {
-                    return None;
-                }
-                Some(Ok((status, description, TaskStepMetadata::default())))
-            }
-            TaskItemInput::Structured(payload) => {
-                let (parsed_status, parsed_description) = parse_status_prefix(&payload.description);
-                let description = parsed_description.trim().to_string();
-                if description.is_empty() {
-                    return None;
-                }
-                let status = match payload.status.as_deref() {
-                    Some(raw) => match TaskStatus::from_str(raw) {
-                        Ok(status) => status,
-                        Err(err) => return Some(Err(err)),
-                    },
-                    None => parsed_status,
-                };
-                let metadata = metadata_from_input(
-                    payload.files.as_deref(),
-                    payload.outcome.as_deref(),
-                    payload.verify.as_deref(),
-                );
-                Some(Ok((status, description, metadata)))
-            }
+        .map(|item| TaskMetadataRef {
+            description: &item.description,
+            metadata: &item.metadata,
         })
+        .collect();
+    Ok(parse_task_items(items, &previous_metadata)?
+        .into_iter()
         .enumerate()
-        .map(|(idx, item)| {
-            let (status, description, metadata) = item?;
-            Ok(TaskItem { index: idx + 1, description, status, metadata })
+        .map(|(idx, item)| TaskItem {
+            index: idx + 1,
+            description: item.description,
+            status: item.status,
+            metadata: item.metadata,
         })
-        .collect()
+        .collect())
 }
 
 fn parse_single_index_from_path(index_path: &str) -> Result<usize> {
@@ -369,7 +343,6 @@ pub struct TaskTrackerArgs {
 pub struct TaskTrackerTool {
     workspace_root: PathBuf,
     planning_workflow_state: PlanningWorkflowState,
-    checklist: Arc<RwLock<Option<TaskChecklist>>>,
 }
 
 fn standard_task_tracker_parameter_schema() -> Value {
@@ -471,11 +444,7 @@ pub(crate) fn is_task_tracker_shape_error(error_msg: &str) -> bool {
 
 impl TaskTrackerTool {
     pub fn new(workspace_root: PathBuf, planning_workflow_state: PlanningWorkflowState) -> Self {
-        Self {
-            workspace_root,
-            planning_workflow_state,
-            checklist: Arc::new(RwLock::new(None)),
-        }
+        Self { workspace_root, planning_workflow_state }
     }
 
     fn tasks_dir(&self) -> PathBuf {
@@ -501,35 +470,26 @@ impl TaskTrackerTool {
             .await
             .with_context(|| format!("Failed to create tasks directory: {}", dir.display()))?;
         let md = checklist.to_markdown();
-        write_file_with_context(&self.task_file(), &md, "task checklist")
+        write_tracker_artifact(&self.task_file(), &md, "task checklist")
             .await
             .with_context(|| "Failed to write task checklist")?;
         Ok(())
     }
 
     async fn save_plan_mirror_to_file(&self, tracker_file: &Path, checklist: &TaskChecklist) -> Result<()> {
-        if let Some(parent) = tracker_file.parent() {
-            ensure_dir_exists(parent)
-                .await
-                .with_context(|| format!("Failed to create plan tracker directory: {}", parent.display()))?;
-        }
-        write_file_with_context(tracker_file, &checklist.to_plan_markdown(), "plan task tracker file")
-            .await
-            .with_context(|| format!("Failed to write plan task tracker file: {}", tracker_file.display()))?;
-        if let Some(plan_file) = plan_file_for_tracker_file(tracker_file)
-            && tokio::fs::try_exists(&plan_file).await.unwrap_or(false)
-        {
-            sync_tracker_into_plan_file(&plan_file, &checklist.to_plan_markdown()).await?;
-        }
-        Ok(())
+        persist_tracker_artifacts(Self::plan_mirror_artifacts(tracker_file, checklist).await?).await
     }
 
-    async fn save_plan_mirror(&self, checklist: &TaskChecklist) -> Result<()> {
-        let Some(tracker_file) = self.plan_task_file().await else {
-            return Ok(());
-        };
-        self.save_plan_mirror_to_file(&tracker_file, checklist).await?;
-        Ok(())
+    async fn plan_mirror_artifacts(tracker_file: &Path, checklist: &TaskChecklist) -> Result<Vec<TrackerArtifact>> {
+        let markdown = checklist.to_plan_markdown();
+        let mut artifacts =
+            vec![TrackerArtifact::new(tracker_file.to_path_buf(), markdown.clone(), "plan task tracker file").await?];
+        if let Some(plan_file) = plan_file_for_tracker_file(tracker_file)
+            && let Some(artifact) = TrackerArtifact::embedded_plan(plan_file, &markdown).await?
+        {
+            artifacts.push(artifact);
+        }
+        Ok(artifacts)
     }
 
     async fn load_global_checklist(&self) -> Result<Option<TaskChecklist>> {
@@ -656,22 +616,36 @@ impl TaskTrackerTool {
         Ok(loaded)
     }
 
-    async fn ensure_checklist_loaded(&self) -> Result<()> {
-        let loaded = self.load_preferred_checklist().await?;
-        let mut guard = self.checklist.write().await;
-        *guard = loaded;
-        Ok(())
-    }
-
     async fn persist_edit_mode_snapshot(&self, checklist: &TaskChecklist) -> Result<()> {
-        self.save_checklist(checklist).await?;
-        self.save_plan_mirror(checklist).await?;
-        Ok(())
+        let mut artifacts =
+            vec![TrackerArtifact::new(self.task_file(), checklist.to_markdown(), "task checklist").await?];
+        if let Some(tracker_file) = self.plan_task_file().await {
+            artifacts.extend(Self::plan_mirror_artifacts(&tracker_file, checklist).await?);
+        }
+        persist_tracker_artifacts(artifacts).await
     }
 
     async fn persist_and_build_view(&self, checklist: &TaskChecklist) -> Result<(Value, Value)> {
         self.persist_edit_mode_snapshot(checklist).await?;
         Ok((checklist.summary(), checklist.view()))
+    }
+
+    async fn persist_update(
+        &self,
+        previous: Option<&TaskChecklist>,
+        checklist: &TaskChecklist,
+        message: String,
+    ) -> Result<Value> {
+        let unchanged = previous == Some(checklist);
+        if !unchanged {
+            self.persist_edit_mode_snapshot(checklist).await?;
+        }
+        Ok(json!({
+            "status": if unchanged { "unchanged" } else { "updated" },
+            "message": if unchanged { "Checklist already matches requested state.".to_string() } else { message },
+            "checklist": checklist.summary(),
+            "view": checklist.view(),
+        }))
     }
 
     fn to_plan_args(args: &TaskTrackerArgs) -> PlanningTaskTrackerArgs {
@@ -694,10 +668,7 @@ impl TaskTrackerTool {
     async fn execute_in_planning_workflow(&self, args: &TaskTrackerArgs) -> Result<Value> {
         let plan_tool = PlanningTaskTrackerTool::new(self.planning_workflow_state.clone());
         let mapped = Self::to_plan_args(args);
-        let output = plan_tool.execute(serde_json::to_value(mapped)?).await?;
-        self.ensure_checklist_loaded().await?;
-
-        Ok(output)
+        plan_tool.execute(serde_json::to_value(mapped)?).await
     }
 
     /// Check if a `create` call is idempotent (same checklist already active).
@@ -751,16 +722,15 @@ impl TaskTrackerTool {
             anyhow::bail!("At least one item is required for 'create'. Provide items: [\"step 1\", \"step 2\", ...]");
         }
 
-        let items = parse_input_items(item_descs)?;
+        let items = parse_input_items(item_descs, &[])?;
         if items.is_empty() {
             anyhow::bail!("No valid task items were provided for create.");
         }
         let notes = append_notes(None, args.notes.as_deref());
 
-        self.ensure_checklist_loaded().await?;
-        let guard = self.checklist.write().await;
+        let existing_checklist = self.load_preferred_checklist().await?;
         let mut existing_item_count = 0usize;
-        if let Some(existing) = guard.as_ref() {
+        if let Some(existing) = existing_checklist.as_ref() {
             existing_item_count = existing.items.len();
             if let Some(unchanged) =
                 Self::check_create_idempotency(existing, &title, &items, &self.display_path(&self.task_file()))
@@ -771,10 +741,7 @@ impl TaskTrackerTool {
 
         let checklist = TaskChecklist { title, items, notes };
 
-        drop(guard);
         let (summary, view) = self.persist_and_build_view(&checklist).await?;
-        let mut guard = self.checklist.write().await;
-        *guard = Some(checklist);
 
         let (status, message) = if existing_item_count > 0 {
             (
@@ -798,11 +765,14 @@ impl TaskTrackerTool {
         validate_update_shape(args.items.as_deref(), args.index, args.index_path.as_deref(), args.status.as_deref())?;
         let is_bulk_update =
             is_bulk_sync_update(args.items.as_deref(), args.index, args.index_path.as_deref(), args.status.as_deref());
-        self.ensure_checklist_loaded().await?;
-        let mut guard = self.checklist.write().await;
+        let mut current = self.load_preferred_checklist().await?;
+        let previous = current.clone();
         if is_bulk_update {
             let input_items = args.items.as_deref().unwrap_or(&[]);
-            let items = parse_input_items(input_items)?;
+            let items = parse_input_items(
+                input_items,
+                current.as_ref().map(|checklist| checklist.items.as_slice()).unwrap_or(&[]),
+            )?;
             if items.is_empty() {
                 anyhow::bail!("No valid items provided for checklist sync.");
             }
@@ -810,10 +780,10 @@ impl TaskTrackerTool {
             let title = args
                 .title
                 .clone()
-                .or_else(|| guard.as_ref().map(|checklist| checklist.title.clone()))
+                .or_else(|| current.as_ref().map(|checklist| checklist.title.clone()))
                 .unwrap_or_else(|| "Task Checklist".to_string());
 
-            let checklist = guard.get_or_insert(TaskChecklist {
+            let checklist = current.get_or_insert(TaskChecklist {
                 title: title.clone(),
                 items: Vec::new(),
                 notes: None,
@@ -823,17 +793,12 @@ impl TaskTrackerTool {
             checklist.items = items;
             checklist.notes = append_notes(checklist.notes.take(), args.notes.as_deref());
             let snapshot = checklist.clone();
-            drop(guard);
-            let (summary, view) = self.persist_and_build_view(&snapshot).await?;
-            return Ok(json!({
-                "status": "updated",
-                "message": "Checklist synchronized from provided items.",
-                "checklist": summary,
-                "view": view
-            }));
+            return self
+                .persist_update(previous.as_ref(), &snapshot, "Checklist synchronized from provided items.".to_string())
+                .await;
         }
 
-        let checklist = guard.as_mut().context("No active checklist. Use action='create' first.")?;
+        let checklist = current.as_mut().context("No active checklist. Use action='create' first.")?;
 
         let index = match (args.index, args.index_path.as_deref()) {
             (Some(idx), _) => idx,
@@ -864,15 +829,14 @@ impl TaskTrackerTool {
             checklist.notes = append_notes(checklist.notes.take(), args.notes.as_deref());
 
             let snapshot = checklist.clone();
-            drop(guard);
-            let (summary, view) = self.persist_and_build_view(&snapshot).await?;
-
-            return Ok(json!({
-                "status": "updated",
-                "message": "Checklist-level completion acknowledged; checklist progress remains derived from item statuses.",
-                "checklist": summary,
-                "view": view
-            }));
+            return self
+                .persist_update(
+                    previous.as_ref(),
+                    &snapshot,
+                    "Checklist-level completion acknowledged; checklist progress remains derived from item statuses."
+                        .to_string(),
+                )
+                .await;
         }
 
         let item_count = checklist.items.len();
@@ -885,34 +849,25 @@ impl TaskTrackerTool {
         let old_status = checklist.items[pos].status.to_string();
         checklist.items[pos].status = new_status;
         let new_status_str = checklist.items[pos].status.to_string();
-        if let Some(files) = args.files.as_deref() {
-            checklist.items[pos].metadata.files = normalize_string_items(Some(files));
-        }
-        if args.outcome.is_some() {
-            checklist.items[pos].metadata.outcome = normalize_optional_text(args.outcome.as_deref());
-        }
-        if let Some(verify) = args.verify.as_deref() {
-            checklist.items[pos].metadata.verify = normalize_string_items(Some(verify));
-        }
+        apply_metadata_input(
+            &mut checklist.items[pos].metadata,
+            args.files.as_deref(),
+            args.outcome.as_deref(),
+            args.verify.as_deref(),
+        );
         checklist.notes = append_notes(checklist.notes.take(), args.notes.as_deref());
 
         let snapshot = checklist.clone();
-        drop(guard);
-        let (summary, view) = self.persist_and_build_view(&snapshot).await?;
-
-        Ok(json!({
-            "status": "updated",
-            "message": format!("Item {} status changed: {} → {}", index, old_status, new_status_str),
-            "checklist": summary,
-            "view": view
-        }))
+        self.persist_update(
+            previous.as_ref(),
+            &snapshot,
+            format!("Item {} status changed: {} → {}", index, old_status, new_status_str),
+        )
+        .await
     }
 
     async fn handle_list(&self) -> Result<Value> {
-        self.ensure_checklist_loaded().await?;
-        let guard = self.checklist.read().await;
-
-        match guard.as_ref() {
+        match self.load_preferred_checklist().await? {
             Some(checklist) => Ok(json!({
                 "status": "ok",
                 "checklist": checklist.summary(),
@@ -934,9 +889,10 @@ impl TaskTrackerTool {
             );
         }
 
-        self.ensure_checklist_loaded().await?;
-        let mut guard = self.checklist.write().await;
-        let checklist = guard.as_mut().context("No active checklist. Use action='create' first.")?;
+        let mut checklist = self
+            .load_preferred_checklist()
+            .await?
+            .context("No active checklist. Use action='create' first.")?;
 
         let desc = args.description.as_deref().context("'description' is required for 'add'")?;
         let (status, parsed_description) = parse_status_prefix(desc);
@@ -954,9 +910,7 @@ impl TaskTrackerTool {
         });
 
         checklist.notes = append_notes(checklist.notes.take(), args.notes.as_deref());
-        let snapshot = checklist.clone();
-        drop(guard);
-        let (summary, view) = self.persist_and_build_view(&snapshot).await?;
+        let (summary, view) = self.persist_and_build_view(&checklist).await?;
 
         Ok(json!({
             "status": "added",
@@ -1009,6 +963,9 @@ impl Tool for TaskTrackerTool {
         false // State management should be sequential
     }
 }
+
+#[cfg(test)]
+mod update_regressions;
 
 #[cfg(test)]
 mod tests {

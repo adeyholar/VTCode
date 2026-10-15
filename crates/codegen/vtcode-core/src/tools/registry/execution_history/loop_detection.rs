@@ -96,14 +96,24 @@ impl ToolExecutionHistory {
         // Count how many recent calls match this tool's loop identity.
         // CRITICAL FIX: Only count SUCCESSFUL calls to avoid cascade blocking
         let mut identical_count = 0;
+        let is_tracker = tool_name == tools::TASK_TRACKER;
         for record in &recent {
+            if !record.success {
+                continue;
+            }
+            // Tracker state is live: intervening work or a different tracker
+            // operation starts a new observation/update streak. Do not carry
+            // old polls across a checklist update or verification step.
+            if is_tracker && (record.tool_name != tool_name || record.args != *args) {
+                break;
+            }
             let same_args = if tool_name_matches(tool_name, tools::CODE_SEARCH) {
                 crate::tools::normalised_code_search_loop_identity(&record.args)
                     == crate::tools::normalised_code_search_loop_identity(args)
             } else {
                 record.args == *args
             };
-            if record.tool_name == tool_name && same_args && record.success {
+            if record.tool_name == tool_name && same_args {
                 identical_count += 1;
             }
         }

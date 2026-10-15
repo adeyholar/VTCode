@@ -18,6 +18,15 @@ or parameter rejection (including a generic vendor error code) does not prove th
 These errors must retain their original diagnostic and leave the model's route eligible instead of
 downgrading to Chat Completions. WebSocket startup failures are visible at warning level.
 
+## Inline file inputs
+
+Local non-image attachments such as `@README.md` use `input_file` content parts.
+The Responses serializer wraps raw base64 in a MIME-prefixed data URL, for example
+`data:text/markdown;base64,...`; already-prefixed data URLs, file IDs, and remote file URLs
+retain their existing representation. This applies to HTTP and WebSocket requests, including
+replayed history, without changing stored messages. Size validation counts decoded bytes.
+See the [official OpenAI file-input guide](https://developers.openai.com/api/docs/guides/file-inputs).
+
 ## Lifecycle and cancellation
 
 One response lane serializes generation and streaming on the connection. A lease removes the socket and

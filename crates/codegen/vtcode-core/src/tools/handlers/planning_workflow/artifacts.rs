@@ -10,7 +10,8 @@ mod validation;
 mod verification;
 
 pub use steps::split_bracket_items;
-pub(super) use tracker::{extract_embedded_tracker, render_plan_with_tracker, tracker_has_progress_or_notes};
+pub(in crate::tools::handlers) use tracker::render_plan_with_tracker;
+pub(super) use tracker::{extract_embedded_tracker, tracker_has_progress_or_notes};
 pub use tracker::{
     generate_tracker_markdown_from_plan, merge_plan_content, plan_file_for_tracker_file, tracker_file_for_plan_file,
 };
