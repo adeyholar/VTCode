@@ -1004,6 +1004,7 @@ async fn inspection_accounting_preserves_generation_but_concrete_changes_invalid
     for command in [
         "for p in $(grep -o 'x' README.md | sort -u); do test -f \"$p\" || echo \"missing: $p\"; done",
         "grep x README.md; echo \"exit:$?\"",
+        "rg -n \"MD013|line_length\" docs/development/*.md | head",
     ] {
         registry.observe_completion_mutation(tools::EXEC_COMMAND, &json!({"cmd":command}), &json!({"exit_code":0}));
         assert!(registry.completion_verifier_passed("cargo check"), "{command}");
@@ -1038,4 +1039,29 @@ async fn required_inspection_repetition_limit_rejects_instead_of_replaying_a_ver
     assert!(result.get("exit_code").is_none());
     assert!(!registry.completion_verifier_passed(command));
     assert!(registry.completion_verification_pending());
+}
+
+#[tokio::test]
+async fn docs_session_path_glob_does_not_activate_a_malformed_tracker_verifier() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+    registry.set_required_completion_verifiers(vec![
+        "rg -n \"brew trust\" README.md && ! rg -n \"brew tap\" README.md".into(),
+    ]);
+    registry.observe_completion_mutation(
+        tools::APPLY_PATCH,
+        &json!({"input":"*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch"}),
+        &json!({"success":true,"modified_files":["README.md"]}),
+    );
+    registry.observe_completion_mutation(
+        tools::EXEC_COMMAND,
+        &json!({"cmd":"rg -n \"MD013|line_length\" docs/development/*.md | head"}),
+        &json!({"exit_code":0}),
+    );
+    assert_eq!(registry.harness_context.completion_verification.lock().generation, 0);
+    assert!(!registry.completion_verification_pending());
+    assert_eq!(
+        registry.next_required_completion_verifier().as_deref(),
+        Some("rg -n \"brew trust\" README.md && ! rg -n \"brew tap\" README.md")
+    );
 }

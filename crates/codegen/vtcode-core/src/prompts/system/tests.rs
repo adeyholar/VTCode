@@ -76,14 +76,14 @@ async fn planning_prompt_size_fixed_fixture() {
         PlanningPromptSizeCase {
             density: "Default",
             prompt_budget_tokens: 100_000,
-            max_prompt_bytes: 10_850,
-            max_estimated_tokens: 2_330,
+            max_prompt_bytes: 10_950,
+            max_estimated_tokens: 2_360,
         },
         PlanningPromptSizeCase {
             density: "Minimal",
             prompt_budget_tokens: 1,
-            max_prompt_bytes: 11_150,
-            max_estimated_tokens: 2_400,
+            max_prompt_bytes: 11_250,
+            max_estimated_tokens: 2_430,
         },
     ] {
         let mut config = VTCodeConfig::default();
@@ -154,7 +154,7 @@ async fn test_minimal_mode_selection() {
     // Char bound is a smoke check only; tokens are authoritative.
     // Includes direct patch calls and bounded context-mismatch recovery.
     // Raised from 3700 for the reuse-reads and exact-whitespace patch-copy guidance (measured 3917).
-    assert!(result.len() < 4650, "Minimal mode should produce <4.65K chars (was {} chars)", result.len());
+    assert!(result.len() < 4700, "Minimal mode should produce <4.7K chars (was {} chars)", result.len());
     assert!(result.contains("VT Code") || result.contains("VT Code"), "Should contain VT Code identifier");
 }
 
@@ -385,6 +385,7 @@ fn plan_quality_line_requires_concrete_verify_checks() {
     let line = PLANNING_WORKFLOW_PLAN_QUALITY_LINE;
     assert!(line.contains("must exit 0 on success"));
     assert!(line.contains("grep/rg exit 1 cannot satisfy completion"));
+    assert!(line.contains("both present and absent inputs"));
     assert!(line.contains("one concrete `verify:`/`verification:` command or observable check"));
     assert!(line.contains("vague prose"));
     assert!(line.contains("comma-separated verify entries that are not commands or observable checks"));
@@ -1421,7 +1422,7 @@ Work the way a senior engineer on this codebase would: understand the relevant c
 ## Runtime Guidance
 
 - Work at the intended scope; decide routine details. Ask about materially different work, authorization, or risk; flag mistaken asks.
-- Finish the whole task; do the rest and state plainly what is missing if blocked. While tracker steps remain for the current request, keep working in this run; avoid a resume note or status-only recap. Reuse tracker results; update only when state changes. Run checks; complete indexed steps. Preserve step metadata. Tracker notes append.
+- Finish the whole task; do the rest and state plainly what is missing if blocked. While tracker steps remain for the current request, keep working in this run; avoid a resume note or status-only recap. Reuse tracker results; update only when state changes. Run checks; complete indexed steps. Preserve step metadata; indexed updates need status. Tracker notes append.
 - Read code before claims; do not guess. Ground versions/capabilities in current metadata or omit them. Cite `path:line`; label inference. Low reuse != churn.
 - Verify: never claim a check passed unless you ran it. Fix root causes, not symptoms; do not stash for baselines or trust piped success. For code/build/dependency edits: fresh terminal exit 0 after the last edit from the exact verifier session. Required tracker checks remain mandatory: run remaining checks exactly; retain metadata; reuse passes. Generated `verify:` commands must exit 0 on success; grep/rg absence exit 1 cannot satisfy completion. If blocked: unverified, command, evidence, blocker.
 - Delegate only sizeable, independent work to subagents; keep small tasks and verification in the main thread.
@@ -1498,7 +1499,7 @@ You are VT Code (Build mode), a coding agent working in the user's repository an
 ## Runtime Guidance
 
 - Work at the intended scope; decide routine details. Ask about materially different work, authorization, or risk; flag mistaken asks.
-- Finish the whole task; do the rest and state plainly what is missing if blocked. While tracker steps remain for the current request, keep working in this run; avoid a resume note or status-only recap. Reuse tracker results; update only when state changes. Run checks; complete indexed steps. Preserve step metadata. Tracker notes append.
+- Finish the whole task; do the rest and state plainly what is missing if blocked. While tracker steps remain for the current request, keep working in this run; avoid a resume note or status-only recap. Reuse tracker results; update only when state changes. Run checks; complete indexed steps. Preserve step metadata; indexed updates need status. Tracker notes append.
 - Read code before claims; do not guess. Ground versions/capabilities in current metadata or omit them. Cite `path:line`; label inference. Low reuse != churn.
 - Verify: never claim a check passed unless you ran it. Fix root causes, not symptoms; do not stash for baselines or trust piped success. For code/build/dependency edits: fresh terminal exit 0 after the last edit from the exact verifier session. Required tracker checks remain mandatory: run remaining checks exactly; retain metadata; reuse passes. Generated `verify:` commands must exit 0 on success; grep/rg absence exit 1 cannot satisfy completion. If blocked: unverified, command, evidence, blocker.
 - Delegate only sizeable, independent work to subagents; keep small tasks and verification in the main thread.

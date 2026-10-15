@@ -804,6 +804,7 @@ fn dynamic_readonly_inspections_do_not_arm_verification_gate() {
         "rg -n 'vinhnx/(VTCode|vtcode)' README.md",
         "grep -n '^## ' README.md",
         "git status --short",
+        "rg -n \"MD013|line_length\" docs/development/*.md | head",
     ] {
         let outcome = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
             output: serde_json::json!({"exit_code": 0}),

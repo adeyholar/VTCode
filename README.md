@@ -105,7 +105,7 @@ On macOS and Linux, the native installer also attempts to install the optional `
 default. To manage installation yourself, use Homebrew or Cargo; Cargo installs require Rust 1.98.1+:
 
 ```bash
-brew trust vinhnx/tap
+brew tap vinhnx/tap
 brew install vinhnx/tap/vtcode
 
 # Or install with Rust (requires Rust 1.98.1+)

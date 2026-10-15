@@ -7,7 +7,7 @@
 pub(crate) const RUNTIME_GUIDANCE_SECTION: &str = r#"## Runtime Guidance
 
 - Work at the intended scope; decide routine details. Ask about materially different work, authorization, or risk; flag mistaken asks.
-- Finish the whole task; do the rest and state plainly what is missing if blocked. While tracker steps remain for the current request, keep working in this run; avoid a resume note or status-only recap. Reuse tracker results; update only when state changes. Run checks; complete indexed steps. Preserve step metadata. Tracker notes append.
+- Finish the whole task; do the rest and state plainly what is missing if blocked. While tracker steps remain for the current request, keep working in this run; avoid a resume note or status-only recap. Reuse tracker results; update only when state changes. Run checks; complete indexed steps. Preserve step metadata; indexed updates need status. Tracker notes append.
 - Read code before claims; do not guess. Ground versions/capabilities in current metadata or omit them. Cite `path:line`; label inference. Low reuse != churn.
 - Verify: never claim a check passed unless you ran it. Fix root causes, not symptoms; do not stash for baselines or trust piped success. For code/build/dependency edits: fresh terminal exit 0 after the last edit from the exact verifier session. Required tracker checks remain mandatory: run remaining checks exactly; retain metadata; reuse passes. Generated `verify:` commands must exit 0 on success; grep/rg absence exit 1 cannot satisfy completion. If blocked: unverified, command, evidence, blocker.
 - Delegate only sizeable, independent work to subagents; keep small tasks and verification in the main thread.
@@ -120,6 +120,7 @@ mod tests {
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Reuse tracker results; update only when state changes"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Run checks; complete indexed steps"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Preserve step metadata"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("indexed updates need status"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("for the current request"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("task_tracker"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("keep working in this run"));

@@ -14,7 +14,13 @@ Shell accounting exempts an inspection only after a complete syntax-aware proof
 that every command, including nested substitutions, is nonmutating. Unknown or
 malformed syntax, dynamic executables/options, mutating options, and file writes
 retain debt. Descriptor plumbing and literal quoted operator text do not create
-debt. Concrete changed-file evidence always creates shell mutation debt. This
+debt. Literal `*`/`?` path globs such as `docs/development/*.md` also preserve evidence
+when used as operands of the supported read commands (`rg`, `grep`, `egrep`,
+`fgrep`, `ls`, `cat`, `head`, `tail`, `wc`). Their literal directory prefix
+prevents expansion into options. Character classes, bare globs, variable-based paths,
+substitutions, dynamic executable names, mutating options, and output-file redirects retain
+debt. This accounting exemption grants no planning or execution permission.
+Concrete changed-file evidence always creates shell mutation debt. This
 proof affects freshness and mutation pacing only; admission and permissions
 remain unchanged.
 
@@ -63,7 +69,11 @@ Generated `verify:` commands must exit zero on success. A `grep`/`rg` absence
 check returning exit one is useful inspection evidence but cannot satisfy a
 mandatory completion requirement; invalid grep options returning exit two also
 remain failures. Choose a verifier with a zero-on-success contract when writing
-a plan. Existing tracker requirements are never repaired or replaced automatically.
+a plan. Test absence assertions with both present and absent fixtures; a reversed
+predicate can otherwise make the desired state fail its own required check.
+Existing tracker requirements are never repaired or replaced automatically.
+Indexed tracker updates require `status`, including updates to `outcome`,
+`verify`, or notes; retain the current status when changing only metadata.
 Required inspections and custom checks bypass both result-cache boundaries,
 including entries cached before tracker adoption, so actual execution supplies
 the verdict. Passing current-generation checks remain reusable as verification
@@ -151,3 +161,10 @@ The saved `session-vtcode-20261015T142625Z_988722-36010` failure supplied the
 inspection loops, stale cached `rg` verdict, and invalid mandatory `grep` cases
 for deterministic regressions, following
 [OpenAI's trace-to-regression workflow](https://developers.openai.com/cookbook/examples/agents_sdk/agent_improvement_loop).
+
+Session `session-vtcode-20261015T155522Z_593497-38366` supplies the literal-path-glob
+regression: `rg -n "MD013|line_length" docs/development/*.md | head` created
+spurious debt during README-only work and activated a reversed required check.
+The deterministic replay preserves generation zero and does not rewrite that
+requirement. Code-debt coverage separately ensures the same inspection preserves
+current passing evidence, while adversarial glob and write variants retain debt.

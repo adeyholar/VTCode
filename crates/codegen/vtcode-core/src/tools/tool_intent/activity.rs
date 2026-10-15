@@ -963,6 +963,22 @@ pub(crate) fn exec_output_has_changes(output: &Value) -> bool {
         || crate::tools::file_ops::diff_output_has_effective_change(output) == Some(true)
 }
 
+/// Path-prefixed globs cannot expand into options. Keep this narrower than
+/// general expansion: variables, substitutions, bare globs and dynamic heads
+/// remain unproven, and the parent command still checks program/options.
+fn is_literal_path_glob(word: &str) -> bool {
+    let Some((prefix, _)) = word.split_once('/') else {
+        return false;
+    };
+    !prefix.starts_with('-')
+        && !prefix.contains(['*', '?', '[', ']'])
+        && word.contains(['*', '?'])
+        && !word.contains(['[', ']'])
+        && !word
+            .chars()
+            .any(|character| character.is_whitespace() || "\"'$`\\{}()<>&;|~!".contains(character))
+}
+
 /// Walk every supported node, including commands nested in substitutions.
 /// Unlike command extraction, this proof must never discard unknown syntax.
 fn nonmutating_shell_node(node: tree_sitter::Node<'_>, source: &str) -> bool {
@@ -990,7 +1006,15 @@ fn nonmutating_shell_node(node: tree_sitter::Node<'_>, source: &str) -> bool {
                 if child.kind() == "variable_assignment" {
                     return false;
                 }
-                if contains_dynamic_shell_syntax(word) {
+                if child != name
+                    && child.kind() == "word"
+                    && is_literal_path_glob(word)
+                    && matches!(name_text, "rg" | "grep" | "egrep" | "fgrep" | "ls" | "cat" | "head" | "tail" | "wc")
+                {
+                    // Classification sees a path operand; expansion cannot
+                    // produce flags, while static mutating options stay visible.
+                    words.push(word.to_owned());
+                } else if contains_dynamic_shell_syntax(word) {
                     // Only these builtins cannot turn a dynamic argument into
                     // an option that writes or executes code. Keep arguments
                     // quoted so expansion cannot alter their dimensionality.
@@ -1016,7 +1040,7 @@ fn nonmutating_shell_node(node: tree_sitter::Node<'_>, source: &str) -> bool {
             // as /dev/null.backup must not be mistaken for descriptor plumbing.
             return matches!(text, "2>&1" | "1>&2") || (cfg!(unix) && text == "2>/dev/null");
         }
-        "word" | "regex" => return !contains_dynamic_shell_syntax(text),
+        "word" | "regex" => return !contains_dynamic_shell_syntax(text) || is_literal_path_glob(text),
         "raw_string" | "string_content" | "comment" | "number" | "variable_name" | "special_variable_name" => {
             return true;
         }
@@ -1779,6 +1803,40 @@ mod tests {
         assert!(matches!(shell_args_as_executed(tools::UNIFIED_EXEC, &poll), std::borrow::Cow::Borrowed(_)));
         let read = json!({"path": "src/lib.rs"});
         assert!(matches!(shell_args_as_executed(tools::READ_FILE, &read), std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn path_glob_inspections_preserve_debt_without_weakening_admission() {
+        let clean = json!({"exit_code":0});
+        for command in [
+            "rg -n \"MD013|line_length\" docs/development/*.md | head",
+            "rg -n x ./docs/file?.md | head -20",
+            "grep -n x docs/*.md",
+            "cat ./docs/*.md",
+            "ls docs/*.md",
+        ] {
+            assert!(!exec_mutation_should_incur_debt(command, &clean), "{command}");
+            assert_eq!(classify_shell_activity(tools::EXEC_COMMAND, &exec_command(command)), ShellActivity::Mutation);
+            assert!(exec_mutation_should_incur_debt(command, &json!({"exit_code":0,"modified_files":["src/lib.rs"]})));
+        }
+        for command in [
+            "rg -n x *",
+            "rg -n x ./docs/[a-z]*.md",
+            "rg -n x -docs/*.md",
+            "rg -n x $dir/*.md",
+            "rg --pre touch docs/*.md",
+            "rg --hostname-bin=touch docs/*.md",
+            "sed docs/*.md",
+            "sort -o marker docs/*.md",
+            "./tools/* --version",
+            "rg x docs/$(touch marker)/*.md",
+            "rg x docs/*.md > marker",
+            "rg x docs/*.md; touch marker",
+            "rg x docs/*.md; if",
+            "rg x docs*/*.md",
+        ] {
+            assert!(exec_mutation_should_incur_debt(command, &clean), "{command}");
+        }
     }
 
     #[test]
