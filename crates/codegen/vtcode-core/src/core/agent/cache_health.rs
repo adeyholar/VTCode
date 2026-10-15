@@ -204,6 +204,36 @@ mod tests {
     }
 
     #[test]
+    fn observed_constant_reuse_plateau_reports_weighted_session_rate() {
+        // First six requests in the 2026-10-15T06:35:33 session: the reused
+        // prefix plateaus while input grows. This measures reuse, not churn.
+        let mut monitor = PromptCacheHealthMonitor::new();
+        for (input, cached) in [
+            (19126, 0),
+            (20309, 13708),
+            (25677, 13708),
+            (30443, 13708),
+            (30686, 13708),
+        ] {
+            assert!(monitor.record_turn(&usage(input, cached, input - cached - 3)).is_none());
+        }
+        let alert = monitor
+            .record_turn(&usage(30932, 13708, 17221))
+            .expect("three low-reuse requests");
+        let CacheHealthAlert::SustainedMisses { consecutive, hit_rate, measured_turns } = &alert else {
+            panic!("expected sustained low reuse");
+        };
+        assert_eq!((*consecutive, *measured_turns), (3, 6));
+        assert!((hit_rate - 43.6079988293).abs() < 0.000001);
+        assert!(alert.message().contains("44% over 6 measured requests"));
+        assert!(
+            alert
+                .message()
+                .contains("Cache misses alone do not establish client-side prefix churn")
+        );
+    }
+
+    #[test]
     fn ignores_turns_without_cache_metrics() {
         let mut monitor = PromptCacheHealthMonitor::new();
         for _ in 0..10 {

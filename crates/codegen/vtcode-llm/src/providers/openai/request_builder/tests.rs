@@ -518,6 +518,101 @@ fn system_with_dynamics() -> String {
 }
 
 #[test]
+fn native_runtime_reminders_preserve_implicit_tool_history_cache_boundaries() {
+    for model in [models::openai::GPT_5_6_LUNA, models::openai::GPT_6_LUNA] {
+        let mut request = gpt56_request(vec![provider::Message::user("Inspect the workspace".into())]);
+        request.model = model.into();
+        request.system_prompt = Some(system_with_dynamics().into());
+        request.prompt_cache_key = Some("stable-session".into());
+        request.tools = Some(std::sync::Arc::new(vec![provider::ToolDefinition::function(
+            "inspect".into(),
+            "Inspect workspace evidence".into(),
+            json!({"type": "object", "properties": {}}),
+        )]));
+        let mut context = cache_ctx();
+        context.prompt_cache_key = Some("stable-session");
+        context.supports_tools = true;
+        let original = request.messages.clone();
+        let mut previous = build_responses_request(&request, &context).unwrap();
+        assert_eq!(previous.pointer("/input/1/role"), Some(&json!("user")));
+        assert_eq!(previous["prompt_cache_key"], "stable-session");
+        assert_eq!(previous["tools"][0]["name"], "inspect");
+
+        for step in 1..=3 {
+            let mut messages = request.messages.as_ref().clone();
+            let call_id = format!("call_{step}");
+            messages.push(provider::Message::assistant_with_tools(
+                String::new(),
+                vec![provider::ToolCall::function(
+                    call_id.clone(),
+                    "inspect".into(),
+                    "{}".into(),
+                )],
+            ));
+            messages.push(provider::Message::tool_response(call_id.clone(), format!("Evidence for step {step}")));
+            request.messages = messages.into();
+            request.system_prompt = Some(format!("{}\n- retries: {step}", system_with_dynamics()).into());
+            let current = build_responses_request(&request, &context).unwrap();
+            let before = previous["input"].as_array().unwrap();
+            let after = current["input"].as_array().unwrap();
+
+            // Independent oracle from the documented native implicit boundaries:
+            // user messages and the last tool result are eligible; developer
+            // messages after the initial developer group are not. The previous
+            // write must end before the replaced request-only reminder.
+            let prior_boundary = before
+                .iter()
+                .rposition(|item| item["role"] == "user" || item["type"] == "function_call_output")
+                .unwrap();
+            assert_eq!(prior_boundary, before.len() - 2);
+            assert_eq!(&before[..=prior_boundary], &after[..=prior_boundary], "reusable wire prefix, {model}");
+            assert_eq!(after[after.len() - 2]["type"], "function_call_output");
+            assert_eq!(after[after.len() - 2]["call_id"], call_id);
+            let reminder = after.last().unwrap();
+            assert_eq!(reminder["role"], "developer");
+            assert!(reminder.pointer("/content/0/prompt_cache_breakpoint").is_none());
+            assert_ne!(before.last(), after.last(), "exercise a changing runtime suffix");
+            assert_eq!(previous["prompt_cache_key"], current["prompt_cache_key"]);
+            assert_eq!(previous["tools"], current["tools"]);
+            assert!(count_explicit_breakpoints(&current) <= 3);
+            previous = current;
+        }
+        assert_eq!(original.len(), 1, "canonical history snapshots must remain unchanged");
+        assert_eq!(request.messages.len(), 7, "reminders must remain request-only");
+    }
+}
+
+#[test]
+fn runtime_reminder_role_preserves_legacy_backend_and_model_shapes() {
+    let cases = [
+        (models::openai::GPT_5_6_LUNA, false, true),
+        (models::openai::GPT_6_LUNA, false, true),
+        (models::openai::GPT_6_LUNA, true, false),
+        (models::openai::GPT_5, true, true),
+    ];
+    for (model, explicit_breakpoints, responses_model) in cases {
+        let mut request = gpt56_request(vec![provider::Message::user("Continue".into())]);
+        request.model = model.into();
+        request.system_prompt = Some(system_with_dynamics().into());
+        let mut context = cache_ctx();
+        context.include_explicit_cache_breakpoints = explicit_breakpoints;
+        context.is_responses_api_model = responses_model;
+        let payload = build_responses_request(&request, &context).unwrap();
+        let reminder = payload["input"].as_array().unwrap().last().unwrap();
+        assert_eq!(reminder["role"], "user", "legacy reminder shape, {model}");
+        assert!(
+            reminder
+                .pointer("/content/0/text")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("[Harness Limits]")
+        );
+        assert_eq!(count_explicit_breakpoints(&payload), 0);
+    }
+}
+
+#[test]
 fn responses_splits_dynamic_suffix_into_trailing_reminder() {
     use std::sync::Arc;
 
@@ -539,14 +634,14 @@ fn responses_splits_dynamic_suffix_into_trailing_reminder() {
 
     let input = payload.get("input").and_then(Value::as_array).expect("input");
     let reminder = input.last().expect("trailing reminder");
-    assert_eq!(reminder.get("role").and_then(Value::as_str), Some("user"));
+    assert_eq!(reminder.get("role").and_then(Value::as_str), Some("developer"));
     let reminder_text = reminder
         .pointer("/content/0/text")
         .and_then(Value::as_str)
         .expect("reminder text");
     assert!(reminder_text.contains("[Harness Limits]"), "volatile sections ride the tail");
     assert!(reminder_text.contains("Previous conversation summary"), "history system rides the tail");
-    assert!(reminder.pointer("/content/0/prompt_cache_breakpoint").is_none(), "varying tail stays implicit-only");
+    assert!(reminder.pointer("/content/0/prompt_cache_breakpoint").is_none(), "varying tail stays unmarked");
 }
 
 #[test]

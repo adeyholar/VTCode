@@ -103,8 +103,8 @@ fn apply_explicit_cache_breakpoints(input: &mut [Value], model: &str, instructio
         return;
     }
 
-    // Stable-prefix discipline: the newest trailing item is the varying suffix
-    // (covered by the implicit breakpoint). Explicit markers go on user-message
+    // Stable-prefix discipline: the newest trailing item may be a varying runtime
+    // reminder, which must not consume a cache write. Explicit markers go on user-message
     // boundaries inside the stable prefix so growing history keeps earlier
     // markers byte-stable across turns. Implicit mode uses one of four write slots,
     // leaving three explicit writes. Reserve one for developer instructions
@@ -172,7 +172,11 @@ pub(super) fn build_responses_item_history(
         responses_payload.instructions = Some(instructions);
     }
 
-    separate_dynamic_instructions(request, &mut responses_payload);
+    separate_dynamic_instructions(
+        request,
+        &mut responses_payload,
+        ctx.is_responses_api_model && ctx.include_explicit_cache_breakpoints,
+    );
 
     if !(ctx.include_assistant_phase
         || ctx.preserve_assistant_phase_on_replay && supports_assistant_phase_replay(&request.model))
@@ -224,14 +228,18 @@ pub(super) fn build_responses_item_history(
 /// `instructions` (with the model contract addendum applied to the stable part
 /// only) while volatile segments — labeled by the builder via
 /// `InstructionSegmentKind`, so segment attribution never depends on guessing
-/// at a joined-string layout — move to a trailing user-role reminder item.
+/// at a joined-string layout — move to a trailing reminder item.
 /// History order is otherwise untouched, so grown histories keep the stable
 /// input prefix byte-stable across turns.
 ///
 /// Fast path (no volatile segments): `instructions` keeps the exact legacy
 /// augmented value. When the builder supplied no provenance (e.g. a static
 /// replay fallback injected upstream), the whole string is treated as stable.
-fn separate_dynamic_instructions(request: &provider::LLMRequest, payload: &mut OpenAIResponsesPayload) {
+fn separate_dynamic_instructions(
+    request: &provider::LLMRequest,
+    payload: &mut OpenAIResponsesPayload,
+    native_cache_boundaries: bool,
+) {
     let Some(built) = payload.instructions.take() else {
         return;
     };
@@ -291,8 +299,20 @@ fn separate_dynamic_instructions(request: &provider::LLMRequest, payload: &mut O
     reminder.push_str(DYNAMIC_RUNTIME_REMINDER_LABEL);
     reminder.push('\n');
     reminder.push_str(&tail);
+    // Native GPT-5.6+ writes its implicit cache at the latest eligible user or
+    // tool-result boundary. This request-only reminder is replaced each time:
+    // making it a user message writes a prefix that the next request cannot
+    // match, starving growing tool history of reusable writes. A developer
+    // message after the initial developer group is not an implicit boundary.
+    // Keep legacy/backend shapes where these cache semantics are unavailable.
+    // https://developers.openai.com/api/docs/guides/prompt-caching#how-caching-works
+    let role = if native_cache_boundaries && is_explicit_cache_breakpoint_model(&request.model) {
+        "developer"
+    } else {
+        "user"
+    };
     payload.input.push(json!({
-        "role": "user",
+        "role": role,
         "content": [{ "type": "input_text", "text": reminder }]
     }));
 }

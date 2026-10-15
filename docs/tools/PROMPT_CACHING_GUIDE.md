@@ -50,9 +50,12 @@ prompt_cache_key_mode = "session" # session | off
   stable system prompt moves into the first developer `input_text` block with a breakpoint, without duplication.
   The remaining slots mark recent stable history boundaries. This preserves an instruction anchor when history
   is compacted. Replay-only fallback instructions keep their existing top-level representation.
-- Volatile runtime sections and history system reminders stay in a trailing user-role `[System reminder]` item
-  with no explicit marker. Older models, ChatGPT subscriptions, and third-party endpoints keep their compatible
-  request shapes without explicit markers. Earlier models can reuse partial prefixes through implicit boundaries.
+- Volatile runtime sections and history system reminders stay in a trailing developer-role `[System reminder]` item
+  with no explicit marker on native GPT-5.6/GPT-6 cache-enabled requests. A developer message after the initial
+  developer group is not an implicit cache boundary, so the implicit write covers the latest reusable user message
+  or tool result. A temporary user-role reminder would consume that write and be replaced on the next request,
+  preventing reuse of the growing tool history. Older models, ChatGPT subscriptions, third-party endpoints, and
+  requests with explicit cache hints disabled keep their compatible user-role reminder shape.
 - Keys remain stable per session. On GPT-5.6 and later, keys separate cache accounting; older models use them to
   help routing locality. Use `prompt_cache_key_mode = "off"` when separate accounting is unnecessary.
 
@@ -185,6 +188,9 @@ Successful compaction resets the consecutive streak in both runloops, including 
 compaction. Session totals, cumulative hit-rate alerts, and one-shot warning latches remain intact. Failed or no-op
 compaction preserves the streak. Initial cold writes and intentionally compacted history can have low reuse even
 when the client prefix/catalog hashes are unchanged; check comparison evidence before attributing churn to VT Code.
+An unchanged cached-token count with growing total input can also lower the ratio: inspect eligible cache-write
+boundaries and request-only reminders, rather than assuming model switches or prefix churn. Stable prefix/catalog
+hashes do not cover the entire serialized conversation. These alerts measure reuse, not its cause.
 
 No-op catalog refreshes (version/epoch bump with identical tool bytes and stable prompt) preserve the frozen request
 envelope so the provider prefix stays hot; only provider-visible changes rebuild it.

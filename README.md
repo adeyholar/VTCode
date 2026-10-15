@@ -101,8 +101,8 @@ Requirements: macOS, Linux, or Windows/WSL. Cargo installs require Rust 1.98.1+ 
 curl -fsSL https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.sh | bash
 ```
 
-On macOS and Linux, the installer also installs `ripgrep` and `ast-grep` by default. To manage installation yourself,
-use Homebrew or Cargo:
+On macOS and Linux, the native installer also attempts to install the optional `ripgrep` and `ast-grep` search tools by
+default. To manage installation yourself, use Homebrew or Cargo; Cargo installs require Rust 1.98.1+:
 
 ```bash
 brew trust vinhnx/tap

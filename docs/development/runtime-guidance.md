@@ -14,6 +14,7 @@ in the prompt builder; correctness-critical behavior belongs in runtime policy, 
 Repository claims must follow observed code and current metadata. Exact versions and capabilities should be omitted
 when that evidence is unavailable, rather than filled in from model memory. This rule shares the existing runtime
 guidance presence and size tests across prompt profiles; it adds no automatic metadata scans or provider requests.
+Low prompt-cache reuse alone does not establish prefix churn; compare actual request or provider diagnostic evidence.
 
 Attached files supply context, while workspace paths identify the files to read or edit. Compiled guidance
 keeps that distinction explicit: an attached filename does not prove the current on-disk contents.

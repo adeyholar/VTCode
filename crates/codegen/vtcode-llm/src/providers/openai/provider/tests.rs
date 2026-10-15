@@ -299,8 +299,18 @@ fn without_responses_backend_capability_fields(mut payload: Value) -> Value {
     payload
 }
 
-fn without_explicit_breakpoints(mut payload: Value) -> Value {
+fn without_native_cache_projection(mut payload: Value) -> Value {
     if let Some(items) = payload.get_mut("input").and_then(Value::as_array_mut) {
+        // Compare shared history after checking the intentional native/legacy
+        // reminder-role difference separately at the call site.
+        if let Some(reminder) = items.last_mut()
+            && reminder
+                .pointer("/content/0/text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.starts_with("[System reminder — runtime context, not a user request]"))
+        {
+            reminder["role"] = json!("user");
+        }
         for item in items {
             if let Some(blocks) = item.get_mut("content").and_then(Value::as_array_mut) {
                 for block in blocks {
@@ -625,9 +635,19 @@ fn api_key_and_chatgpt_subscription_share_responses_item_history_builder() {
         .convert_to_openai_responses_format(&request)
         .expect("chatgpt payload should build");
 
+    for (payload, expected_role) in [(&native_payload, "developer"), (&chatgpt_payload, "user")] {
+        let reminder = payload["input"].as_array().unwrap().last().unwrap();
+        assert_eq!(reminder["role"], expected_role);
+        assert!(
+            reminder["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Follow the local policy.")
+        );
+    }
     assert_eq!(
-        without_explicit_breakpoints(native_payload.clone()).get("input"),
-        without_explicit_breakpoints(chatgpt_payload.clone()).get("input"),
+        without_native_cache_projection(native_payload.clone()).get("input"),
+        without_native_cache_projection(chatgpt_payload.clone()).get("input"),
         "API-key and ChatGPT paths must share the same Responses item/history builder"
     );
     assert!(
@@ -641,8 +661,8 @@ fn api_key_and_chatgpt_subscription_share_responses_item_history_builder() {
     );
     assert_eq!(native_payload.get("instructions"), chatgpt_payload.get("instructions"));
     assert_eq!(
-        without_responses_backend_fields(without_explicit_breakpoints(native_payload.clone())),
-        without_responses_backend_fields(without_explicit_breakpoints(chatgpt_payload.clone()))
+        without_responses_backend_fields(without_native_cache_projection(native_payload.clone())),
+        without_responses_backend_fields(without_native_cache_projection(chatgpt_payload.clone()))
     );
 
     assert_absent(&native_payload, "previous_response_id");
@@ -710,9 +730,19 @@ fn openai_and_chatgpt_share_responses_payload_builder_except_backend() {
         .convert_to_openai_responses_format(&request)
         .expect("chatgpt payload should build");
 
+    for (payload, expected_role) in [(&native_payload, "developer"), (&chatgpt_payload, "user")] {
+        let reminder = payload["input"].as_array().unwrap().last().unwrap();
+        assert_eq!(reminder["role"], expected_role);
+        assert!(
+            reminder["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Follow the local policy.")
+        );
+    }
     assert_eq!(
-        without_explicit_breakpoints(without_responses_backend_capability_fields(native_payload.clone())),
-        without_explicit_breakpoints(without_responses_backend_capability_fields(chatgpt_payload.clone()))
+        without_native_cache_projection(without_responses_backend_capability_fields(native_payload.clone())),
+        without_native_cache_projection(without_responses_backend_capability_fields(chatgpt_payload.clone()))
     );
     assert!(
         count_input_breakpoints(&native_payload) > 0,
