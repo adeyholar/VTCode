@@ -584,6 +584,9 @@ pub(crate) async fn handle_turn_processing_result<'a>(
             // bound this path instead, and the generic cap still refuses
             // unverified completion.
             let tool_free_synthesis = params.ctx.in_tool_free_recovery_synthesis();
+            if tool_free_synthesis && params.max_tool_loops > 0 && params.step_count >= params.max_tool_loops {
+                params.ctx.session_stats.navigation_recovery.consume();
+            }
             if !is_planning_synthesis && params.ctx.tool_registry.completion_verification_pending() {
                 params.repeated_tool_attempts.mark_verification_pending();
             }

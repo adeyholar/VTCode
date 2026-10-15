@@ -2175,6 +2175,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 // and model refusal prose. Permission, verification and stop gates remain
                 // authoritative; queue failure falls through to the existing handoff.
                 if session_stats.preflight_recovery.corrective_pending()
+                    && !session_stats.navigation_recovery.blocked()
                     && !turn_refused
                     && crate::agent::runloop::unified::stop_requests::stop_outcome(&ctrl_c_state).is_none()
                     && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref())
@@ -2211,6 +2212,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         !matches!(outcome_result, RunLoopTurnLoopResult::Cancelled | RunLoopTurnLoopResult::Exit)
                             && crate::agent::runloop::unified::stop_requests::stop_outcome(&ctrl_c_state).is_none()
                             && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref())
+                            && !session_stats.navigation_recovery.blocked()
                             && !session_stats.preflight_recovery.exhausted()
                             && !session_stats.preflight_recovery.corrective_pending();
                     let is_verification_block = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { reason }

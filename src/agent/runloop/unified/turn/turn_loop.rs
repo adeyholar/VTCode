@@ -551,6 +551,12 @@ pub(crate) async fn run_turn_loop(
         if handle_steering_messages(&mut ctx, working_history, &mut result).await? {
             break;
         }
+        if ctx.session_stats.navigation_recovery.blocked() {
+            result = TurnLoopResult::Blocked {
+                reason: Some(crate::agent::runloop::unified::state::NAVIGATION_RECOVERY_BLOCK_REASON.to_string()),
+            };
+            break;
+        }
         if apply_pending_session_settings(&mut ctx, working_history).await? {
             // A model or effort switch changes provider capabilities, context
             // budget, and prompt shaping for the request about to be built.
@@ -1633,6 +1639,8 @@ pub(crate) async fn run_turn_loop(
             reason: Some(ctx.tool_registry.unverified_completion_reason()),
         };
     }
+    // A terminal or failed synthesis cannot leave a stale resume grant for an internal follow-up.
+    ctx.session_stats.navigation_recovery.consume();
     ctx.session_stats.preflight_recovery.finish_corrective_turn();
     if ctx.session_stats.preflight_recovery.exhausted()
         && !ctx.harness_state.turn_refused()

@@ -1,4 +1,6 @@
+mod navigation_recovery;
 mod preflight_recovery;
+pub(crate) use navigation_recovery::{NAVIGATION_RECOVERY_BLOCK_REASON, NavigationRecovery};
 pub(crate) use preflight_recovery::{PREFLIGHT_CORRECTIVE_FOLLOW_UP_PREFIX, PreflightRecovery, ValidationCategory};
 mod ctrl_c;
 pub(crate) use ctrl_c::{CtrlCSignal, CtrlCState};
@@ -39,6 +41,7 @@ pub(crate) struct AutoPermissionDenial {
 #[derive(Default)]
 pub(crate) struct SessionStats {
     pub(crate) preflight_recovery: PreflightRecovery,
+    pub(crate) navigation_recovery: NavigationRecovery,
     tools: std::collections::BTreeSet<String>,
     pub task_panel_visible: bool,
     /// Auto permission classifier consecutive denial count.

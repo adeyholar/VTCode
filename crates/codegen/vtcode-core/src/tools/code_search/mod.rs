@@ -361,6 +361,7 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
         path_outcome,
     } = inputs;
     let mut unavailable = Vec::new();
+    let mut backend_errors = Vec::new();
     let mut candidates = Vec::new();
     let mut truncated = false;
     let mut inventories: HashMap<PathBuf, DeclarationInventory> = HashMap::new();
@@ -398,6 +399,7 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
             }
         }
         Err(err) => {
+            backend_errors.push(format!("declaration: {}", format!("{err:#}").chars().take(240).collect::<String>()));
             if definition_enabled {
                 unavailable.push(CodeSearchResultType::Definition);
             }
@@ -432,6 +434,7 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
             );
         }
         Err(err) => {
+            backend_errors.push(format!("literal: {}", format!("{err:#}").chars().take(240).collect::<String>()));
             if text_enabled {
                 unavailable.push(CodeSearchResultType::Text);
             }
@@ -454,6 +457,7 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
             ranking::append_path_candidates(&scope, base, outcome.paths, &languages, &mut candidates);
         }
         Err(err) => {
+            backend_errors.push(format!("path: {}", format!("{err:#}").chars().take(240).collect::<String>()));
             unavailable.push(CodeSearchResultType::Path);
             tracing::debug!(target: "vtcode.code_search", error = format!("{err:#}"), "path backend failed");
         }
@@ -475,7 +479,8 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
             .collect::<Vec<_>>()
             .join(", ");
         bail!(
-            "all requested code_search result categories are unavailable (requested: {requested}). Do not retry the identical query/path; drop file_types, broaden path, or use exec_command rg for literal text"
+            "all requested code_search result categories are unavailable (requested: {requested}; backend context: {}). Do not retry the identical query/path; drop file_types, broaden path, or use exec_command rg for literal text",
+            backend_errors.join("; ")
         );
     }
 
@@ -532,6 +537,34 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn code_search_unavailable_error_retains_bounded_backend_context() {
+        let fixture = code_search_fixture();
+        let scope = scope::resolve_scope(fixture.workspace.path(), "src/widget.rs").unwrap();
+        let Err(error) = aggregate_search_results(SearchAggregationInputs {
+            scope,
+            languages: vec![],
+            query: "Widget".into(),
+            result_types: vec![CodeSearchResultType::Text],
+            max_results: 5,
+            definition_enabled: false,
+            text_enabled: true,
+            usage_enabled: false,
+            usage_backend_needed: false,
+            has_unsupported_files: false,
+            requested_unsupported_file_types: false,
+            literal_outcome: Err(anyhow::anyhow!("backend refused: {}", "é".repeat(1000))),
+            declaration_outcome: Ok(None),
+            path_outcome: Ok(None),
+        }) else {
+            panic!("expected an unavailable category");
+        };
+        let text = error.to_string();
+        assert!(text.contains("literal: backend refused:"));
+        assert!(text.contains("requested: text"));
+        assert!(text.chars().count() < 600);
+    }
 
     #[test]
     fn result_identity_includes_effective_max_results() {
@@ -1130,6 +1163,7 @@ mod tests {
             request(json!({
                 "query": "- [Sessions](#sessions)",
                 "path": "README.md",
+                "file_types": ["md"],
                 "result_types": ["text"]
             })),
         )

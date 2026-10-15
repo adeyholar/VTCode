@@ -822,12 +822,8 @@ async fn prose_blob_tool_names_do_not_trip_circuit_or_skip_valid_siblings() {
 }
 
 #[tokio::test]
-async fn cleared_history_stub_echo_does_not_trip_preflight_circuit() {
-    // Session session-vtcode-20261015T083154Z_961005-54191: the model echoed
-    // the request-only history stub `{"cleared":"tool_input"}` as fresh
-    // `exec_command`/`task_tracker` arguments. Three such echoes tripped the
-    // preflight circuit and disabled tools. Cleared echoes carry no operation
-    // and must not advance the failure streak.
+async fn cleared_history_stub_echo_is_bounded_by_preflight_circuit() {
+    // Historical placeholders are invalid calls, not an exemption from recovery limits.
     assert!(super::super::is_cleared_tool_input_echo(Some(&json!({"cleared": "tool_input"}))));
     assert!(!super::super::is_cleared_tool_input_echo(Some(&json!({"command": "ls"}))));
     assert!(!super::super::is_cleared_tool_input_echo(None));
@@ -844,8 +840,11 @@ async fn cleared_history_stub_echo_does_not_trip_preflight_circuit() {
         ))
     };
 
+    let mut config = vtcode_core::config::VTCodeConfig::default();
+    config.tools.max_consecutive_blocked_tool_calls_per_turn = 3;
     for index in 0..3 {
         let mut ctx = backing.turn_processing_context();
+        ctx.vt_cfg = Some(&config);
         let mut outcome_ctx = ToolOutcomeContext {
             ctx: &mut ctx,
             repeated_tool_attempts: &mut repeated_tool_attempts,
@@ -854,14 +853,14 @@ async fn cleared_history_stub_echo_does_not_trip_preflight_circuit() {
         let outcome = handle_tool_calls(&mut outcome_ctx, &[cleared_call(&format!("cleared_{index}"))])
             .await
             .expect("cleared echo should be recoverable");
-        assert!(outcome.is_none(), "cleared echo must not trip the circuit");
+        assert_eq!(outcome.is_some(), index == 2, "the third invalid call must arm recovery");
     }
     let ctx = backing.turn_processing_context();
     assert_eq!(
-        ctx.harness_state.consecutive_preflight_failures, 0,
-        "cleared echoes must not advance the preflight streak"
+        ctx.harness_state.consecutive_preflight_failures, 3,
+        "cleared echoes count toward the preflight streak"
     );
-    assert!(!ctx.harness_state.recovery_is_tool_free(), "cleared echoes must not arm tool-free recovery");
+    assert!(ctx.harness_state.recovery_is_tool_free(), "the validation cap arms tool-free recovery");
     assert!(
         ctx.working_history.iter().any(|message| {
             message.tool_call_id.as_deref() == Some("cleared_0")
@@ -2100,7 +2099,7 @@ async fn repeated_paginated_sed_reads_eventually_trip_per_file_path_cap() {
             let content = message.content.as_text();
             content.contains("repeated_read_path")
                 && content.contains("further reads of this path are blocked")
-                && content.contains("Reads of other paths, edits")
+                && content.to_ascii_lowercase().contains("reads of other paths, edits")
         }),
         "path-cap error should explain its scope and available next actions"
     );
@@ -3894,4 +3893,89 @@ async fn source_inspection_refresh_survives_read_cap_without_replenishing_quota(
         .unwrap();
     assert_eq!(std::fs::read_to_string(&sample).unwrap(), "after\nunseen\n");
     assert!(!outcomes.ctx.tool_registry.has_patch_recovery_read(tool_names::READ_FILE, &read));
+}
+
+#[tokio::test]
+async fn placeholder_policy_failure_keeps_policy_correction_and_single_prefix() {
+    let mut backing = TestContextBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    let args = json!({"cleared":"tool_input"});
+    super::super::handle_preflight_failure(
+        &mut ctx,
+        "policy-placeholder",
+        tool_names::EXEC_COMMAND,
+        "Tool preflight validation failed: Command security check failed: command injection",
+        Some(&args),
+        None,
+    );
+    assert_eq!(ctx.harness_state.consecutive_preflight_failures, 1);
+    assert!(ctx.session_stats.preflight_recovery.is_clear(), "policy is not schema recovery");
+    let replies: Vec<_> = ctx
+        .working_history
+        .iter()
+        .filter(|m| m.tool_call_id.as_deref() == Some("policy-placeholder"))
+        .collect();
+    assert_eq!(replies.len(), 1);
+    let payload: serde_json::Value = serde_json::from_str(&replies[0].content.as_text()).unwrap();
+    assert!(!payload["schema_correction"].as_str().unwrap().contains("Do not echo"));
+    assert_eq!(
+        payload["error"]
+            .as_str()
+            .unwrap()
+            .matches("Tool preflight validation failed")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn preflight_placeholder_and_invalid_arguments_allow_schema_correct_execution() {
+    for (invalid, command_key) in [
+        (r#"{"cleared":"tool_input"}"#, "cmd"),
+        (r#"{}"#, "command"),
+        (r#"{"cmd":" "}"#, "cmd"),
+        (r#"{"cmd":42}"#, "command"),
+        ("{", "cmd"),
+    ] {
+        let mut backing = TestContextBacking::new(20).await;
+        backing.select_build_primary_agent();
+        let mut tracker = LoopTracker::new();
+        let mut files = BTreeSet::new();
+        let mut ctx = backing.turn_processing_context();
+        let mut outcomes = ToolOutcomeContext {
+            ctx: &mut ctx,
+            repeated_tool_attempts: &mut tracker,
+            turn_modified_files: &mut files,
+        };
+        let mut valid = json!({"yield_time_ms":10000});
+        valid[command_key] = json!("rustc --version");
+        let calls = [
+            PreparedAssistantToolCall::new(uni::ToolCall::function(
+                "invalid".into(),
+                tool_names::EXEC_COMMAND.into(),
+                invalid.into(),
+            )),
+            PreparedAssistantToolCall::new(uni::ToolCall::function(
+                "corrected".into(),
+                tool_names::EXEC_COMMAND.into(),
+                valid.to_string(),
+            )),
+        ];
+        assert!(handle_tool_calls(&mut outcomes, &calls).await.unwrap().is_none(), "{invalid}");
+        assert!(outcomes.ctx.session_stats.preflight_recovery.is_clear(), "successful correction: {invalid}");
+        for id in ["invalid", "corrected"] {
+            let replies: Vec<_> = outcomes
+                .ctx
+                .working_history
+                .iter()
+                .filter(|m| m.tool_call_id.as_deref() == Some(id))
+                .collect();
+            assert_eq!(replies.len(), 1, "one terminal response: {invalid} / {id}");
+            if id == "corrected" {
+                assert!(replies[0].content.as_text().contains("rustc"));
+                let payload: serde_json::Value = serde_json::from_str(&replies[0].content.as_text()).unwrap();
+                assert_eq!(payload["exit_code"], 0, "the verifier must finish successfully");
+            }
+        }
+    }
 }

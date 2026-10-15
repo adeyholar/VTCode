@@ -603,3 +603,28 @@ async fn tool_free_recovery_retries_on_contract_violation_then_salvages() {
     );
     assert!(backing.recovery_is_tool_free());
 }
+
+#[tokio::test]
+async fn navigation_blocked_internal_turn_cannot_reopen_execution() {
+    use crate::agent::runloop::unified::state::NAVIGATION_RECOVERY_BLOCK_REASON;
+    use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
+    let mut backing = TestTurnProcessingBacking::new(20).await;
+    {
+        let ctx = backing.turn_processing_context();
+        ctx.session_stats.navigation_recovery.arm();
+        assert!(ctx.session_stats.navigation_recovery.consume());
+        ctx.session_stats.navigation_recovery.arm();
+        ctx.session_stats
+            .register_follow_up_prompt("Preflight corrective turn: continue the task");
+    }
+    let mut history = vec![uni::Message::user(
+        "Preflight corrective turn: continue the task".into(),
+    )];
+    let outcome = run_turn_loop(&mut history, backing.turn_loop_context()).await.unwrap();
+    assert!(
+        matches!(outcome.result, TurnLoopResult::Blocked { reason: Some(ref reason) } if reason == NAVIGATION_RECOVERY_BLOCK_REASON)
+    );
+    let ctx = backing.turn_processing_context();
+    assert_eq!(ctx.harness_state.tool_calls, 0);
+    assert!(!ctx.is_recovery_active());
+}

@@ -67,12 +67,14 @@ fn different_queries_with_retained_rows_are_redundant_but_new_rows_are_productiv
     }
     assert!(tracker.take_redundant_navigation_notice());
     tracker.reset_after_balancer_recovery();
+    let previous = tracker.low_signal_tool_calls;
     update_repetition_tracker(
         &mut tracker,
         &success(json!({"results":[search_row(30,"## Contents")]})),
         tools::CODE_SEARCH,
         &json!({"query":"another query"}),
     );
+    assert_eq!(tracker.low_signal_tool_calls, previous + 1, "retained evidence stays redundant after synthesis");
     assert!(!tracker.take_redundant_navigation_notice(), "coaching stays once per turn");
 }
 
@@ -206,18 +208,13 @@ fn bounded_evidence_ledger_keeps_unrecorded_rows_productive() {
 }
 
 #[test]
-fn balancer_recovery_clears_retained_evidence_so_resume_starts_novel() {
-    // Session session-vtcode-20261015T083154Z_961005-54191: early recovery for
-    // `navigation::retained_evidence ×3` never resumed normal operation
-    // because the evidence window survived the reset and the next identical
-    // read was immediately redundant again.
+fn balancer_recovery_preserves_retained_evidence_but_resets_churn() {
+    // Synthesis leaves context available, so it must not make an unchanged
+    // read novel. Only churn counters reset before the bounded execution phase.
     let mut tracker = LoopTracker::new();
     let signatures = vec!["retained line".to_string()];
     assert!(!tracker.record_navigation_evidence(&signatures));
     assert!(tracker.record_navigation_evidence(&signatures));
     tracker.reset_after_balancer_recovery();
-    assert!(
-        !tracker.record_navigation_evidence(&signatures),
-        "post-recovery resume must treat retained rows as fresh evidence"
-    );
+    assert!(tracker.record_navigation_evidence(&signatures), "post-recovery resume must remember retained rows");
 }

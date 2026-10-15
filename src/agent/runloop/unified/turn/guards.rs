@@ -338,6 +338,26 @@ fn churn_line_label(churn: Option<&(String, usize)>) -> String {
         .map_or(String::new(), |(family, count)| format!(" ({family} ×{count})"))
 }
 
+/// Keep navigation recovery distinct from policy/budget synthesis.
+fn activate_navigation_recovery(ctx: &mut TurnProcessingContext<'_>, reason: String) -> bool {
+    if ctx.is_recovery_active() {
+        return false;
+    }
+    if !ctx.is_planning_active()
+        && ctx.session_stats.navigation_recovery == crate::agent::runloop::unified::state::NavigationRecovery::Consumed
+    {
+        ctx.session_stats.navigation_recovery.arm();
+        return false;
+    }
+    if !ctx.activate_recovery(reason) {
+        return false;
+    }
+    if !ctx.is_planning_active() {
+        ctx.session_stats.navigation_recovery.arm();
+    }
+    true
+}
+
 /// Arm the early tool-free synthesis pass and, only when actually armed,
 /// announce it in the UI, history, and decision ledger. Returns `false` when
 /// a recovery was already armed (e.g. by the blocked-tool fuse in the same
@@ -347,7 +367,7 @@ async fn arm_and_announce_early_recovery(
     recovery_reason: String,
     churn: Option<&(String, usize)>,
 ) -> bool {
-    if !ctx.activate_recovery(recovery_reason.clone()) {
+    if !activate_navigation_recovery(ctx, recovery_reason.clone()) {
         return false;
     }
     ctx.renderer
@@ -441,7 +461,7 @@ pub(crate) async fn handle_turn_balancer(
         // Only claim the intervention when a pass was actually armed: a
         // recovery already pending from another guard or the blocked-tool
         // fuse would make the "[!]" line and duplicate reason a lie.
-        if ctx.activate_recovery(recovery_reason.clone()) {
+        if activate_navigation_recovery(ctx, recovery_reason.clone()) {
             repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
             ctx.renderer
                 .line(
@@ -451,7 +471,7 @@ pub(crate) async fn handle_turn_balancer(
                 .unwrap_or(());
             ctx.working_history.push(uni::Message::system(recovery_reason));
         }
-        return apply_balancer_recovery(repeated_tool_attempts);
+        return navigation_balancer_outcome(ctx, repeated_tool_attempts);
     }
 
     // NL2Repo-Bench: Navigation Loop Detection
@@ -473,7 +493,7 @@ pub(crate) async fn handle_turn_balancer(
             "Navigation loop detected after {} consecutive read/search steps (recurrence #{recurrence}). Tools are disabled on the next pass; summarize findings and propose the next concrete action.",
             repeated_tool_attempts.consecutive_navigations
         );
-        if ctx.activate_recovery(recovery_reason.clone()) {
+        if activate_navigation_recovery(ctx, recovery_reason.clone()) {
             ctx.renderer
                 .line(MessageStyle::Warning, "[!] Navigation Loop: scheduling a recovery synthesis pass.")
                 .unwrap_or(());
@@ -483,7 +503,7 @@ pub(crate) async fn handle_turn_balancer(
                 navigation_loop_guidance(ctx.is_planning_active(), recurrence)
             )));
         }
-        return apply_balancer_recovery(repeated_tool_attempts);
+        return navigation_balancer_outcome(ctx, repeated_tool_attempts);
     }
 
     // --- Turn balancer: cap low-signal churn ---
@@ -530,7 +550,7 @@ pub(crate) async fn handle_turn_balancer(
         if armed && planning_active {
             repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
         }
-        return apply_balancer_recovery(repeated_tool_attempts);
+        return navigation_balancer_outcome(ctx, repeated_tool_attempts);
     }
 
     // Execution-mode total low-signal guard: diverse churn (a new query each
@@ -539,7 +559,9 @@ pub(crate) async fn handle_turn_balancer(
     // window. The counter's window resets on any mutation or verification,
     // so this fires only for churn uninterrupted by productive work.
     if !planning_active
-        && !repeated_tool_attempts.execution_total_low_signal_triggered
+        && (!repeated_tool_attempts.execution_total_low_signal_triggered
+            || ctx.session_stats.navigation_recovery
+                == crate::agent::runloop::unified::state::NavigationRecovery::Consumed)
         && repeated_tool_attempts.total_low_signal_navigations >= EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD
     {
         let churn = repeated_tool_attempts.dominant_churn();
@@ -552,7 +574,7 @@ pub(crate) async fn handle_turn_balancer(
         if armed {
             repeated_tool_attempts.execution_total_low_signal_triggered = true;
         }
-        return apply_balancer_recovery(repeated_tool_attempts);
+        return navigation_balancer_outcome(ctx, repeated_tool_attempts);
     }
 
     if !step_count.is_multiple_of(check_interval) {
@@ -582,7 +604,7 @@ pub(crate) async fn handle_turn_balancer(
                 churn_reason_note(churn.as_ref())
             )
         };
-        if ctx.activate_recovery(recovery_reason.clone()) {
+        if activate_navigation_recovery(ctx, recovery_reason.clone()) {
             if planning_active {
                 repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
             }
@@ -610,10 +632,22 @@ pub(crate) async fn handle_turn_balancer(
                 );
             }
         }
-        return apply_balancer_recovery(repeated_tool_attempts);
+        return navigation_balancer_outcome(ctx, repeated_tool_attempts);
     }
 
     TurnHandlerOutcome::Continue
+}
+
+fn navigation_balancer_outcome(
+    ctx: &TurnProcessingContext<'_>,
+    tracker: &mut crate::agent::runloop::unified::turn::tool_outcomes::helpers::LoopTracker,
+) -> TurnHandlerOutcome {
+    if ctx.session_stats.navigation_recovery.blocked() {
+        return TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+            reason: Some(crate::agent::runloop::unified::state::NAVIGATION_RECOVERY_BLOCK_REASON.to_string()),
+        });
+    }
+    apply_balancer_recovery(tracker)
 }
 
 fn apply_balancer_recovery(

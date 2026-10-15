@@ -45,6 +45,7 @@ impl SessionStats {
             return FollowUpPromptAction::None;
         }
         self.preflight_recovery = PreflightRecovery::default();
+        self.navigation_recovery = Default::default();
         let suppression_active = self.consume_follow_up_prompt_suppression();
         let is_follow_up = is_follow_up_prompt_like(input);
 

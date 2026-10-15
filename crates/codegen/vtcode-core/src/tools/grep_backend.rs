@@ -63,7 +63,7 @@ pub(crate) struct LiteralSearchOutcome {
     pub truncated: bool,
 }
 
-async fn kill_and_reap_literal_child(child: &mut tokio::process::Child) {
+pub(super) async fn kill_and_reap_search_child(child: &mut tokio::process::Child) {
     let _ = child.start_kill();
     let _ = child.wait().await;
 }
@@ -188,11 +188,21 @@ pub(crate) async fn search_literal_bounded(
     // as flags without `-e`; `--` keeps a leading-dash path positional.
     command.arg("-e").arg(&pattern_arg).arg("--").arg(search_path);
 
+    run_literal_child(command, query, candidate_cap).await
+}
+
+async fn run_literal_child(
+    mut command: TokioCommand,
+    query: &str,
+    candidate_cap: usize,
+) -> Result<LiteralSearchOutcome> {
+    // Own cancellation even while waiting for the first JSON record.
+    command.kill_on_drop(true);
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to execute ripgrep for literal query '{query}'"))?;
     let Some(stdout) = child.stdout.take() else {
-        kill_and_reap_literal_child(&mut child).await;
+        kill_and_reap_search_child(&mut child).await;
         anyhow::bail!("failed to capture ripgrep output");
     };
     let mut reader = BufReader::new(stdout);
@@ -208,7 +218,7 @@ pub(crate) async fn search_literal_bounded(
                 Ok(read) => read,
                 Err(error) => {
                     drop(reader);
-                    kill_and_reap_literal_child(&mut child).await;
+                    kill_and_reap_search_child(&mut child).await;
                     return Err(error).context("failed to read ripgrep JSON stream");
                 }
             };
@@ -224,7 +234,7 @@ pub(crate) async fn search_literal_bounded(
             Ok(event) => event,
             Err(error) => {
                 drop(reader);
-                kill_and_reap_literal_child(&mut child).await;
+                kill_and_reap_search_child(&mut child).await;
                 return Err(error).context("failed to parse ripgrep JSON stream record");
             }
         };
@@ -300,7 +310,7 @@ pub(crate) async fn search_literal_bounded(
     }
     let status = child.wait().await.context("failed to reap ripgrep process")?;
     if !truncated && !matches!(status.code(), Some(0) | Some(1)) {
-        anyhow::bail!("ripgrep literal search failed");
+        anyhow::bail!("ripgrep literal search failed ({status})");
     }
 
     Ok(LiteralSearchOutcome { candidates, truncated })
@@ -589,3 +599,6 @@ pub(crate) async fn run_ripgrep_backend_async(
 
     Ok(matches)
 }
+
+#[cfg(test)]
+mod tests;

@@ -834,6 +834,15 @@ impl HarnessTurnState {
         true
     }
 
+    /// Only called after an admitted navigation synthesis; request-scoped state
+    /// prevents this reset from granting another automatic execution attempt.
+    pub(crate) fn resume_after_navigation_synthesis(&mut self) {
+        self.recovery_phase = RecoveryPhase::Inactive;
+        self.recovery_mode = None;
+        self.recovery_reason = None;
+        self.recovery_prompt_reason = None;
+    }
+
     pub(crate) fn finish_recovery_pass(&mut self) -> bool {
         if !matches!(self.recovery_phase, RecoveryPhase::InPass) {
             return false;

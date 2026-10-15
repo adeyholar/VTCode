@@ -540,7 +540,12 @@ impl<'a> TurnProcessingContext<'a> {
     ) -> anyhow::Result<TurnHandlerOutcome> {
         let recovery_pass_response = self.is_recovery_active() && self.recovery_pass_used();
         let tool_free_recovery_pass = recovery_pass_response && self.recovery_is_tool_free();
-        // Tool-free recovery is terminal: the model's text IS the final answer.
+        let navigation_summary_valid =
+            !crate::agent::runloop::unified::turn::provider_noise::strip_provider_noise(&text)
+                .trim()
+                .is_empty();
+        // Tool-free recovery normally ends the turn; navigation has one bounded
+        // continuation below. Either path needs meaningful synthesis text.
         // Some providers (e.g. MiniMax) emit a noise prefix like `]<]minimax[>[`
         // before/instead of real content. When the model has nothing to
         // synthesize, this residue becomes the user-visible final answer — the
@@ -655,18 +660,23 @@ impl<'a> TurnProcessingContext<'a> {
             && !persisted_plan_is_ready(&self.tool_registry.planning_workflow_state()).await;
         let final_text = text.clone();
         let consecutive_relaxed = self.harness_state.consecutive_relaxed_continuations;
-        let continuation_decision = if tool_free_recovery_pass {
-            // Tool-free recovery is terminal: the text produced during recovery
-            // IS the final answer. Allowing continuation here would call
-            // `finish_recovery_pass()` (deactivating recovery), re-enable tools
-            // on the next iteration, and — if the follow-up fails again —
-            // re-trigger recovery, producing an infinite cycle that no existing
-            // bound catches (`consecutive_relaxed_continuations` is bypassed by
-            // non-relaxed "recent_tool_activity" continuations that reset the
-            // counter to 0, and `MAX_RECOVERY_RETRIES` only counts retries
-            // within a single pass). Evaluate continuation intent solely to
-            // populate diagnostic fields for the tracing log; the decision is
-            // always to end the turn.
+        let navigation_resume_allowed = tool_free_recovery_pass
+            && navigation_summary_valid
+            && self.session_stats.navigation_recovery
+                == crate::agent::runloop::unified::state::NavigationRecovery::Synthesizing
+            && !self.is_planning_active()
+            && proposed_plan.is_none()
+            && !self.harness_state.wall_clock_exhausted()
+            && !self.harness_state.wall_clock_exhausted_emitted
+            && !self.harness_state.tool_budget_exhausted()
+            && !self.harness_state.tool_budget_exhausted_emitted
+            && !self.harness_state.turn_refused()
+            && self.session_stats.preflight_recovery.is_clear()
+            && crate::agent::runloop::unified::stop_requests::stop_outcome(self.ctrl_c_state).is_none()
+            && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg);
+        let continuation_decision = if tool_free_recovery_pass && !navigation_resume_allowed {
+            // Non-navigation recovery remains terminal. Only typed navigation
+            // synthesis can spend the request's single execution allowance.
             let decision = evaluate_interim_text_continuation(
                 self.full_auto,
                 self.is_planning_active(),
@@ -724,18 +734,15 @@ impl<'a> TurnProcessingContext<'a> {
         // the workspace tracker can force continuation. Restoration uses the
         // same adoption boundary.
         //
-        // Tool-free recovery stays terminal in-turn: finish_recovery_pass()
-        // would re-enable tools and can re-enter recovery (see the
-        // `tool_free_recovery_terminal` branch above). Outer auto-queue after
-        // a Completed recovery end schedules the next tracker turn instead.
-        // Completed-plan branches stay terminal in-turn as well.
+        // Only navigation synthesis may use this override to resume in-turn.
+        // Completed plans and all other tool-free recoveries stay terminal.
         // In-turn override is gated on `auto_continue_tracker` only —
         // `cross_turn_turns == 0` disables only the outer auto-queue.
         // Complete probes clear the cache so auto-continue stops when the
         // tracker finishes; Unavailable keeps the last known incomplete set.
         let tracker_adoption_allowed = self.tool_registry.tracker_adopted_for_request();
         let live_probe = if !continuation_decision.should_continue
-            && !tool_free_recovery_pass
+            && (!tool_free_recovery_pass || navigation_resume_allowed)
             && proposed_plan.is_none()
             && !self.is_planning_active()
             && tracker_adoption_allowed
@@ -749,7 +756,7 @@ impl<'a> TurnProcessingContext<'a> {
         let effective_incomplete = self.harness_state.apply_tracker_probe(live_probe);
         let tracker_incomplete = effective_incomplete.is_some_and(|items| !items.is_empty());
         let continuation_decision = if !continuation_decision.should_continue
-            && !tool_free_recovery_pass
+            && (!tool_free_recovery_pass || navigation_resume_allowed)
             && proposed_plan.is_none()
             && !self.is_planning_active()
             && tracker_adoption_allowed
@@ -760,6 +767,12 @@ impl<'a> TurnProcessingContext<'a> {
         } else {
             continuation_decision
         };
+
+        if navigation_resume_allowed && continuation_decision.should_continue {
+            self.session_stats.navigation_recovery.consume();
+            self.harness_state.resume_after_navigation_synthesis();
+            self.push_system_message("Navigation synthesis is complete. Tools are available under current policy for one bounded execution attempt. Reuse retained evidence; take the next concrete action and verify it. No tool, loop, approval, or verification limit is increased.".to_string());
+        }
 
         // Track consecutive relaxed continuations to prevent infinite loops.
         if continuation_decision.should_continue && continuation_decision.is_relaxed_continuation {
@@ -784,7 +797,7 @@ impl<'a> TurnProcessingContext<'a> {
         // keeps re-prompting. See `MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN`.
         self.harness_state.record_assistant_text_response();
 
-        if recovery_pass_response {
+        if recovery_pass_response && !(navigation_resume_allowed && continuation_decision.should_continue) {
             self.finish_recovery_pass();
         }
 

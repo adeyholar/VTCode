@@ -39,6 +39,45 @@ system directives; a shared planning-synthesis directive is omitted only when it
 preflight circuit trip. Canonical archives and user/policy messages remain intact. Current tool-free recovery still
 adds its active request-only directive.
 
+Historical `{"cleared":"tool_input"}` arguments are request-projection placeholders, never executable calls.
+Compiled guidance requires reconstructing real arguments against the current schema; `exec_command` uses `cmd`
+(with `command` accepted as an alias). Placeholder reuse counts toward the existing validation failure cap.
+Policy corrections take precedence over placeholder coaching. Each rejected or skipped call retains one terminal
+response, and clearing never rewrites durable history or breaks call/result pairing.
+
+Navigation synthesis has one automatic execution allowance per genuine user request. A valid tool-free summary
+becomes commentary and restores tools only when existing continuation classifiers or an adopted current-request
+tracker identify remaining work, and continuation is enabled. Planning synthesis stays an approval handoff.
+A second navigation stall blocks with retained evidence and pending work; internal follow-ups cannot refill the
+allowance or immediately auto-queue that blocked handoff. Cancellation, refusal, approval, verification, call/loop
+and wall-clock limits still apply. Recovery resets churn counters while retaining evidence signatures until an
+existing mutation, verification, or successful compaction invalidates them.
+
+Tracker notes append rather than replace existing notes. Repeating an update to replace a prior note duplicates it;
+reuse the latest tracker result and update only when state changes.
+
+The literal ripgrep and declaration-outline backends own their children across cancellation (`kill_on_drop`) and
+explicitly kill and wait on stream errors or truncation, sharing the same stream-error cleanup helper. Nonzero backend
+exits retain their exit status in bounded unavailable-category context. Pattern `-e` and path `--` separators remain
+required for ripgrep. Declaration discovery resolves the installed binary directly and uses outline execution as its
+availability check, avoiding a blocking per-query version subprocess. Explicit installer and readiness version checks
+share a private probe with a two-second deadline for execution and pipe collection, and a 64 KiB limit per stdout/stderr
+stream. Timeouts and overflows return errors after stopping and reaping the direct child. A joined worker with its own
+Tokio runtime keeps the existing synchronous status APIs usable from both ordinary and Tokio callers; these APIs still
+wait synchronously, now within the probe's deadline plus cleanup. Empty output, nonzero exits, and missing executables
+retain their existing status categories. Ast-grep error messages preserve the cause chain, including timeout/output caps.
+No probe installs tools. This independently applies the deadline/reap pattern verified in
+[Codex's synchronous probe](https://github.com/openai/codex/blob/5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0/codex-rs/tui/src/tui/tmux.rs)
+and its [cleanup regression](https://github.com/openai/codex/blob/5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0/codex-rs/tui/src/tui/tmux_tests.rs);
+VT Code uses bounded asynchronous pipes to avoid temporary output files or detached pipe-reader threads.
+This follows lifecycle ownership verified in
+Codex `codex-rs/core/src/spawn.rs` at
+[`5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0`](https://github.com/openai/codex/blob/5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0/codex-rs/core/src/spawn.rs)
+(Apache-2.0, copyright 2025 OpenAI); no upstream code was copied.
+The [pinned execution handler](https://github.com/openai/codex/blob/5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0/codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs)
+uses typed argument parsing, and [OpenAI session-memory guidance](https://developers.openai.com/cookbook/examples/agents_sdk/session_memory)
+reinforces keeping tool calls paired with results. Navigation resumption is VT Code policy, not an upstream behavior claim.
+
 `start_planning` treats blank optional paths as absent and initializes a validated regular-file destination before
 publishing its active state. Initialization failures retain the prior active flag, plan path, and baseline.
 An explicit replacement validates the selected destination without inspecting an unusable preceding path. Omitting

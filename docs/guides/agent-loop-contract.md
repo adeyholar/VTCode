@@ -67,6 +67,16 @@ has incomplete steps, and when a turn ends on a recoverable block — in every m
   verification, and existing continuation limits remain authoritative. Rejections preserve parsed arguments in
   canonical invocation events; malformed JSON has no parsed
   arguments. Every skipped call in a batch receives one terminal response.
+- Navigation recovery: after a valid tool-free synthesis, existing continuation classification or an adopted
+  current-request tracker can resume one tool-enabled execution phase in the same turn. The summary is commentary;
+  planning synthesis remains an approval handoff. The existing continuation kill-switch, tool/loop/wall-clock budgets,
+  verification, cancellation, refusal, and policy gates still apply. Only navigation recovery can restore tools this way.
+  A second navigation stall produces a resumable blocked handoff that automatic continuation cannot reopen. The allowance
+  survives internal follow-ups and resets only on genuine user input. Retained evidence stays known across synthesis;
+  unchanged reads remain redundant. Mutation, verification, and successful compaction keep their existing invalidation.
+- Cleared historical arguments are placeholders, not callable input. Reusing `{"cleared":"tool_input"}` consumes the
+  validation failure allowance; policy errors retain precedence and every rejected/skipped call gets one response.
+  Tracker notes append, so repeating an update does not replace earlier notes.
 - Kill-switch: `[agent.harness.continuation].auto_continue_tracker = false`.
 
 Harness-generated tracker, plan, blocked-end, verification, and background continuations preserve the existing episode

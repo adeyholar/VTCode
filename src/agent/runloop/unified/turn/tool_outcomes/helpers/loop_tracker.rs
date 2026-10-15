@@ -372,11 +372,8 @@ impl LoopTracker {
         self.attempts.clear();
         self.reset_low_signal_attempts();
         self.nav_signatures.clear();
-        // Retained-evidence churn must not re-trip immediately after the
-        // tool-free synthesis pass: clear the evidence window so resumed
-        // navigation starts novel. Emitted notice latches stay set to avoid
-        // re-spamming the same coaching after resume.
-        self.clear_navigation_evidence();
+        // Synthesis retains context: unchanged reads remain redundant.
+        // Mutations, verification and successful compaction invalidate it.
         // Navigation recovery is not verification. Preserve mutation pressure,
         // an active verification checkpoint, its bounded fix window, the
         // in-turn auto-recovery budget, the harness-executed once-flag, and

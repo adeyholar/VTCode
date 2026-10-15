@@ -148,7 +148,7 @@ pub(crate) fn handle_preflight_failure(
         return Some(TurnHandlerOutcome::Break(stop));
     }
     let is_cleared_echo = is_cleared_tool_input_echo(arguments);
-    let is_llm_mistake = preflight_failure_is_llm_mistake(error) || is_cleared_echo;
+    let is_llm_mistake = !is_cleared_echo && preflight_failure_is_llm_mistake(error);
     let failure_count = if is_llm_mistake {
         // Report the current streak without advancing it so the model still
         // sees failure_count telemetry, but a prose blob cannot poison the
@@ -176,10 +176,12 @@ pub(crate) fn handle_preflight_failure(
         );
     let exhausted = ctx.session_stats.preflight_recovery.exhausted();
     let circuit_tripped = !is_llm_mistake && (failure_count >= max_failures || exhausted);
-    let schema_correction = if is_cleared_echo {
+    let schema_correction = if is_cleared_echo
+        && vtcode_core::tools::error_messages::agent_execution::preflight_policy_correction(error).is_none()
+    {
         if matches!(tool_name, tool_names::EXEC_COMMAND | tool_names::UNIFIED_EXEC | "command_session") {
             format!(
-                "Do not echo the history stub '{{\"cleared\":\"tool_input\"}}'. Provide real arguments matching the declared schema for '{tool_name}' (exec_command requires \"cmd\")."
+                "Do not echo the history stub '{{\"cleared\":\"tool_input\"}}'. Provide real arguments matching the declared schema for '{tool_name}' (exec_command requires \"cmd\"; \"command\" is accepted as an alias)."
             )
         } else {
             format!(
@@ -208,7 +210,7 @@ pub(crate) fn handle_preflight_failure(
         "error": if repeated {
             format!("Repeated preflight rejection for '{tool_name}'; use schema_correction.")
         } else {
-            format!("Tool preflight validation failed for '{tool_name}': {error}")
+            format!("Tool preflight validation failed for '{tool_name}': {}", error.strip_prefix("Tool preflight validation failed: ").unwrap_or(error))
         },
         "failure_kind": failure_kind,
         "tool_name": tool_name,

@@ -1822,3 +1822,228 @@ async fn completion_verification_short_edit_arms_gate_without_completion_wording
             .completion_verification_pending()
     );
 }
+
+#[tokio::test]
+async fn navigation_synthesis_resumes_execution_once_and_second_stall_blocks() {
+    use crate::agent::runloop::unified::state::NavigationRecovery;
+    use crate::agent::runloop::unified::turn::guards::handle_turn_balancer;
+    use crate::agent::runloop::unified::turn::tool_outcomes::helpers::EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD;
+
+    let mut backing = TestTurnProcessingBacking::new(40).await;
+    backing.set_skip_confirmations_for_test(true);
+    let mut tracker = LoopTracker::new();
+    let mut modified = BTreeSet::new();
+    let summary = "The evidence identifies the affected parser. I will apply the correction and run the verifier.";
+    let outcome = {
+        let mut ctx = backing.turn_processing_context();
+        ctx.working_history
+            .push(uni::Message::user("Implement the fix and verify it.".into()));
+        tracker.total_low_signal_navigations = EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD;
+        assert!(matches!(handle_turn_balancer(&mut ctx, 8, &mut tracker, 40, 3).await, TurnHandlerOutcome::Continue));
+        assert_eq!(ctx.session_stats.navigation_recovery, NavigationRecovery::Synthesizing);
+        assert!(ctx.consume_recovery_pass());
+        handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: summary.into(),
+                reasoning: vec![],
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 8,
+            repeated_tool_attempts: &mut tracker,
+            turn_modified_files: &mut modified,
+            max_tool_loops: 40,
+            tool_repeat_limit: 3,
+        })
+        .await
+        .unwrap()
+    };
+    assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+    {
+        let ctx = backing.turn_processing_context();
+        assert!(!ctx.is_recovery_active());
+        assert!(!ctx.harness_state.recovery_is_tool_free());
+        assert_eq!(ctx.session_stats.navigation_recovery, NavigationRecovery::Consumed);
+        let message = ctx.working_history.iter().find(|m| m.content.as_text() == summary).unwrap();
+        assert_eq!(message.phase, Some(uni::AssistantPhase::Commentary));
+    }
+    // A real admitted verifier remains executable after synthesis.
+    let outcome = {
+        let mut ctx = backing.turn_processing_context();
+        handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::ToolCalls {
+                tool_calls: vec![PreparedAssistantToolCall::new(uni::ToolCall::function(
+                    "navigation-verifier".into(),
+                    "exec_command".into(),
+                    serde_json::json!({"cmd":"rustc --version", "yield_time_ms":10000}).to_string(),
+                ))],
+                assistant_text: String::new(),
+                reasoning: vec![],
+                reasoning_details: None,
+            },
+            response_streamed: false,
+            step_count: 9,
+            repeated_tool_attempts: &mut tracker,
+            turn_modified_files: &mut modified,
+            max_tool_loops: 40,
+            tool_repeat_limit: 3,
+        })
+        .await
+        .unwrap()
+    };
+    assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+    let mut ctx = backing.turn_processing_context();
+    let replies: Vec<_> = ctx
+        .working_history
+        .iter()
+        .filter(|m| m.tool_call_id.as_deref() == Some("navigation-verifier"))
+        .collect();
+    assert_eq!(replies.len(), 1);
+    assert!(replies[0].content.as_text().contains("rustc"));
+    let payload: serde_json::Value = serde_json::from_str(&replies[0].content.as_text()).unwrap();
+    assert_eq!(payload["exit_code"], 0, "the verifier must finish successfully");
+
+    tracker.total_low_signal_navigations = EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD;
+    assert!(matches!(
+        handle_turn_balancer(&mut ctx, 16, &mut tracker, 40, 3).await,
+        TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })
+    ));
+    assert!(ctx.session_stats.navigation_recovery.blocked());
+    ctx.session_stats
+        .register_follow_up_prompt("Preflight corrective turn: fix arguments");
+    assert!(ctx.session_stats.navigation_recovery.blocked(), "internal continuation cannot refill recovery");
+    ctx.session_stats.register_follow_up_prompt("continue");
+    assert_eq!(ctx.session_stats.navigation_recovery, NavigationRecovery::Ready);
+}
+
+#[tokio::test]
+async fn navigation_synthesis_respects_terminal_handoffs_and_existing_limits() {
+    use crate::agent::runloop::unified::state::NavigationRecovery;
+    for case in [
+        "policy",
+        "budget",
+        "call_budget",
+        "wallclock",
+        "validation",
+        "loops",
+        "disabled",
+        "approval",
+        "informational",
+    ] {
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut cfg = vtcode_core::config::loader::VTCodeConfig::default();
+        cfg.agent.harness.continuation.auto_continue_tracker = case != "disabled";
+        backing.set_vt_cfg_for_test(cfg);
+        let mut tracker = LoopTracker::new();
+        let mut modified = BTreeSet::new();
+        let outcome = {
+            let mut ctx = backing.turn_processing_context();
+            ctx.working_history.push(uni::Message::user(if case == "informational" {
+                "Explain the parser.".into()
+            } else {
+                "Fix the parser.".into()
+            }));
+            if case != "policy" {
+                ctx.session_stats.navigation_recovery.arm();
+            }
+            ctx.activate_recovery("synthesis");
+            assert!(ctx.consume_recovery_pass());
+            if case == "budget" {
+                ctx.harness_state.tool_budget_exhausted_emitted = true;
+            }
+            if case == "call_budget" {
+                ctx.harness_state.tool_calls = ctx.harness_state.max_tool_calls;
+            }
+            if case == "wallclock" {
+                ctx.harness_state.wall_clock_exhausted_emitted = true;
+            }
+            if case == "validation" {
+                ctx.session_stats.preflight_recovery.reject(
+                    "exec_command",
+                    crate::agent::runloop::unified::state::ValidationCategory::Arguments,
+                    Some(&serde_json::json!({})),
+                    3,
+                    false,
+                );
+            }
+            let text = match case {
+                "approval" => "I need your approval before proceeding.",
+                "informational" => "The parser converts input into a syntax tree.",
+                _ => "I will apply the correction next.",
+            };
+            handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::TextResponse {
+                    text: text.into(),
+                    reasoning: vec![],
+                    reasoning_details: None,
+                    proposed_plan: None,
+                },
+                response_streamed: false,
+                step_count: if case == "loops" { 20 } else { 4 },
+                repeated_tool_attempts: &mut tracker,
+                turn_modified_files: &mut modified,
+                max_tool_loops: 20,
+                tool_repeat_limit: 3,
+            })
+            .await
+            .unwrap()
+        };
+        assert!(matches!(outcome, TurnHandlerOutcome::Break(_)), "{case}");
+        let ctx = backing.turn_processing_context();
+        assert!(ctx.harness_state.recovery_is_tool_free(), "{case} must not restore tools");
+        assert_ne!(ctx.session_stats.navigation_recovery, NavigationRecovery::Blocked);
+    }
+}
+
+#[tokio::test]
+async fn navigation_synthesis_uses_only_adopted_tracker_and_nonempty_summary() {
+    for (adopted, text, resumes) in [
+        (true, "Evidence retained.", true),
+        (false, "Evidence retained.", false),
+        (true, "  ", false),
+    ] {
+        let mut backing = TestTurnProcessingBacking::new(20).await;
+        let mut tracker = LoopTracker::new();
+        let mut modified = BTreeSet::new();
+        let outcome = {
+            let mut ctx = backing.turn_processing_context();
+            ctx.tool_registry.allow_all_tools().await.unwrap();
+            ctx.tool_registry
+                .execute_tool(
+                    "task_tracker",
+                    serde_json::json!({"action":"create", "items":[{"description":"Fix parser"}]}),
+                )
+                .await
+                .unwrap();
+            ctx.tool_registry.begin_tracker_request(adopted);
+            ctx.working_history.push(uni::Message::user("Fix the parser.".into()));
+            ctx.session_stats.navigation_recovery.arm();
+            ctx.activate_recovery("navigation synthesis");
+            assert!(ctx.consume_recovery_pass());
+            handle_turn_processing_result(HandleTurnProcessingResultParams {
+                ctx: &mut ctx,
+                processing_result: TurnProcessingResult::TextResponse {
+                    text: text.into(),
+                    reasoning: vec![],
+                    reasoning_details: None,
+                    proposed_plan: None,
+                },
+                response_streamed: false,
+                step_count: 4,
+                repeated_tool_attempts: &mut tracker,
+                turn_modified_files: &mut modified,
+                max_tool_loops: 20,
+                tool_repeat_limit: 3,
+            })
+            .await
+            .unwrap()
+        };
+        assert_eq!(matches!(outcome, TurnHandlerOutcome::Continue), resumes, "adopted={adopted}, text={text:?}");
+        let ctx = backing.turn_processing_context();
+        assert_eq!(!ctx.harness_state.recovery_is_tool_free(), resumes);
+    }
+}
