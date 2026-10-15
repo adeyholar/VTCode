@@ -185,6 +185,11 @@ empty until a route demonstrates a need.
 
 ## Verification
 
+Successful compaction starts a new prompt-cache health streak in both runloops. Cumulative usage and hit rates remain
+intact, so expected replay-window changes cannot join an earlier low-reuse streak while persistent degradation remains
+visible. Failed and no-op compaction do not reset the streak. See the
+[cache health guide](../tools/PROMPT_CACHING_GUIDE.md#cache-health-monitoring).
+
 ```bash
 cargo nextest run --locked -p vtcode-core -E 'test(compaction::) | test(core::agent::state::) | test(core::agent::runner::tests::clearing::)'
 cargo nextest run --locked -p vtcode -E 'test(llm_request::request_builder::tests::) | test(llm_request::context_management::tests::)'

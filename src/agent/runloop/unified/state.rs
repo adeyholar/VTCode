@@ -668,6 +668,32 @@ mod tests {
     }
 
     #[test]
+    fn compaction_boundary_does_not_join_cache_misses_across_replay_windows() {
+        let mut stats = SessionStats::default();
+        let usage = |input, cached, creation| {
+            Some(vtcode_core::llm::provider::Usage {
+                prompt_tokens: input,
+                cached_prompt_tokens: Some(cached),
+                cache_read_tokens: Some(cached),
+                cache_creation_tokens: Some(creation),
+                ..Default::default()
+            })
+        };
+        for sample in [usage(12_645, 0, 12_642), usage(12_669, 5_710, 5_575)] {
+            stats.record_usage("openai", &sample);
+            assert!(stats.record_cache_turn_health("openai", &sample).is_none());
+        }
+        stats.begin_request_segment(SegmentBoundaryReason::Compaction);
+        let sample = usage(12_740, 0, 5_212);
+        stats.record_usage("openai", &sample);
+        assert!(stats.record_cache_turn_health("openai", &sample).is_none());
+        assert_eq!(stats.total_usage().input_tokens, 38_054);
+        assert_eq!(stats.total_usage().cached_input_tokens, 5_710);
+        assert!(stats.record_cache_turn_health("openai", &sample).is_none());
+        assert!(stats.record_cache_turn_health("openai", &sample).is_some());
+    }
+
+    #[test]
     fn capability_change_starts_segment_without_mutating_frozen_prompt() {
         let mut stats = SessionStats::default();
         let first = stats.request_envelope_shared("model", "provider", "build", "fixed".into(), None, 7, 11);

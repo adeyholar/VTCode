@@ -113,6 +113,7 @@ impl AgentRunner {
                 return false;
             }
         };
+        session_state.stats.prompt_cache_health.record_compaction_boundary();
 
         // Rebuild the Gemini `conversation` view from the compacted universal
         // `messages` and keep the processed-message cursor consistent.
