@@ -664,14 +664,14 @@ fn background_exec_guidance() -> &'static str {
 
 fn read_only_batching_guidance(has_read_file: bool) -> &'static str {
     if has_read_file {
-        "- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations; narrow the range on `line_truncated`."
+        "- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations; narrow the range on `line_truncated`; prefer wider windows and reuse evidence over overlapping slices."
     } else {
         "- Batch independent read-only calls; order dependent reads, and serialize mutations."
     }
 }
 
 fn code_search_guidance(has_exec: bool) -> String {
-    const BASE: &str = "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`.";
+    const BASE: &str = "- Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow; unavailable: do not retry identical, drop `file_types`/broaden `path`. Example: `{\"query\":\"TurnLoop\",\"path\":\"src\",\"result_types\":[\"definition\"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`.";
     if has_exec {
         format!("{BASE} Use `exec_command` or a skill for syntax patterns.")
     } else {
@@ -1043,7 +1043,7 @@ mod tests {
         );
         assert_eq!(
             default,
-            "\n\n## Active Tools\n- `verify: [skip Markdown lint if unavailable]`: report skipped; review diff/links without installing tools. Lint errors remain failures.\n- Capabilities: read-only. Analyze and search, but do not modify files or run shell commands.\n- Use available read-only repository tools for browsing; do not modify files.\n- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations; narrow the range on `line_truncated`."
+            "\n\n## Active Tools\n- `verify: [skip Markdown lint if unavailable]`: report skipped; review diff/links without installing tools. Lint errors remain failures.\n- Capabilities: read-only. Analyze and search, but do not modify files or run shell commands.\n- Use available read-only repository tools for browsing; do not modify files.\n- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations; narrow the range on `line_truncated`; prefer wider windows and reuse evidence over overlapping slices."
         );
     }
 
@@ -1467,8 +1467,11 @@ mod tests {
         // Raised to 580 for the Sonnet 5.5 low-effort real-check rule
         // (syntax-only/failed-to-start do not count; project package manager,
         // never sudo; state which check was skipped and why).
+        // Raised to 640 for wider-window reuse and code_search unavailable
+        // no-retry guardrails (session-20261015 overlapping reads + identical
+        // retries).
         // Source inspection is separate from verification and retained in both densities.
-        assert!(approx_tokens < 600, "got ~{approx_tokens} tokens");
+        assert!(approx_tokens < 640, "got ~{approx_tokens} tokens");
     }
 
     #[test]

@@ -720,4 +720,25 @@ mod tests {
         assert!(diagnosis.next_action.contains("do not bypass safeguards"));
         assert!(diagnosis.likely_cause.contains("active policy"));
     }
+
+    #[test]
+    fn code_search_unavailable_does_not_suggest_identical_retry() {
+        let unavailable = ToolExecutionError::new(
+            "code_search",
+            vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+            "all requested code_search result categories are unavailable (requested: text). Do not retry the identical query/path; drop file_types, broaden path, or use exec_command rg for literal text",
+        );
+        let diagnosis = deterministic_error_diagnosis(&unavailable, "execution");
+        assert!(diagnosis.next_action.contains("Do not retry the identical"));
+        assert!(diagnosis.next_action.contains("file_types"));
+
+        let generic = ToolExecutionError::new(
+            "code_search",
+            vtcode_core::tools::registry::ToolErrorType::ExecutionError,
+            "ripgrep literal search failed",
+        );
+        let generic_diagnosis = deterministic_error_diagnosis(&generic, "execution");
+        assert!(generic_diagnosis.next_action.contains("retry with corrected arguments"));
+        assert!(!generic_diagnosis.next_action.contains("Do not retry the identical"));
+    }
 }

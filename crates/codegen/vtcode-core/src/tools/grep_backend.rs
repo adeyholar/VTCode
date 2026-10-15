@@ -184,7 +184,9 @@ pub(crate) async fn search_literal_bounded(
             command.arg("--iglob").arg(glob);
         }
     }
-    command.arg(&pattern_arg).arg(search_path);
+    // Patterns starting with `-` (e.g. markdown `- [link](...)`) would parse
+    // as flags without `-e`; `--` keeps a leading-dash path positional.
+    command.arg("-e").arg(&pattern_arg).arg("--").arg(search_path);
 
     let mut child = command
         .spawn()
@@ -535,8 +537,8 @@ pub(crate) async fn run_ripgrep_backend_async(
     // Use JSON output format for structured results
     cmd.arg("--json");
 
-    cmd.arg(&input.pattern);
-    cmd.arg(&input.path);
+    // `-e` keeps a leading-dash pattern positional; `--` protects the path.
+    cmd.arg("-e").arg(&input.pattern).arg("--").arg(&input.path);
 
     // Own the child so cancelling the search future kills ripgrep rather
     // than orphaning it.

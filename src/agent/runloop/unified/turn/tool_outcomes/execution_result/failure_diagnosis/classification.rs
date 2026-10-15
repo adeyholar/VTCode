@@ -180,6 +180,14 @@ pub(crate) fn deterministic_error_diagnosis(error: &ToolExecutionError, failure_
             correction,
         );
     }
+    if error_message.contains("all requested code_search result categories are unavailable") {
+        return ToolFailureDiagnosis::new(
+            observed,
+            "All requested code_search backends failed for this query/path combination.",
+            "Do not retry the identical query/path. Drop file_types, broaden path, or use exec_command rg for literal text. Revise the hypothesis from the bounded evidence before retrying.",
+        )
+        .with_revision_guidance(mismatch_kind);
+    }
     let likely_cause = match error.category {
         ErrorCategory::Authentication => "The provider rejected the configured credentials or authentication state.",
         ErrorCategory::PermissionDenied | ErrorCategory::PolicyViolation | ErrorCategory::PlanningPolicyViolation => {

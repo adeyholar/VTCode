@@ -204,3 +204,20 @@ fn bounded_evidence_ledger_keeps_unrecorded_rows_productive() {
     assert!(tracker.record_navigation_evidence(&signatures[..4096]));
     assert!(!tracker.record_navigation_evidence(&signatures[4096..]));
 }
+
+#[test]
+fn balancer_recovery_clears_retained_evidence_so_resume_starts_novel() {
+    // Session session-vtcode-20261015T083154Z_961005-54191: early recovery for
+    // `navigation::retained_evidence ×3` never resumed normal operation
+    // because the evidence window survived the reset and the next identical
+    // read was immediately redundant again.
+    let mut tracker = LoopTracker::new();
+    let signatures = vec!["retained line".to_string()];
+    assert!(!tracker.record_navigation_evidence(&signatures));
+    assert!(tracker.record_navigation_evidence(&signatures));
+    tracker.reset_after_balancer_recovery();
+    assert!(
+        !tracker.record_navigation_evidence(&signatures),
+        "post-recovery resume must treat retained rows as fresh evidence"
+    );
+}

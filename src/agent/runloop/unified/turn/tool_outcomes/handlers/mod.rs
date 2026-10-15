@@ -64,6 +64,16 @@ use rate_limit::acquire_adaptive_rate_limit_slot;
 use recovery::try_interactive_circuit_recovery;
 pub(crate) use types::{PreparedToolCall, ToolOutcomeContext, ValidationResult};
 
+/// Whether model-emitted arguments echo the request-only history stub
+/// `{"cleared":"tool_input"}` from `clear_old_tool_results` in vtcode-core.
+/// The stub is valid JSON for the wire but carries no operation; executing it
+/// always fails preflight with `Missing required argument`. Session
+/// `session-vtcode-20261015T083154Z_961005-54191` burned 3 loops echoing it
+/// for `exec_command`/`task_tracker` before the circuit tripped.
+pub(crate) fn is_cleared_tool_input_echo(arguments: Option<&serde_json::Value>) -> bool {
+    arguments.is_some_and(|args| args.get("cleared").and_then(serde_json::Value::as_str) == Some("tool_input"))
+}
+
 /// Whether a preflight reject is a tool-name/identity mistake rather than a
 /// policy block or a repeated argument-schema failure.
 ///
@@ -137,7 +147,8 @@ pub(crate) fn handle_preflight_failure(
             serde_json::json!({"error":"Tool call cancelled before validation", "not_executed":true, "interrupted":true}).to_string());
         return Some(TurnHandlerOutcome::Break(stop));
     }
-    let is_llm_mistake = preflight_failure_is_llm_mistake(error);
+    let is_cleared_echo = is_cleared_tool_input_echo(arguments);
+    let is_llm_mistake = preflight_failure_is_llm_mistake(error) || is_cleared_echo;
     let failure_count = if is_llm_mistake {
         // Report the current streak without advancing it so the model still
         // sees failure_count telemetry, but a prose blob cannot poison the
@@ -165,7 +176,19 @@ pub(crate) fn handle_preflight_failure(
         );
     let exhausted = ctx.session_stats.preflight_recovery.exhausted();
     let circuit_tripped = !is_llm_mistake && (failure_count >= max_failures || exhausted);
-    let schema_correction = preflight_schema_correction(tool_name, error);
+    let schema_correction = if is_cleared_echo {
+        if matches!(tool_name, tool_names::EXEC_COMMAND | tool_names::UNIFIED_EXEC | "command_session") {
+            format!(
+                "Do not echo the history stub '{{\"cleared\":\"tool_input\"}}'. Provide real arguments matching the declared schema for '{tool_name}' (exec_command requires \"cmd\")."
+            )
+        } else {
+            format!(
+                "Do not echo the history stub '{{\"cleared\":\"tool_input\"}}'. Provide real arguments matching the declared schema for '{tool_name}'."
+            )
+        }
+    } else {
+        preflight_schema_correction(tool_name, error)
+    };
     let next_action = if exhausted {
         "Automatic validation recovery stopped. Resume with corrected arguments on fresh user input."
     } else if circuit_tripped && ctx.is_planning_active() {
@@ -251,6 +274,11 @@ fn preflight_schema_correction(tool_name: &str, error: &str) -> String {
         && error.contains("dynamic shell expansion in find commands")
     {
         return "Do not retry the rejected dynamic find command. Use a literal path and quoted pattern, for example `find src -name '*.rs'`, or use `rg --files src | rg '\\.rs$'`. Do not use `$()`, backticks, variable/brace expansion, or dynamically spliced find options.".to_string();
+    }
+    if matches!(tool_name, tool_names::EXEC_COMMAND | tool_names::UNIFIED_EXEC | "command_session")
+        && error.contains("Missing required argument: command")
+    {
+        return "Provide `{\"cmd\": \"<shell command>\"}` for exec_command (`command` is accepted as an alias). Parse the arguments as JSON before retrying.".to_string();
     }
 
     format!(

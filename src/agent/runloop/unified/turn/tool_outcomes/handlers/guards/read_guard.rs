@@ -598,7 +598,7 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
         let path_count = ctx.harness_state.record_file_read_path_call(path.clone());
         if path_count > path_cap && !recovery_allowed {
             let block_reason = format!(
-                "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}), so further reads of this path are blocked for the rest of this turn. Reads of other paths, edits, and other useful actions remain available; continue from the evidence already gathered."
+                "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}), so further reads of this path are blocked for the rest of this turn. Prefer wider windows (e.g. sed -n '1,200p' or read_file) over overlapping slices and reuse spooled evidence; reads of other paths, edits, and other useful actions remain available."
             );
             let error_content = super::super::super::execution_result::build_error_content(
                 block_reason.clone(),

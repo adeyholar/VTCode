@@ -29,6 +29,7 @@ pub mod agent_execution {
              - Run recognized commands: cargo check, cargo nextest run, git status, command -v, ls, grep, find, diff\n\
              - Search code: exec_command with rg or other readonly search commands\n\
              - Use task_tracker\n\n\
+             Planning shell shapes: use `&&` chains or separate calls; `;`, `||`, redirections (`>`, `2>`), and `*` globs are not recognized. Prefer `rg --files src | rg '\\.md$'` over `ls */*.md`.\n\n\
              To start implementation:\n\
              1. Wait for the user to review and approve the plan in the UI\n\
              2. After approval, use apply_patch for file edits\n\n\
@@ -125,6 +126,8 @@ mod tests {
         assert!(planning_msg.contains("cargo check"));
         assert!(planning_msg.contains("exec_command"));
         assert!(planning_msg.contains("apply_patch"));
+        assert!(planning_msg.contains("Planning shell shapes"));
+        assert!(planning_msg.contains("rg --files"));
         assert!(!planning_msg.contains(&internal_unified_tool_name("file")));
         assert!(!planning_msg.contains(&internal_unified_tool_name("exec")));
         assert!(!planning_msg.contains(&internal_unified_tool_name("search")));

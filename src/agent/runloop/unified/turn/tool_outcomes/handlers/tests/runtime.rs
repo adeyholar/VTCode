@@ -822,6 +822,127 @@ async fn prose_blob_tool_names_do_not_trip_circuit_or_skip_valid_siblings() {
 }
 
 #[tokio::test]
+async fn cleared_history_stub_echo_does_not_trip_preflight_circuit() {
+    // Session session-vtcode-20261015T083154Z_961005-54191: the model echoed
+    // the request-only history stub `{"cleared":"tool_input"}` as fresh
+    // `exec_command`/`task_tracker` arguments. Three such echoes tripped the
+    // preflight circuit and disabled tools. Cleared echoes carry no operation
+    // and must not advance the failure streak.
+    assert!(super::super::is_cleared_tool_input_echo(Some(&json!({"cleared": "tool_input"}))));
+    assert!(!super::super::is_cleared_tool_input_echo(Some(&json!({"command": "ls"}))));
+    assert!(!super::super::is_cleared_tool_input_echo(None));
+    assert!(!super::super::is_cleared_tool_input_echo(Some(&json!({"cleared": "other"}))));
+
+    let mut backing = TestContextBacking::new(4).await;
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let cleared_call = |id: &str| {
+        PreparedAssistantToolCall::new(uni::ToolCall::function(
+            id.to_string(),
+            tool_names::EXEC_COMMAND.to_string(),
+            r#"{"cleared":"tool_input"}"#.to_string(),
+        ))
+    };
+
+    for index in 0..3 {
+        let mut ctx = backing.turn_processing_context();
+        let mut outcome_ctx = ToolOutcomeContext {
+            ctx: &mut ctx,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+        };
+        let outcome = handle_tool_calls(&mut outcome_ctx, &[cleared_call(&format!("cleared_{index}"))])
+            .await
+            .expect("cleared echo should be recoverable");
+        assert!(outcome.is_none(), "cleared echo must not trip the circuit");
+    }
+    let ctx = backing.turn_processing_context();
+    assert_eq!(
+        ctx.harness_state.consecutive_preflight_failures, 0,
+        "cleared echoes must not advance the preflight streak"
+    );
+    assert!(!ctx.harness_state.recovery_is_tool_free(), "cleared echoes must not arm tool-free recovery");
+    assert!(
+        ctx.working_history.iter().any(|message| {
+            message.tool_call_id.as_deref() == Some("cleared_0")
+                && message.content.as_text().contains("Do not echo the history stub")
+                && message.content.as_text().contains("requires")
+                && message.content.as_text().contains("cmd")
+        }),
+        "exec_command cleared echo must name the public `cmd` contract"
+    );
+
+    let mut tracker_backing = TestContextBacking::new(4).await;
+    let mut tracker_attempts = LoopTracker::new();
+    let mut tracker_files = BTreeSet::new();
+    let mut tracker_ctx = tracker_backing.turn_processing_context();
+    let mut tracker_outcome_ctx = ToolOutcomeContext {
+        ctx: &mut tracker_ctx,
+        repeated_tool_attempts: &mut tracker_attempts,
+        turn_modified_files: &mut tracker_files,
+    };
+    assert!(
+        handle_tool_calls(
+            &mut tracker_outcome_ctx,
+            &[PreparedAssistantToolCall::new(uni::ToolCall::function(
+                "cleared_tracker".to_string(),
+                tool_names::TASK_TRACKER.to_string(),
+                r#"{"cleared":"tool_input"}"#.to_string(),
+            ))]
+        )
+        .await
+        .expect("task_tracker cleared echo should be recoverable")
+        .is_none()
+    );
+    assert!(
+        tracker_ctx.working_history.iter().any(|message| {
+            message.tool_call_id.as_deref() == Some("cleared_tracker")
+                && message.content.as_text().contains("Do not echo the history stub")
+                && !message.content.as_text().contains("exec_command requires")
+        }),
+        "task_tracker cleared echo must not mention exec_command"
+    );
+}
+
+#[tokio::test]
+async fn exec_command_missing_command_correction_names_cmd_contract() {
+    // Public schema requires `cmd` (vtcode-utility-tool-specs), internal
+    // UNIFIED_EXEC validation reports `command`. The correction must name the
+    // public `cmd` contract with `command` as alias, not just repeat the
+    // internal name.
+    let mut backing = TestContextBacking::new(4).await;
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut ctx = backing.turn_processing_context();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+    assert!(
+        handle_tool_calls(
+            &mut outcome_ctx,
+            &[PreparedAssistantToolCall::new(uni::ToolCall::function(
+                "missing_cmd".to_string(),
+                tool_names::EXEC_COMMAND.to_string(),
+                r#"{"yield_time_ms":10000}"#.to_string(),
+            ))]
+        )
+        .await
+        .expect("missing cmd should be recoverable")
+        .is_none()
+    );
+    assert!(
+        ctx.working_history.iter().any(|message| {
+            message.tool_call_id.as_deref() == Some("missing_cmd")
+                && message.content.as_text().contains("cmd")
+                && message.content.as_text().contains("alias")
+        }),
+        "exec_command missing-arg correction must name `cmd` with `command` alias"
+    );
+}
+
+#[tokio::test]
 async fn preflight_circuit_does_not_block_approved_plan_execution() {
     // Regression for checkpoint turn_874: when the preflight circuit breaker
     // tripped during an approved-plan build turn, the old code returned

@@ -397,13 +397,14 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
                 );
             }
         }
-        Err(_) => {
+        Err(err) => {
             if definition_enabled {
                 unavailable.push(CodeSearchResultType::Definition);
             }
             if usage_backend_needed {
                 unavailable.push(CodeSearchResultType::Usage);
             }
+            tracing::debug!(target: "vtcode.code_search", error = format!("{err:#}"), "declaration backend failed");
         }
         Ok(None) => {}
     }
@@ -430,13 +431,14 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
                 &mut candidates,
             );
         }
-        Err(_) => {
+        Err(err) => {
             if text_enabled {
                 unavailable.push(CodeSearchResultType::Text);
             }
             if usage_backend_needed && !unavailable.contains(&CodeSearchResultType::Usage) {
                 unavailable.push(CodeSearchResultType::Usage);
             }
+            tracing::debug!(target: "vtcode.code_search", error = format!("{err:#}"), "literal backend failed");
         }
         Ok(None) => {}
     }
@@ -451,7 +453,10 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
             };
             ranking::append_path_candidates(&scope, base, outcome.paths, &languages, &mut candidates);
         }
-        Err(_) => unavailable.push(CodeSearchResultType::Path),
+        Err(err) => {
+            unavailable.push(CodeSearchResultType::Path);
+            tracing::debug!(target: "vtcode.code_search", error = format!("{err:#}"), "path backend failed");
+        }
         Ok(None) => {}
     }
 
@@ -459,7 +464,19 @@ fn aggregate_search_results(inputs: SearchAggregationInputs) -> Result<Aggregate
     unavailable.dedup();
     let successful_count = result_types.len().saturating_sub(unavailable.len());
     if successful_count == 0 {
-        bail!("all requested code_search result categories are unavailable");
+        let requested = result_types
+            .iter()
+            .map(|kind| match kind {
+                CodeSearchResultType::Definition => "definition",
+                CodeSearchResultType::Usage => "usage",
+                CodeSearchResultType::Text => "text",
+                CodeSearchResultType::Path => "path",
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!(
+            "all requested code_search result categories are unavailable (requested: {requested}). Do not retry the identical query/path; drop file_types, broaden path, or use exec_command rg for literal text"
+        );
     }
 
     let mut results = ranking::deduplicate_and_order(candidates);
@@ -1094,6 +1111,44 @@ mod tests {
         assert_eq!(response.returned, 1);
         assert_eq!(response.results[0].path, "src/widget.rs");
         assert!(response.results.iter().all(|result| result.path == "src/widget.rs"));
+    }
+
+    #[tokio::test]
+    async fn code_search_leading_dash_text_query_succeeds_on_single_file() {
+        // Session session-vtcode-20261015T083154Z_961005-54191: text-only
+        // `path=README.md` queries starting with `- ` failed with "all
+        // requested categories unavailable" because ripgrep parsed the leading
+        // dash as flags. Asymmetric pair: dash-prefixed vs plain query must
+        // both succeed on the same single file.
+        let workspace = TempDir::new().expect("workspace");
+        fs::create_dir_all(workspace.path().join(".git")).expect("git marker");
+        fs::write(workspace.path().join("README.md"), "# Title\n\n- [Sessions](#sessions)\n\n## Sessions\n")
+            .expect("readme fixture");
+
+        let dashed = execute(
+            workspace.path(),
+            request(json!({
+                "query": "- [Sessions](#sessions)",
+                "path": "README.md",
+                "result_types": ["text"]
+            })),
+        )
+        .await
+        .expect("leading-dash text search must succeed");
+        assert_eq!(dashed.returned, 1);
+        assert_eq!(dashed.results[0].result_type, CodeSearchResultType::Text);
+
+        let plain = execute(
+            workspace.path(),
+            request(json!({
+                "query": "Sessions",
+                "path": "README.md",
+                "result_types": ["text"]
+            })),
+        )
+        .await
+        .expect("plain text search must succeed");
+        assert!(plain.returned >= 1);
     }
 
     #[tokio::test]
