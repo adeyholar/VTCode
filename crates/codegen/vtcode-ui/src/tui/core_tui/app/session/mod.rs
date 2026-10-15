@@ -1455,7 +1455,7 @@ impl TuiSessionDriver for AppSession {
     fn is_running_activity(&self) -> bool {
         // Turn-scoped only. Background tasks and drawer previews are
         // asynchronous, so they must not lock mode switches, block slash
-        // commands, or convert plain submissions into queued/steered input.
+        // commands, or convert plain submissions into queued input.
         self.core.is_running_activity()
     }
 

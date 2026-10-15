@@ -363,7 +363,7 @@ pub(super) fn try_handle_slash_navigation(
         KeyCode::Enter => {
             // Only plain Enter accepts the highlighted suggestion. Modified
             // Enter (Shift/Ctrl/Alt/Cmd) falls through to the normal handler
-            // for newline, steering, or queue behavior.
+            // for newline or queue behavior.
             if has_control || has_alt || has_command || key.modifiers.contains(KeyModifiers::SHIFT) {
                 return false;
             }
@@ -372,7 +372,7 @@ pub(super) fn try_handle_slash_navigation(
             // into the composer, then fall through to the normal Enter
             // submit path in the same keypress so the command runs
             // immediately. Returning false lets `process_key` continue to
-            // the generic Enter arm (busy-steer/queue/block/help-modal
+            // the generic Enter arm (busy-queue/block/help-modal
             // checks + Submit). Tab remains the complete-without-run
             // path for editing args before submitting.
             let _ = apply_selected_slash_suggestion(session);

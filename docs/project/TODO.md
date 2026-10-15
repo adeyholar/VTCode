@@ -15,7 +15,3 @@ gui
 --
 
 computer use
-
----
-
-when the agent is processing and returning results, and user press enter, it should enqueue the input and process it after the current task is completed. check current queue prompts handling and ensure proper synchronization to avoid race conditions. also reflect in the user interface to provide feedback that the input has been queued.

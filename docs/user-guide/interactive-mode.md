@@ -305,16 +305,17 @@ VT Code supports an optional Vim-style prompt editor.
 - Pressing `Enter` on an empty draft opens `/config jobs` when active jobs exist; otherwise VT Code keeps the normal
   empty-enter behavior.
 
-## Active Run Steering
+## Active Run Queueing
 
-When a task is already running, VT Code keeps the active turn alive and lets you queue or steer input:
+When a task is already running, VT Code keeps the active turn alive and queues follow-up input to run after it:
 
-- `Enter` steers the active turn: the message is injected into the conversation right after the current tool-call batch,
-  so the model sees it on its next request within the same turn. If the turn ends before another tool call runs, the
-  steered message is delivered at the next turn boundary instead — nothing is lost. When live steering is unavailable
-  (for example before the steering channel is wired, or after it closes), the message is queued and processed once the
-  agent is ready rather than dropped. The transcript confirms genuine user steering with a `Steered into active turn: …`
-  status line. Harness-generated continuations (tracker/plan auto-continue, recoverable blocked-end resume, background
+- `Enter` queues the draft for the next turn as its own non-batchable turn: the composer clears immediately and the
+  message appears in the queue overlay above the input (`↳ [i/n] …`) until it dispatches after the current task
+  completes. Queued attachments stay with their message and dispatch alone. If the turn ends before the queue drains,
+  the message simply runs at the next turn boundary — nothing is lost. Because queueing goes through the MPSC FIFO plus
+  the runloop's drain-then-`flush_sync`, rapid Enters keep FIFO order with one consistent overlay snapshot and avoids racing
+  a mid-turn injection.
+  Harness-generated continuations (tracker/plan auto-continue, recoverable blocked-end resume, background
   completion, verification recovery) stay quiet and never echo their full internal prompt.
 - `Ctrl+Enter` queues the current draft as a _batchable_ message. Consecutive text-only Ctrl+Enter messages queued while
   a turn runs are joined into a single combined prompt for the next turn. Slash commands other than `/stop`, `/pause`,

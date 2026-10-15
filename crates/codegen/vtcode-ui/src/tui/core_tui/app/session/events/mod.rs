@@ -816,8 +816,8 @@ fn process_key_with_clipboard_readers(
                             // it sends. Plain messages are marked batchable so
                             // several queued messages coalesce into ONE turn;
                             // slash commands stay one per turn so command
-                            // intent is preserved. Plain Enter steers the
-                            // active run instead of queueing.
+                            // intent is preserved. Busy plain Enter queues as
+                            // its own non-batchable turn instead of steering.
                             if let Some(command_name) = other {
                                 tracing::debug!(target: "vtcode_ui::keys", %command_name, "ctrl+enter queued slash command");
                                 session.push_queued_input(submitted.text.clone());
@@ -846,18 +846,18 @@ fn process_key_with_clipboard_readers(
                 return Some(InlineEvent::Submit(submitted));
             }
 
-            // While a turn is actively running, steer plain text: the message
-            // is injected into the conversation right after the current
-            // tool-call batch, so the model sees it on its next request within
-            // this turn. Slash commands keep the queue path, and Ctrl+Enter
-            // keeps the queue role. Otherwise submit directly so the turn
-            // starts now.
+            // While a turn is actively running, enqueue plain text so it runs
+            // after the current turn completes. Queueing avoids racing a
+            // mid-turn steer against the tool-batch boundary and the
+            // steering-channel latch: the MPSC FIFO plus the runloop's
+            // drain-then-flush_sync keeps UI-optimistic and authoritative
+            // queue snapshots in order. Each plain-Enter stays its own
+            // non-batchable turn (only Ctrl+Enter merges). Unblocked slash
+            // keeps the existing queue path (blockable slash is rejected
+            // earlier); Ctrl+Enter keeps the queue role.
             if session.is_running_activity() {
-                if submitted.text.trim_start().starts_with('/') {
-                    session.push_queued_input(submitted.text.clone());
-                    return Some(InlineEvent::QueueSubmit(submitted));
-                }
-                return Some(InlineEvent::Steer(submitted));
+                session.push_queued_input(submitted.text.clone());
+                return Some(InlineEvent::QueueSubmit(submitted));
             }
             Some(InlineEvent::Submit(submitted))
         }
