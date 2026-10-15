@@ -17,6 +17,23 @@ use super::terminal_capabilities;
 use super::utils::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::{Session, ratatui_color_from_ansi, ratatui_style_from_inline};
 
+fn ultrafast_badge_style(colors_enabled: bool, safe_colors_only: bool, bold_is_bright: bool) -> Style {
+    let mut style = Style::default().remove_modifier(Modifier::DIM | Modifier::REVERSED);
+    style = if !colors_enabled {
+        style.fg(Color::Reset).bg(Color::Reset).add_modifier(Modifier::REVERSED)
+    } else if safe_colors_only {
+        style.fg(Color::Black).bg(Color::Yellow)
+    } else {
+        // Black text on the premium #D99A4E fill exceeds WCAG AAA (7:1).
+        style.fg(Color::Rgb(0, 0, 0)).bg(Color::Rgb(0xD9, 0x9A, 0x4E))
+    };
+    if bold_is_bright {
+        style.remove_modifier(Modifier::BOLD)
+    } else {
+        style.add_modifier(Modifier::BOLD)
+    }
+}
+
 fn clean_reasoning_text(text: &str) -> String {
     vtcode_commons::formatting::clean_reasoning_text(text)
 }
@@ -239,10 +256,7 @@ impl Session {
             if !spans.is_empty() {
                 spans.push(Span::styled(" · ".to_owned(), self.header_secondary_style()));
             }
-            spans.push(Span::styled(
-                capitalize_first_letter(&tier),
-                self.header_secondary_style().add_modifier(Modifier::DIM),
-            ));
+            spans.push(self.header_service_tier_span(&tier));
         }
 
         spans
@@ -293,7 +307,7 @@ impl Session {
             if !spans.is_empty() {
                 spans.push(Span::raw(" "));
             }
-            spans.push(Span::styled(capitalize_first_letter(&tier), self.header_secondary_style()));
+            spans.push(self.header_service_tier_span(&tier));
         }
 
         if spans.is_empty() {
@@ -405,6 +419,21 @@ impl Session {
         let raw = self.header_context.service_tier.as_deref()?;
         let tier = Self::strip_prefix(raw, ui::HEADER_SERVICE_TIER_PREFIX).trim();
         (!tier.is_empty() && !tier.eq_ignore_ascii_case(ui::HEADER_UNKNOWN_PLACEHOLDER)).then(|| tier.to_owned())
+    }
+
+    fn header_service_tier_span(&self, tier: &str) -> Span<'static> {
+        if tier.eq_ignore_ascii_case("ultrafast") {
+            Span::styled(
+                " ULTRAFAST ",
+                ultrafast_badge_style(
+                    vtcode_commons::color_policy::current_color_output_policy().enabled,
+                    crate::theme::is_safe_colors_only(),
+                    crate::theme::is_bold_bright_mode(),
+                ),
+            )
+        } else {
+            Span::styled(capitalize_first_letter(tier), self.header_secondary_style())
+        }
     }
 
     pub fn header_chain_values(&self) -> Vec<String> {
@@ -726,5 +755,32 @@ impl Session {
 
     fn strip_prefix<'a>(value: &'a str, prefix: &str) -> &'a str {
         value.strip_prefix(prefix).unwrap_or(value)
+    }
+}
+
+#[cfg(test)]
+mod badge_tests {
+    use super::*;
+
+    #[test]
+    fn ultrafast_badge_color_policy_and_bold_is_bright() {
+        for bold_is_bright in [false, true] {
+            for (colors_enabled, safe_colors_only, foreground, background, reversed) in [
+                (true, false, Color::Rgb(0, 0, 0), Color::Rgb(0xD9, 0x9A, 0x4E), false),
+                (true, true, Color::Black, Color::Yellow, false),
+                (false, false, Color::Reset, Color::Reset, true),
+                (false, true, Color::Reset, Color::Reset, true),
+            ] {
+                let style = ultrafast_badge_style(colors_enabled, safe_colors_only, bold_is_bright);
+                let inherited = Style::default()
+                    .add_modifier(Modifier::DIM | Modifier::BOLD | Modifier::REVERSED)
+                    .patch(style);
+                assert_eq!(inherited.fg, Some(foreground));
+                assert_eq!(inherited.bg, Some(background));
+                assert_eq!(inherited.add_modifier.contains(Modifier::REVERSED), reversed);
+                assert_eq!(inherited.add_modifier.contains(Modifier::BOLD), !bold_is_bright);
+                assert!(!inherited.add_modifier.contains(Modifier::DIM));
+            }
+        }
     }
 }

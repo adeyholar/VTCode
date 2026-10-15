@@ -309,3 +309,59 @@ fn test_all_themes_sticky_prompt_meets_contrast() {
         assert!(ratio >= accessibility.minimum_contrast, "theme={} sticky prompt contrast {ratio:.2}", definition.id);
     }
 }
+
+#[test]
+fn test_all_themes_ultrafast_header_badge_meets_contrast() {
+    use crate::tui::core_tui::{
+        session::Session,
+        types::{InlineCommand, InlineHeaderContext},
+    };
+    use ratatui::style::{Color as TerminalColor, Modifier};
+    use vtcode_commons::ui_protocol::theme_from_color_fields;
+    use vtcode_config::constants::ui;
+
+    for definition in all_theme_definitions().values() {
+        let styles = definition
+            .palette
+            .build_styles_with_accessibility(&ColorAccessibilityConfig::default());
+        let theme = theme_from_color_fields(
+            styles.foreground,
+            styles.background,
+            styles.primary,
+            styles.secondary,
+            styles.tool,
+            styles.tool_detail,
+            styles.pty_output,
+            styles.error,
+            styles.warning,
+        );
+        let mut session = Session::new(theme, None, 24);
+        session.handle_command(InlineCommand::SetHeaderContext {
+            context: Box::new(InlineHeaderContext {
+                service_tier: Some(format!("{}ultrafast", ui::HEADER_SERVICE_TIER_PREFIX)),
+                ..Default::default()
+            }),
+        });
+        let line = session.header_title_line();
+        let badge = line
+            .spans
+            .iter()
+            .find(|span| span.content == " ULTRAFAST ")
+            .expect("premium badge");
+        if vtcode_commons::color_policy::color_output_enabled() {
+            let rgb = |color| match color {
+                Some(TerminalColor::Rgb(r, g, b)) => RgbColor(r, g, b),
+                other => panic!("expected badge RGB colors, got {other:?}"),
+            };
+            let ratio = contrast_ratio(rgb(badge.style.bg), rgb(badge.style.fg));
+            assert!(ratio >= 7.0, "{} badge contrast {ratio:.2} is below WCAG AAA", definition.id);
+            assert_eq!(badge.style.bg, Some(TerminalColor::Rgb(0xD9, 0x9A, 0x4E)));
+            assert!(!badge.style.add_modifier.contains(Modifier::REVERSED));
+        } else {
+            assert_eq!(badge.style.fg, Some(TerminalColor::Reset));
+            assert_eq!(badge.style.bg, Some(TerminalColor::Reset));
+            assert!(badge.style.add_modifier.contains(Modifier::REVERSED));
+        }
+        assert!(badge.style.sub_modifier.contains(Modifier::DIM));
+    }
+}

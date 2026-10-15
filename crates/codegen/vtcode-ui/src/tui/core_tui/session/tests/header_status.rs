@@ -474,7 +474,7 @@ fn header_title_line_shows_service_tier_when_configured() {
     session.header_context.service_tier = Some(format!("{}ultrafast", ui::HEADER_SERVICE_TIER_PREFIX));
 
     let summary = line_text(&session.header_title_line());
-    assert!(summary.contains("Ultrafast"), "tier should appear in title line, got: {summary}");
+    assert!(summary.contains("ULTRAFAST"), "tier should appear in title line, got: {summary}");
 
     session.header_context.service_tier = Some(format!("{}priority", ui::HEADER_SERVICE_TIER_PREFIX));
     let summary = line_text(&session.header_title_line());
@@ -490,7 +490,7 @@ fn header_title_line_omits_service_tier_when_unset() {
 
     let summary = line_text(&session.header_title_line());
     assert!(
-        !summary.contains("Ultrafast") && !summary.contains("Priority") && !summary.contains("Tier:"),
+        !summary.contains("ULTRAFAST") && !summary.contains("Priority") && !summary.contains("Tier:"),
         "unset tier must stay hidden, got: {summary}"
     );
 }
@@ -509,7 +509,7 @@ fn hidden_header_summary_shows_service_tier_on_top_right() {
     assert_eq!(lines.len(), 1);
 
     let summary = line_text(&lines[0]);
-    assert!(summary.contains("Ultrafast"), "tier should appear in top-right summary, got: {summary}");
+    assert!(summary.contains("ULTRAFAST"), "tier should appear in top-right summary, got: {summary}");
 }
 
 #[test]
@@ -522,14 +522,14 @@ fn hidden_header_summary_live_reloads_service_tier_changes() {
     session.header_context.reasoning = format!("{}medium", ui::HEADER_REASONING_PREFIX);
 
     let initial = header_line_text(&mut session);
-    assert!(!initial.contains("Ultrafast"));
+    assert!(!initial.contains("ULTRAFAST"));
 
     let mut next_context = session.header_context.clone();
     next_context.service_tier = Some(format!("{}ultrafast", ui::HEADER_SERVICE_TIER_PREFIX));
     session.handle_command(InlineCommand::SetHeaderContext { context: Box::new(next_context) });
 
     let updated = header_line_text(&mut session);
-    assert!(updated.contains("Ultrafast"), "tier should appear after context update, got: {updated}");
+    assert!(updated.contains("ULTRAFAST"), "tier should appear after context update, got: {updated}");
 }
 
 #[test]
@@ -1012,4 +1012,91 @@ fn hidden_header_preserves_agent_when_context_refreshes_after_agent() {
     assert!(line.contains("Duck"), "agent must survive context refresh, got: {line}");
     assert!(line.contains("Mimo Mimo-V2.6-Pro"), "missing provider/model, got: {line}");
     assert!(line.contains("low"), "missing reasoning effort, got: {line}");
+}
+
+#[test]
+fn ultrafast_header_badge_is_padded_premium_gold_in_both_layouts() {
+    use anstyle::{Color as AnsiColor, RgbColor};
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        style::Style,
+        widgets::{Paragraph, Widget},
+    };
+
+    for hidden in [false, true] {
+        let amber = RgbColor(224, 176, 72);
+        let background = RgbColor(18, 20, 28);
+        let theme = InlineTheme {
+            warning: Some(AnsiColor::Rgb(amber)),
+            background: Some(AnsiColor::Rgb(background)),
+            ..Default::default()
+        };
+        let mut session = Session::new(theme, None, VIEW_ROWS);
+        session.appearance.hide_header = hidden;
+        session.apply_transcript_width(VIEW_WIDTH);
+        session.header_context.provider = format!("{}openai", ui::HEADER_PROVIDER_PREFIX);
+        session.header_context.model = format!("{}gpt-6.1-sol", ui::HEADER_MODEL_PREFIX);
+        session.header_context.service_tier = Some(format!("{}UlTrAfAsT", ui::HEADER_SERVICE_TIER_PREFIX));
+        let lines = session.header_lines();
+        let badge = lines[0]
+            .spans
+            .iter()
+            .find(|span| span.content == " ULTRAFAST ")
+            .expect("premium badge");
+
+        let colors_enabled = vtcode_commons::color_policy::color_output_enabled();
+        let (foreground, background) = if colors_enabled {
+            (Color::Rgb(0, 0, 0), Color::Rgb(0xD9, 0x9A, 0x4E))
+        } else {
+            (Color::Reset, Color::Reset)
+        };
+        assert_eq!(badge.style.fg, Some(foreground));
+        assert_eq!(badge.style.bg, Some(background));
+        assert_eq!(badge.style.add_modifier.contains(Modifier::REVERSED), !colors_enabled);
+        assert!(badge.style.sub_modifier.contains(Modifier::DIM));
+        assert_eq!(badge.style.add_modifier.contains(Modifier::BOLD), !crate::theme::is_bold_bright_mode());
+
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buffer = Buffer::empty(area);
+        Paragraph::new(Line::from(vec![Span::raw("tier "), badge.clone()]))
+            .style(Style::default().add_modifier(Modifier::DIM))
+            .render(area, &mut buffer);
+        assert!(buffer[(0, 0)].modifier.contains(Modifier::DIM));
+        assert!(!buffer[(6, 0)].modifier.contains(Modifier::DIM));
+        assert_eq!(buffer[(6, 0)].fg, foreground);
+        assert_eq!(buffer[(6, 0)].bg, background);
+    }
+}
+
+#[test]
+fn ordinary_service_tiers_keep_their_existing_header_treatment() {
+    let mut session = fresh_session();
+    for (tier, label) in [("priority", "Priority"), ("flex", "Flex")] {
+        session.header_context.service_tier = Some(format!("{}{tier}", ui::HEADER_SERVICE_TIER_PREFIX));
+        let line = session.header_title_line();
+        let span = line.spans.iter().find(|span| span.content == label).expect("ordinary tier");
+        assert!(!span.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(span.style.add_modifier.contains(Modifier::DIM));
+        assert!(!line_text(&line).contains("ULTRAFAST"));
+    }
+}
+
+#[test]
+fn ultrafast_header_badge_respects_narrow_terminal_widths_and_can_be_disabled() {
+    for width in [1, 8, 16, 32, 64, 100] {
+        let mut session = fresh_session();
+        session.appearance.hide_header = true;
+        session.apply_transcript_width(width);
+        session.header_context.service_tier = Some(format!("{}ultrafast", ui::HEADER_SERVICE_TIER_PREFIX));
+        let lines = session.header_lines();
+        assert!(lines[0].width() <= usize::from(width), "width={width}");
+    }
+    let mut session = fresh_session();
+    session.header_context.service_tier = Some(format!("{}ultrafast", ui::HEADER_SERVICE_TIER_PREFIX));
+    assert!(header_line_text(&mut session).contains(" ULTRAFAST "));
+    let mut context = session.header_context.clone();
+    context.service_tier = None;
+    session.handle_command(InlineCommand::SetHeaderContext { context: Box::new(context) });
+    assert!(!header_line_text(&mut session).contains("ULTRAFAST"));
 }

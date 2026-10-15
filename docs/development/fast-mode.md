@@ -25,8 +25,12 @@ that client and runtime configuration only after saving succeeds.
 Initialization or save failures leave active settings and the client untouched. Only the tier field changes; model,
 reasoning effort, authentication, conversation history, and WebSocket configuration are preserved.
 
-The header reflects the configured tier immediately. Rebuilding the provider permits its WebSocket connection to
-reconnect normally. Both HTTP request builders and the shared WebSocket payload path apply model compatibility to
+The header reflects the configured tier immediately. When enabled, ultrafast appears as a padded `ULTRAFAST` badge
+with a premium `#D99A4E` gold fill and black text in both header layouts, exceeding WCAG AAA text contrast (7:1).
+The badge stays undimmed, respects bold-is-bright, uses ANSI black/yellow in safe-color mode, and falls back to a
+monochrome inverse label when colors are disabled. Other tiers retain their normal labels.
+Rebuilding the provider permits its WebSocket connection to reconnect normally. Both HTTP request builders and
+the shared WebSocket payload path apply model compatibility to
 explicit tiers and provider defaults. The existing server-rejection fallback remains: configuration success confirms
 the requested tier, while server-reported telemetry identifies the tier actually served.
 
@@ -42,11 +46,13 @@ copied. VT Code additionally prepares the client before saving and installs it a
 Focused coverage includes command discovery and parsing, compatibility and picker availability, tier transitions,
 idempotence, runtime/disk drift, clearing a stale client after reload, subscription-route rejection, clearing after a
 model switch, preservation of unrelated configuration, initialization/save failure
-atomicity, and HTTP/WebSocket payloads with explicit and inherited tiers. Run:
+atomicity, and HTTP/WebSocket payloads with explicit and inherited tiers. Header tests cover both layouts, narrow
+terminals, theme contrast, and color/bold accessibility policies. Run:
 
 ```sh
 cargo nextest run --locked -p vtcode -p vtcode-config -p vtcode-skills -p vtcode-llm --no-tests=fail \
   -E 'test(fast) | test(service_tier) | test(available_service_tiers)'
+cargo nextest run --locked -p vtcode-ui --no-tests=fail -E 'test(header) | test(theme) | test(ultrafast_badge)'
 ./scripts/check-dev.sh
 ```
 
