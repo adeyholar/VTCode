@@ -783,11 +783,18 @@ main() {
 			git push origin --tags --no-verify 2>/dev/null || true
 
 			# Trigger the build-linux-windows workflow
-			# Timestamp the dispatch: run selection below only accepts runs
-			# created after this point, so a delayed new run is never
-			# confused with the previous release's run.
-			local trigger_time
-			trigger_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+			# Timestamp the dispatch (minus a 5-minute skew margin for local
+			# clock vs GitHub server drift): run selection below only accepts
+			# runs created after this point, so a delayed new run is never
+			# confused with the previous release's run. The margin keeps a
+			# fast local clock from excluding the real run.
+			local trigger_epoch trigger_time
+			trigger_epoch=$(($(date +%s) - 300))
+			if [[ "$(uname -s)" == "Darwin" ]]; then
+				trigger_time=$(date -u -r "$trigger_epoch" +%Y-%m-%dT%H:%M:%SZ)
+			else
+				trigger_time=$(date -u -d "@$trigger_epoch" +%Y-%m-%dT%H:%M:%SZ)
+			fi
 			if gh workflow run build-linux-windows.yml --field tag="$released_version"; then
 				print_success "CI workflow triggered for $released_version"
 
@@ -795,11 +802,13 @@ main() {
 				print_info "Waiting for CI builds to complete..."
 				local run_id=""
 
-				# Get the workflow run ID - wait for it to appear
+				# Get the workflow run ID - wait for it to appear. GitHub can
+				# take several minutes to register a dispatched run, so poll
+				# for up to ~6 minutes before giving up.
 				local find_run_attempts=0
-				local max_find_attempts=24 # Wait up to 2 minutes for run to appear
+				local max_find_attempts=36 # 36 x 10s ~= 6 minutes
 				while [[ -z "$run_id" && $find_run_attempts -lt $max_find_attempts ]]; do
-					sleep 5
+					sleep 10
 					# Newest run of this workflow created after the dispatch
 					# above (ISO-8601 Zulu timestamps sort lexicographically).
 					run_id=$(gh run list --workflow build-linux-windows.yml --limit 5 --json databaseId,createdAt --jq --arg since "$trigger_time" '[.[] | select(.createdAt > $since)] | .[0].databaseId // empty' 2>/dev/null || true)
