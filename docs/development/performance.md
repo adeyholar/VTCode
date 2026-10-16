@@ -306,6 +306,39 @@ feature — switch to the branch/worktree that has `profiling` in `crates/codege
 This prints a timing + alloc report on exit (reflow, wrap, render, input). Root `--features profiling` also forwards
 `vtcode-ui/profiling` so the full binary runloop and TUI can be profiled together.
 
+The `tui_hotpath` workload also runs a `channel_demo` (`tui-hotpath-demo` label) through
+`hotpath::channel!`: 100 `u64` messages burst then drained locally, so its `Max queue` reads 100
+by construction. The prod signal from the
+[profiling guide](https://hotpath.rs/blog/profiling-rust-guide) is Max queue *growth* between runs
+under steady load — a Max queue that keeps climbing is the early warning for the unbounded-queue OOM
+shape (producer consistently faster than consumer). The demo is intentionally self-contained:
+`AppSession::handle_event` takes a concrete tokio `UnboundedSender`, so wrapping the production TUI
+channels would change their types under `profiling` only. Production channel instrumentation stays out
+until those boundaries are generic-ified.
+
+Layer status vs the profiling guide (what is wired, what is deferred and why):
+
+- Wall-clock (`measure`, `main`, `tokio_runtime!`): wired — binary runloop, prompt assembly, compaction,
+  TUI reflow/render/input. Keep expanding `measure` coverage before adding new layers.
+- Allocations (`hotpath-alloc`, `CompactStr`, `Arc`-shared histories, borrowed SSE text): wired via
+  `vtcode-ui/profiling`. Use alloc-bytes as the deterministic signal alongside timing.
+- Channels (`channel!`): demo-only (`tui-hotpath-demo`). Prod TUI/runner channels deferred — type-changing
+  wrapper, needs boundary work first.
+- Locks (`mutex!`/`rw_lock!` wait-vs-hold split): demo-wired (`mutex_demo` in `tui_hotpath` exercises
+  a short-hold std Mutex so the wait/acquire report shape stays covered). Production locks audited
+  2026-10-16: no guard-across-slow-work found — `ContextManager` uses a sync std RwLock in sync fns,
+  `FileIndexCache::get_or_build` scopes its tokio RwLock guards in blocks and does traversal in
+  `spawn_blocking` outside any guard, worker aggregation uses short `parking_lot::Mutex` sections, and
+  the lock-free snapshot serves hot reads. Prod wrapping stays out (type-changing under `profiling`
+  only); reach for the demo + `clippy::await_holding_lock` when a new lock is added.
+- HTTP (`http!` on the shared `reqwest 0.12` LLM client): deferred — the macro returns
+  `ClientWithMiddleware`, not `reqwest::Client`, so every provider call site would change type under
+  `profiling` only. Needs a wrapper-type or cfg-gated alias design before touching `HttpClientFactory`.
+- I/O (`io!` byte throughput): not yet wired. Candidates are indexer walker, session event log, PTY/spool
+  paths. Start in benches/examples like the channel demo, not on the agent hot path.
+- CPU sampling (`hotpath-cpu`): enabled on root `profiling`; see Profiling Build below for symbolized
+  runs. Per-call `Regex::new` stays banned by the `no-per-call-regex-literal` ast-grep rule.
+
 TUI invariants found via hotpath (keep these):
 
 - Bottom-follow (`offset == 0`) appends never force a transcript reflow for scroll adjust; scrolled-up views still
@@ -521,6 +554,17 @@ This builds release with:
 - `CARGO_PROFILE_RELEASE_STRIP=false` so the release profile does not remove those symbols
 
 Then profile `target/release/vtcode` with your preferred tool.
+
+### CPU sampling via hotpath-cpu
+
+Root `--features profiling` enables `hotpath/hotpath-cpu`: the binary's `hotpath::main` report gains
+exclusive CPU attribution per measured function (the article's `compile_pattern` 92%-of-samples shape),
+complementing wall-clock timing (which shows waiting) with where the processor actually works. Prerequisites
+are external to this repo: a one-time `cargo install samply` plus profiling permissions on the host
+(Linux `perf_event_paranoid`, macOS dev-mode/JIT permissions — see the
+[hotpath CPU docs](https://hotpath.rs/cpu_profiling)). Keep profiler runs separate from production
+timing comparisons, and treat the first CPU win as exposing the next hotspot (article: removing one
+bottleneck reveals the next — check wall-clock and CPU together before claiming victory).
 
 ## Local Native Tuning
 

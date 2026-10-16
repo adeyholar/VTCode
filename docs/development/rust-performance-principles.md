@@ -629,6 +629,15 @@ When reviewing or writing a hot path in vtcode:
 - [ ] For read-heavy / rare-write shared state, is whole-value `ArcSwap` (or `LrMap`/`FileIndexCache` snapshot)
       used instead of per-item locks? Prefer `parking_lot` for sync short sections, never hold `tokio::sync`
       locks across `.await` in a per-item loop.
+- [ ] Does a lock guard span slow work (I/O, `.await`, serialization, network)? Do the slow work first and
+      acquire only to publish — high hold time on one task becomes high wait time on all contenders
+      ([profiling guide](https://hotpath.rs/blog/profiling-rust-guide): wait-vs-hold split).
+- [ ] For an unbounded channel, is queue depth observable under `profiling` (`hotpath::channel!` Max queue /
+      send→receive latency)? A Max queue that climbs between runs under steady load is the OOM early warning;
+      prefer bounded channels with backpressure for new queues.
+- [ ] For read-only data crossing threads (payloads, histories, cache keys), is it `Arc<str>`/`Arc<[T]>`/shared
+      `Arc` instead of a per-message `String`/`Vec` clone? Allocation bytes are the deterministic regression
+      signal — timing noise is not.
 - [ ] Is the type stored in a bulk collection (`Vec`, queue, per-line buffer)? If so, is its enum footprint minimal —
       sparse large payloads boxed, and a `size_of` guard test pinning it? See
       [Enum Footprint](#enum-footprint-in-bulk-collections).

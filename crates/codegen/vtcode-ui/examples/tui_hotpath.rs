@@ -87,6 +87,46 @@ fn input_burst(session: &mut AppSession, events: usize) {
     while rx.try_recv().is_ok() {}
 }
 
+/// Channel throughput demo (profiling guide: queue depth + send→receive latency).
+///
+/// Uses a locally-owned `u64` channel so the wrapper type never crosses a typed
+/// API boundary (`AppSession::handle_event` takes a concrete tokio
+/// `UnboundedSender`; wrapping that call site would change its signature under
+/// `profiling` only). Bursts 100 messages then drains them, so Max queue reads
+/// 100 by construction; the prod signal from the guide is Max queue *growth*
+/// between runs under steady load (unbounded-queue OOM early warning).
+#[hotpath::measure]
+fn channel_demo() {
+    let (tx, mut rx) = hotpath::channel!(mpsc::unbounded_channel::<u64>(), label = "tui-hotpath-demo");
+    for job in 0..100u64 {
+        if tx.send(job).is_err() {
+            break;
+        }
+    }
+    let mut received = 0u64;
+    while rx.try_recv().is_ok() {
+        received += 1;
+    }
+    let _ = std::hint::black_box(received);
+}
+
+/// Lock contention demo (profiling guide: wait time vs hold/acquire time).
+///
+/// Short critical sections only — the healthy pattern. The article's antipattern
+/// is a write guard held across slow work (network round trip, disk, `.await`);
+/// it shows up as high acquire time on the holder and high wait time on everyone
+/// else. Production locks stay unwrapped (the macro changes the lock type under
+/// `profiling` only); see the audit note in `docs/development/performance.md`.
+#[hotpath::measure]
+fn mutex_demo() {
+    let counter = hotpath::mutex!(std::sync::Mutex::new(0u64), label = "tui-hotpath-demo-mutex");
+    for _ in 0..10_000 {
+        *counter.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
+    }
+    let total = *counter.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _ = std::hint::black_box(total);
+}
+
 #[hotpath::measure]
 fn main_workload() {
     let mut session = AppSession::new(InlineTheme::default(), None, 30);
@@ -104,9 +144,13 @@ fn main_workload() {
     render_frames(&mut session, &mut terminal, 40);
     fill_link_transcript(&mut session, 1_000);
     render_frames(&mut session, &mut terminal, 40);
+    channel_demo();
+    mutex_demo();
 }
 
-#[hotpath::main]
+/// `functions_limit = 0` lifts the top-15 truncation so the full function list
+/// (including the sub-millisecond demos) stays visible for audits.
+#[hotpath::main(functions_limit = 0)]
 fn main() {
     let started = Instant::now();
     main_workload();

@@ -65,7 +65,9 @@ hotpath          = { workspace = true, optional = true }
 [features]
 default = []
 # hotpath profiling for TUI hot paths (render, reflow, input). Zero-cost when off.
-profiling = ["dep:hotpath", "hotpath/hotpath", "hotpath/hotpath-alloc"]
+# `hotpath/tokio` enables tokio channel/mutex wrappers used by the tui_hotpath
+# channel demo (article: channel throughput + Max queue as OOM early warning).
+profiling = ["dep:hotpath", "hotpath/hotpath", "hotpath/hotpath-alloc", "hotpath/tokio"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 arboard          = { workspace = true }
