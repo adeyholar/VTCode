@@ -539,6 +539,7 @@ fn reload_provider_client_if_matching(
             timeouts: None,
             openai: ctx.vt_cfg.as_ref().map(|cfg| cfg.provider.openai.clone()),
             anthropic: configured_anthropic_config(ctx.vt_cfg.as_ref()),
+            openrouter: ctx.vt_cfg.as_ref().map(|cfg| cfg.provider.openrouter.clone()),
             model_behavior: ctx.config.model_behavior.clone(),
             workspace_root: Some(ctx.config.workspace.clone()),
         },

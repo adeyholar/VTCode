@@ -108,8 +108,8 @@ pub const INLINE_PTY_RUNNING_LABEL: &str = "running";
 pub const INLINE_PTY_STATUS_LIVE: &str = "LIVE";
 pub const INLINE_PTY_STATUS_DONE: &str = "DONE";
 pub const INLINE_PTY_PLACEHOLDER: &str = vtcode_config::constants::ui::INLINE_PTY_PLACEHOLDER;
-pub const MODAL_LIST_HIGHLIGHT_SYMBOL: &str = "│";
-pub const MODAL_LIST_HIGHLIGHT_FULL: &str = "│ ";
+pub const MODAL_LIST_HIGHLIGHT_SYMBOL: &str = "┃";
+pub const MODAL_LIST_HIGHLIGHT_FULL: &str = "┃ ";
 /// Prefix for the synthetic `..` row that ascends one directory. Row kind
 /// glyphs (`▸` dir, `▧` image, `⚙` executable) come from `FileKind::glyph`.
 pub const INLINE_FILE_PICKER_PARENT_PREFIX: &str = "↑ ";

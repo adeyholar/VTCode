@@ -75,6 +75,29 @@ OpenRouter account.
 - **Routing:** When the LLM router is enabled, VT Code honours the configured provider and model combination for routing
   tasks.
 
+## App attribution (opt-in)
+
+VT Code sends no OpenRouter attribution headers by default. Opt in to list usage under the VT Code app page
+(`openrouter.ai/apps?url=https://github.com/vinhnx/vtcode`) and public rankings:
+
+```toml
+[provider.openrouter.attribution]
+enabled = true
+# referer = "https://example.com/my-fork"  # optional override for forks
+# title = "My Fork"                        # optional display-name override
+```
+
+Or via environment (accepts `1/true/yes/on`; `0/false/no/off` explicitly opts out):
+
+```bash
+export VTCODE_OPENROUTER_ATTRIBUTION=1
+```
+
+When enabled, VT Code sends `HTTP-Referer`, `X-OpenRouter-Title: VT Code`, and `X-OpenRouter-Categories: cli-agent`
+per <https://openrouter.ai/docs/app-attribution>. Categories use the allowlisted `cli-agent` value for terminal coding
+assistants. Rankings only show top apps by token volume, so low usage appears on the direct app URL but not in
+leaderboards.
+
 ## Troubleshooting
 
 | Symptom                    | Resolution                                                                                                          |

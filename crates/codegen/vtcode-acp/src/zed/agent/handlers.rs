@@ -733,6 +733,7 @@ pub(super) fn build_session_provider(
             timeouts: None,
             openai: None,
             anthropic: None,
+            openrouter: None,
             model_behavior: agent.config.model_behavior.clone(),
             workspace_root: Some(agent.config.workspace.clone()),
         },

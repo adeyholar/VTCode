@@ -291,6 +291,7 @@ impl AgentRunner {
             timeouts: None,
             openai: Some(session_config.effective().provider.openai.clone()),
             anthropic: Some(session_config.effective().provider.anthropic.clone()),
+            openrouter: Some(session_config.effective().provider.openrouter.clone()),
             model_behavior: Some(session_config.effective().model.clone()),
             workspace_root: Some(workspace.clone()),
         };

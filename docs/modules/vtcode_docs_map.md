@@ -910,7 +910,7 @@ below based on the topic area.
 
 - **File**: `docs/providers/openrouter.md`
   - **Content**: OpenRouter Integration Guide
-  - **Topics**: Quickstart, Meta Muse models, Persisting configuration, Runtime behaviour, Troubleshooting
+  - **Topics**: Quickstart, Meta Muse models, Persisting configuration, Runtime behaviour, App attribution (opt-in)
   - **User Questions**: "What can you tell me about OpenRouter Integration Guide?", "How does Quickstart work?", "How
     does Meta Muse models work?"
 

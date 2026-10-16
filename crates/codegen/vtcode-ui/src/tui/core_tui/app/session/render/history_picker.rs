@@ -72,7 +72,7 @@ impl SharedListWidgetModel for HistoryPickerPanelModel {
             .enumerate()
             .map(|(idx, (content, time_label))| {
                 let is_selected = self.selected == Some(idx);
-                // Reserve space for the "│ " selection gutter so rows never
+                // Reserve space for the "┃ " selection gutter so rows never
                 // overflow the panel width and wrap.
                 let max_chars = (width as usize).saturating_sub(selection_padding_width());
 

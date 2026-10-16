@@ -818,6 +818,7 @@ pub(crate) fn create_provider_client(
             timeouts: None,
             openai: vt_cfg.map(|cfg| cfg.provider.openai.clone()),
             anthropic: configured_anthropic_config(vt_cfg),
+            openrouter: vt_cfg.map(|cfg| cfg.provider.openrouter.clone()),
             model_behavior: vt_cfg.map(|cfg| cfg.model.clone()),
             workspace_root: Some(config.workspace.clone()),
         },

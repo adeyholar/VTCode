@@ -45,8 +45,8 @@ pub use provider::{
     AnthropicConfig, AnthropicFallbackMode, AnthropicFallbackTarget, AnthropicFallbacks, OpenAIConfig,
     OpenAIHostedShellConfig, OpenAIHostedShellDomainSecret, OpenAIHostedShellEnvironment,
     OpenAIHostedShellNetworkPolicy, OpenAIHostedShellNetworkPolicyType, OpenAIHostedSkill, OpenAIHostedSkillVersion,
-    OpenAIManualCompactionConfig, OpenAIServiceTier, OpenAIToolSearchConfig, ThinkingDisplayMode, ToolSearchAlgorithm,
-    ToolSearchConfig,
+    OpenAIManualCompactionConfig, OpenAIServiceTier, OpenAIToolSearchConfig, OpenRouterAttributionConfig,
+    OpenRouterConfig, ThinkingDisplayMode, ToolSearchAlgorithm, ToolSearchConfig,
 };
 pub use provider_override::ProviderOverrideConfig;
 pub use sandbox::{

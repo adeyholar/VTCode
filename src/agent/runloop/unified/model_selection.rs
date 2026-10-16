@@ -474,6 +474,7 @@ fn selected_provider_config(
         timeouts: None,
         openai: Some(openai),
         anthropic: configured_anthropic_config(Some(auth_cfg)),
+        openrouter: Some(auth_cfg.provider.openrouter.clone()),
         model_behavior: config.model_behavior.clone(),
         workspace_root: Some(config.workspace.clone()),
     }

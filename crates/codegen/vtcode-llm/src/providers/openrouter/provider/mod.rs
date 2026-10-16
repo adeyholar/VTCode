@@ -16,12 +16,13 @@ use std::str::FromStr;
 use vtcode_commons::sanitizer::sanitize_provider_diagnostic;
 use vtcode_config::TimeoutsConfig;
 use vtcode_config::constants::{env_vars, models, urls};
-use vtcode_config::core::{AnthropicConfig, ModelConfig, OpenRouterPromptCacheSettings, PromptCachingConfig};
+use vtcode_config::core::{
+    AnthropicConfig, ModelConfig, OpenRouterAttributionConfig, OpenRouterConfig, OpenRouterPromptCacheSettings,
+    PromptCachingConfig,
+};
 use vtcode_config::models::ModelId;
 
-const OPENROUTER_REFERER: &str = "https://github.com/vinhnx/vtcode";
-const OPENROUTER_TITLE: &str = "VT Code";
-const OPENROUTER_CATEGORIES: &str = "agents,coding";
+const OPENROUTER_CATEGORIES: &str = OpenRouterAttributionConfig::CATEGORIES;
 
 /// OpenRouter sticky-routing session identity: body `session_id` (docs: body wins)
 /// paired with `x-session-id` at dispatch. Blank lineage omits both.
@@ -47,6 +48,7 @@ pub struct OpenRouterProvider {
     prompt_cache_enabled: bool,
     prompt_cache_settings: OpenRouterPromptCacheSettings,
     model_behavior: Option<ModelConfig>,
+    attribution: OpenRouterAttributionConfig,
 }
 
 impl OpenRouterProvider {
@@ -80,6 +82,7 @@ impl OpenRouterProvider {
             prompt_cache_enabled: false,
             prompt_cache_settings: OpenRouterPromptCacheSettings::default(),
             model_behavior: None,
+            attribution: OpenRouterAttributionConfig::default(),
         }
     }
 
@@ -92,16 +95,39 @@ impl OpenRouterProvider {
         _anthropic: Option<AnthropicConfig>,
         model_behavior: Option<ModelConfig>,
     ) -> Self {
+        Self::from_config_with_attribution(
+            api_key,
+            model,
+            base_url,
+            prompt_cache,
+            timeouts,
+            _anthropic,
+            model_behavior,
+            None,
+        )
+    }
+
+    pub fn from_config_with_attribution(
+        api_key: Option<String>,
+        model: Option<String>,
+        base_url: Option<String>,
+        prompt_cache: Option<PromptCachingConfig>,
+        timeouts: Option<TimeoutsConfig>,
+        _anthropic: Option<AnthropicConfig>,
+        model_behavior: Option<ModelConfig>,
+        openrouter: Option<OpenRouterConfig>,
+    ) -> Self {
         let api_key_value = api_key.unwrap_or_default();
         let model_value = resolve_model(model, models::openrouter::DEFAULT_MODEL);
 
-        Self::with_model_internal(
+        Self::with_model_internal_with_attribution(
             api_key_value,
             model_value,
             prompt_cache,
             base_url,
             timeouts.unwrap_or_default(),
             model_behavior,
+            openrouter.map(|c| c.attribution).unwrap_or_default(),
         )
     }
 
@@ -112,6 +138,26 @@ impl OpenRouterProvider {
         base_url: Option<String>,
         timeouts: TimeoutsConfig,
         model_behavior: Option<ModelConfig>,
+    ) -> Self {
+        Self::with_model_internal_with_attribution(
+            api_key,
+            model,
+            prompt_cache,
+            base_url,
+            timeouts,
+            model_behavior,
+            OpenRouterAttributionConfig::default(),
+        )
+    }
+
+    fn with_model_internal_with_attribution(
+        api_key: String,
+        model: String,
+        prompt_cache: Option<PromptCachingConfig>,
+        base_url: Option<String>,
+        timeouts: TimeoutsConfig,
+        model_behavior: Option<ModelConfig>,
+        attribution: OpenRouterAttributionConfig,
     ) -> Self {
         use crate::http_client::HttpClientFactory;
         let (prompt_cache_enabled, prompt_cache_settings) = extract_prompt_cache_settings(
@@ -128,6 +174,7 @@ impl OpenRouterProvider {
             prompt_cache_enabled,
             prompt_cache_settings,
             model_behavior,
+            attribution,
         }
     }
 
@@ -303,13 +350,16 @@ impl OpenRouterProvider {
         payload: &Value,
         session_id: Option<&str>,
     ) -> Result<Response, LLMError> {
-        let mut req = self
-            .http_client
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .header("HTTP-Referer", OPENROUTER_REFERER)
-            .header("X-OpenRouter-Title", OPENROUTER_TITLE)
-            .header("X-OpenRouter-Categories", OPENROUTER_CATEGORIES);
+        let mut req = self.http_client.post(url).bearer_auth(&self.api_key);
+        // Opt-in app attribution per https://openrouter.ai/docs/app-attribution.
+        // No headers are sent unless explicitly enabled via
+        // `[provider.openrouter.attribution]` or `VTCODE_OPENROUTER_ATTRIBUTION=1`.
+        if self.attribution.is_enabled() {
+            req = req
+                .header("HTTP-Referer", self.attribution.resolved_referer().to_string())
+                .header("X-OpenRouter-Title", self.attribution.resolved_title().to_string())
+                .header("X-OpenRouter-Categories", OPENROUTER_CATEGORIES);
+        }
         if let Some(session_id) = session_id.filter(|s| !s.trim().is_empty()) {
             req = req.header("x-session-id", session_id);
         }

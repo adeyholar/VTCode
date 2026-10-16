@@ -9,8 +9,8 @@ use crate::constants::defaults::DEFAULT_PRIMARY_AGENT_NAME;
 use crate::context::ContextFeaturesConfig;
 use crate::core::{
     AgentConfig, AgentPermissionsConfig, AnthropicConfig, AuthConfig, AutomationConfig, CommandsConfig,
-    CustomProviderConfig, DotfileProtectionConfig, ModelConfig, OpenAIConfig, PermissionsConfig, PromptCachingConfig,
-    ProviderOverrideConfig, SandboxConfig, SecurityConfig, SkillsConfig, ToolsConfig,
+    CustomProviderConfig, DotfileProtectionConfig, ModelConfig, OpenAIConfig, OpenRouterConfig, PermissionsConfig,
+    PromptCachingConfig, ProviderOverrideConfig, SandboxConfig, SecurityConfig, SkillsConfig, ToolsConfig,
 };
 use crate::debug::DebugConfig;
 use crate::hooks::HooksConfig;
@@ -37,6 +37,10 @@ pub struct ProviderConfig {
     /// Anthropic provider configuration
     #[serde(default)]
     pub anthropic: AnthropicConfig,
+
+    /// OpenRouter provider configuration
+    #[serde(default)]
+    pub openrouter: OpenRouterConfig,
 
     /// Xiaomi MiMo auth method: "payg" or "token-plan"
     #[serde(default, skip_serializing_if = "Option::is_none")]
