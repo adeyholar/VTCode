@@ -2,6 +2,27 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.178.0 - 2026-10-16
+
+### Highlights
+#### Bug Fixes
+
+- Correct Merge Gateway Muse Spark Open caps from live catalog (174e3d92) 
+#### Documentation
+
+- Refine README for clarity and consistency (58b1467e) 
+#### Features
+
+- Add Meta Muse Spark Open models and presets (21196ee1) 
+- Add Meta Muse Spark Open model and update related documentation (d50a82d0) 
+- Add OpenRouterAttributionConfig to provider initialization (01c65adc) 
+### Other Changes
+#### Other
+
+- Add OpenRouter provider support and attribution configuration (0e0f9158) 
+#### Refactors
+
+- Use » marker for tracker current row and modal group headers (368c8205) 
 ## 0.177.1 - 2026-10-16
 
 ### Highlights
