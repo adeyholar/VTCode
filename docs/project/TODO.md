@@ -60,3 +60,9 @@ use Codex `Plugin Creator`, Help me build a plugin. Start by asking what it shou
 - [ ] Run a real VT Code evaluation on SWE-bench Lite. Follow the
       [evaluation plan](../benchmarks/PLAN-VTCODE-SWEBENCH-LITE.md), pilot first, and submit reproducible
       results if eligible.
+
+---
+
+CRITICAL: after changing models mid-turn, it seems that the prompt is not processed and entered correctly. Ensure that the new model receives the updated prompt and context before continuing. Explain: after switching the model, user enter the new prompt explicitly to ensure it is recognized by the model. hypo: it could be the compaction of context or prompt caching by the previous model that causes the new model to miss the updated instructions and it is not visualized or reflect correctly in the TUI. so it causes potential misalignment between user intent and model behavior. double check the prompt is correctly received by the new model before proceeding.
+
+check session session-vtcode-20261016T093533Z_275395-15111 and investigate and fix.
