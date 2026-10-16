@@ -224,6 +224,13 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             1_000_000,
             false,
         ),
+        (
+            models::merge_gateway::META_MUSE_SPARK_OPEN,
+            "Muse Spark Open (Merge Gateway)",
+            "Meta Muse Spark Open 816B-A42B open-weight flagship for coding and agentic work with 1M context through Merge Gateway",
+            1_048_576,
+            false,
+        ),
     ]
     .into_iter()
     .map(|(model, display_name, description, context_window, is_default)| {

@@ -83,6 +83,7 @@ impl ModelId {
             ModelId::MergeGatewayXiaomimimoMimoV26Pro,
             ModelId::MergeGatewayXiaomimimoMimoV26Flash,
             ModelId::MergeGatewayMistralLarge4,
+            ModelId::MergeGatewayMetaMuseSparkOpen,
             // Mistral models
             ModelId::MistralLarge3,
             ModelId::MistralLarge4,
@@ -123,6 +124,7 @@ impl ModelId {
             ModelId::HuggingFaceGlm53Together,
             ModelId::HuggingFaceKimiK3Together,
             ModelId::HuggingFaceMinimaxM3Novita,
+            ModelId::HuggingFaceMuseSparkOpenBaseten,
             ModelId::StepFun37Flash,
             ModelId::StepFun5Preview,
             ModelId::EvolinkGemini31Pro,

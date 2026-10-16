@@ -80,6 +80,7 @@ vtcode --provider merge-gateway --model anthropic/claude-opus-5
 | `xiaomimimo/mimo-v2.6-pro` | 1M | Yes | Xiaomi MiMo route; reasoning controls omitted (gateway has no vendor serving reasoning jointly with tools) |
 | `xiaomimimo/mimo-v2.6-flash` | 1M | Yes | Xiaomi MiMo route; reasoning controls omitted (gateway has no vendor serving reasoning jointly with tools) |
 | `mistral/mistral-large-4-0` | 1M | Yes | Mistral route (Public Preview); reasoning controls omitted pending catalog confirmation |
+| `meta/muse-spark-open` | 1M | Yes | Meta route (open-weight 816B-A42B flagship for coding/agentic work; `reasoning_effort` low/medium/high/xhigh) |
 
 These are the models shown in VT Code's picker. Merge model IDs are not a
 closed local allowlist: any valid explicit `provider/model` route can be used
@@ -142,7 +143,7 @@ Merge's reasoning behavior is vendor- and route-specific. VT Code discovers each
 route's reasoning capability from the authenticated `/v1/models` catalog and
 applies the configured reasoning effort using the route's advertised control:
 routes advertising a provider-native `reasoning_effort` (OpenAI, xAI, Moonshot,
-Z.AI prefixes) receive a `reasoning_effort` string, while routes advertising a
+Meta, Z.AI prefixes) receive a `reasoning_effort` string, while routes advertising a
 Gateway-managed thinking budget (Anthropic, Gemini, DeepSeek, Qwen, MiniMax,
 Thinking Machines prefixes) receive a top-level `thinking` block with a
 `budget_tokens` value derived from the effort level and clamped below

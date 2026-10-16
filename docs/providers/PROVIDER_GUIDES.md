@@ -382,7 +382,8 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
   `google/gemini-4-argon`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`,
   `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `zai/glm-5.3-flash`,
   `zai/glm-5.3-flashx`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, `openai/gpt-6-astra`,
-  `openai/gpt-6-sol`, `openai/gpt-6.1-sol`, `openai/gpt-6-luna`, and `mistral/mistral-large-4-0`
+  `openai/gpt-6-sol`, `openai/gpt-6.1-sol`, `openai/gpt-6-luna`, `mistral/mistral-large-4-0`,
+  and `meta/muse-spark-open`
 - **Features:** Native Responses, streaming, tool calling, structured outputs, authenticated paginated model catalog,
   cache-backed picker metadata, and arbitrary explicit Merge route IDs
 - **Limitations:** Reasoning controls remain route-specific and are not inferred generically; routing metadata and
@@ -619,9 +620,9 @@ including tools like Claude Code.
 - **Notable models:** `openai/gpt-oss-20b:huggingface`, `deepseek-ai/DeepSeek-R1`,
   `deepseek-ai/DeepSeek-V4-Pro:together`, `deepseek-ai/DeepSeek-V4-Pro:novita`, `zai-org/GLM-5.1:zai-org`,
   `zai-org/GLM-5.2:novita`, `moonshotai/Kimi-K3:together`, `moonshotai/Kimi-K2.6:novita`, `MiniMaxAI/MiniMax-M3:novita`,
-  `MiniMaxAI/MiniMax-M2.7:novita`
+  `MiniMaxAI/MiniMax-M2.7:novita`, `meta-models/Muse-Spark-Open-816B-A42B:baseten`
 - **Features:** Access to various models through HuggingFace's inference API, including models from OpenAI, DeepSeek,
-  Z.AI, Moonshot, MiniMax, and other providers
+  Z.AI, Moonshot, MiniMax, Meta (Muse Spark Open via Baseten), and other providers
 
 ## Poolside
 

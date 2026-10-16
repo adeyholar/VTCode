@@ -511,6 +511,13 @@ model_id_table! {
         display: "Mistral Large 4 (Merge Gateway)",
         description: "Mistral Large 4 open-weight MoE flagship with 1M context accessed through Merge Gateway",
     },
+    MergeGatewayMetaMuseSparkOpen {
+        provider: MergeGateway,
+        id: models::merge_gateway::META_MUSE_SPARK_OPEN,
+        parse: [models::merge_gateway::META_MUSE_SPARK_OPEN],
+        display: "Muse Spark Open (Merge Gateway)",
+        description: "Meta Muse Spark Open 816B-A42B open-weight flagship for coding and agentic work with 1M context accessed through Merge Gateway",
+    },
     // Mistral models
     MistralLarge3 {
         provider: Mistral,
@@ -568,6 +575,16 @@ model_id_table! {
         parse: [models::huggingface::MINIMAX_M3_NOVITA],
         display: "MiniMax-M3 (Novita)",
         description: "MiniMax-M3 model via Novita inference provider on HuggingFace router. Frontier multimodal coding model with 1M context window.",
+    },
+    HuggingFaceMuseSparkOpenBaseten {
+        provider: HuggingFace,
+        id: models::huggingface::META_MUSE_SPARK_OPEN_BASETEN,
+        parse: [
+            models::huggingface::META_MUSE_SPARK_OPEN_BASETEN,
+            "meta-models/Muse-Spark-Open-816B-A42B",
+        ],
+        display: "Muse Spark Open (HF/Baseten)",
+        description: "Meta Muse Spark Open 816B-A42B open-weight flagship for coding and agentic work with 1M context via Baseten on HuggingFace router.",
     },
     // StepFun models
     StepFun37Flash {

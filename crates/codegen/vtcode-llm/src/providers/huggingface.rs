@@ -315,6 +315,11 @@ impl HuggingFaceProvider {
         lower.contains("minimax")
     }
 
+    fn is_muse_spark_open_model(&self, model: &str) -> bool {
+        let lower = model.to_ascii_lowercase();
+        lower.contains("muse-spark-open") || lower.contains("muse-spark")
+    }
+
     fn apply_model_defaults(&self, request: &mut LLMRequest) {
         if self.is_minimax_model(&request.model) {
             if request.temperature.is_none() {
@@ -756,6 +761,7 @@ impl LLMProvider for HuggingFaceProvider {
         // Same robustness logic for reasoning effort
         self.is_glm_model(model)
             || self.is_deepseek_model(model)
+            || self.is_muse_spark_open_model(model)
             || self
                 .model_behavior
                 .as_ref()

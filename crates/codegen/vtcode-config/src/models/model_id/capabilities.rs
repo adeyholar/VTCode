@@ -367,6 +367,8 @@ impl ModelId {
                 | ModelId::MergeGatewayXiaomimimoMimoV26Pro
                 | ModelId::MergeGatewayXiaomimimoMimoV26Flash
                 | ModelId::MergeGatewayMistralLarge4
+                | ModelId::MergeGatewayMetaMuseSparkOpen
+                | ModelId::HuggingFaceMuseSparkOpenBaseten
         )
     }
 
@@ -422,6 +424,7 @@ impl ModelId {
             ModelId::MergeGatewayDeepseekFlash => "4.1",
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",
             ModelId::MetaMuseSpark13 | ModelId::MetaMuseSpark13Contributor => "Muse-Spark-1.3",
+            ModelId::MergeGatewayMetaMuseSparkOpen | ModelId::HuggingFaceMuseSparkOpenBaseten => "Muse-Spark-Open",
             ModelId::MetaMuseWonder10 => "Muse-Wonder-1.0",
             ModelId::MetaMuseWonderFull10 => "Muse-Wonder-Full-1.0",
             // Z.AI generations

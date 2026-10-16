@@ -275,7 +275,7 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaNemotron3Super120bA12b));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 28);
+    assert_eq!(merge_gateway_models.len(), 29);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayXiaomimimoMimoV26Pro));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayXiaomimimoMimoV26Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));

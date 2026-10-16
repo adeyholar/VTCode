@@ -513,6 +513,7 @@ pub fn heuristic_provider_from_model(model: &str) -> Option<Provider> {
         || model.starts_with("zai-org/")
         || model.starts_with("moonshotai/")
         || model.starts_with("minimaxai/")
+        || model.starts_with("meta-models/")
     {
         Some(Provider::HuggingFace)
     } else if model.starts_with("mixtral-")

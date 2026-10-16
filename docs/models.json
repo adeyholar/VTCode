@@ -1212,6 +1212,36 @@
           "medium",
           "high"
         ]
+      },
+      "meta-models/Muse-Spark-Open-816B-A42B:baseten": {
+        "id": "meta-models/Muse-Spark-Open-816B-A42B:baseten",
+        "name": "Muse Spark Open (Baseten)",
+        "description": "Meta Muse Spark Open 816B-A42B open-weight flagship for coding and agentic work with 1M context via Baseten on HuggingFace router.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "max_output_tokens": 131072,
+        "capabilities": {
+          "structured_output": true
+        },
+        "is_pro": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
       }
     }
   },
@@ -4631,6 +4661,38 @@
           "streaming": true,
           "function_calling": true,
           "structured_output": true
+        },
+        "is_pro": true
+      },
+      "meta/muse-spark-open": {
+        "id": "meta/muse-spark-open",
+        "name": "Muse Spark Open (Merge Gateway)",
+        "description": "Meta Muse Spark Open 816B-A42B open-weight flagship for coding and agentic work with 1M context served through Merge Gateway's native Responses API.",
+        "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "output_tokens": 131072,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": false
         },
         "is_pro": true
       },

@@ -158,6 +158,8 @@ pub enum ModelId {
     MergeGatewayXiaomimimoMimoV26Flash,
     /// Mistral Large 4 through Merge Gateway
     MergeGatewayMistralLarge4,
+    /// Meta Muse Spark Open (816B/42B) through Merge Gateway
+    MergeGatewayMetaMuseSparkOpen,
 
     // Mistral AI models
     /// Mistral Large 3 - State-of-the-art open-weight general-purpose multimodal model
@@ -178,6 +180,8 @@ pub enum ModelId {
     HuggingFaceKimiK3Together,
     /// MiniMax M3 via Novita on Hugging Face router
     HuggingFaceMinimaxM3Novita,
+    /// Meta Muse Spark Open 816B-A42B via Baseten on Hugging Face router
+    HuggingFaceMuseSparkOpenBaseten,
 
     // StepFun models
     /// Step 3.7 Flash - StepFun's flagship multimodal reasoning model with tool calling
