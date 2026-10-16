@@ -2611,6 +2611,42 @@
           "doc_comment": "Muse Spark 1.3 - Meta Muse Spark 1.3 reasoning model via OpenRouter"
         }
       },
+      "meta/muse-spark-open": {
+        "id": "meta/muse-spark-open",
+        "name": "Meta: Muse Spark Open",
+        "description": "Meta Muse Spark Open 816B-A42B open-weight flagship for coding and agentic work with 1M context via OpenRouter.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "file",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "cost": {
+          "input": 1.25e-06,
+          "output": 4.25e-06,
+          "cache_read": 1.5e-07
+        },
+        "vtcode": {
+          "variant": "OpenRouterMetaMuseSparkOpen",
+          "constant": "META_MUSE_SPARK_OPEN",
+          "vendor": "meta",
+          "display": "Muse Spark Open (OpenRouter)",
+          "description": "Meta Muse Spark Open 816B-A42B open-weight flagship via OpenRouter",
+          "efficient": false,
+          "top_tier": true,
+          "generation": "Muse-Spark-Open",
+          "doc_comment": "Muse Spark Open - Meta Muse Spark Open 816B-A42B open-weight flagship via OpenRouter"
+        }
+      },
       "openai/gpt-6-astra": {
         "id": "openai/gpt-6-astra",
         "name": "OpenAI: GPT-6 Astra",

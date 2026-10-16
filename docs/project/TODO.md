@@ -47,3 +47,7 @@ https://deepswe.datacurve.ai/run
 ---
 
 https://www.tbench.ai/
+
+---
+
+opt-in openrouter attribution https://openrouter.ai/docs/app-attribution

@@ -47,6 +47,7 @@ model IDs:
 ```bash
 vtcode --provider openrouter --model meta/muse-spark-1.3 chat
 vtcode --provider openrouter --model meta/muse-glimmer-30b chat
+vtcode --provider openrouter --model meta/muse-spark-open chat
 ```
 
 These routes use `OPENROUTER_API_KEY` and OpenRouter billing. The `meta/...` namespace is distinct from the official

@@ -286,6 +286,8 @@ pub enum ModelId {
     /// Meta Muse Spark 1.2 via OpenRouter
     /// Meta Muse Spark 1.3 via OpenRouter
     OpenRouterMetaMuseSpark13,
+    /// Meta Muse Spark Open 816B-A42B via OpenRouter
+    OpenRouterMetaMuseSparkOpen,
     /// Gemini 3.7 Flash - Flash model with 1M context and tunable thinking levels via OpenRouter
     /// Gemini 3.8 Flash - Most intelligent Flash for long-horizon SWE/agents with 1M context via OpenRouter
     OpenRouterGoogleGemini38Flash,

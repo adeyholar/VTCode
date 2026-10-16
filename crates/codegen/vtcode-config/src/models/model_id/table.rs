@@ -915,6 +915,7 @@ mod tests {
                     | ModelId::MergeGatewayOpenAIGpt61Sol
                     | ModelId::MergeGatewayOpenAIGpt6Luna
                     | ModelId::MergeGatewayDeepseekFlash
+                    | ModelId::MergeGatewayMetaMuseSparkOpen
             )
             || matches!(
                 model,

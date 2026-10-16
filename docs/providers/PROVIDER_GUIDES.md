@@ -408,8 +408,9 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
   available.
 - For Meta Muse, prefer the official [`meta` provider](./meta.md) when direct Meta access is desired. OpenRouter's
   `meta/...` entries are separately namespaced marketplace routes.
-- **Meta Muse models via OpenRouter:** `meta/muse-glimmer-30b` and `meta/muse-spark-1.3`
+- **Meta Muse models via OpenRouter:** `meta/muse-glimmer-30b`, `meta/muse-spark-1.3` and `meta/muse-spark-open`
 - **Curated picker catalog:** `openrouter/meta/muse-glimmer-30b`, `openrouter/meta/muse-spark-1.3`,
+  `openrouter/meta/muse-spark-open`,
   `openrouter/deepseek/deepseek-chat`, `openrouter/z-ai/glm-5.1`, `openrouter/z-ai/glm-5.2`,
   `openrouter/z-ai/glm-5.3-flash`, `openrouter/z-ai/glm-5.3-flashx`, `openrouter/moonshotai/kimi-k3`,
   `openrouter/moonshotai/kimi-k2.6`, `openrouter/moonshotai/kimi-k2.7-code`, `openrouter/qwen/qwen3.7-max`,

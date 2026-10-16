@@ -161,6 +161,7 @@ pub(crate) fn merge_reasoning_control_for_model(model: &str) -> Option<MergeReas
         || model.starts_with("xai/")
         || model.starts_with("moonshot/")
         || model.starts_with("zai/")
+        || model.starts_with("meta/")
     {
         Some(MergeReasoningControl::ReasoningEffort)
     } else if model.starts_with("anthropic/")

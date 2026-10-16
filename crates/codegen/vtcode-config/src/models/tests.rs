@@ -678,7 +678,8 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             | ModelId::MergeGatewayGoogleGemini38Flash
             | ModelId::MergeGatewayOpenAIGpt6Astra
             | ModelId::MergeGatewayOpenAIGpt6Sol
-            | ModelId::MergeGatewayOpenAIGpt6Luna => continue,
+            | ModelId::MergeGatewayOpenAIGpt6Luna
+            | ModelId::MergeGatewayMetaMuseSparkOpen => continue,
             // Vercel AI Gateway reuses `vendor/model` ids that overlap with
             // OpenRouter/Merge Gateway; bare parsing preserves the existing
             // precedence and explicit provider configuration selects Vercel.
