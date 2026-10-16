@@ -23,7 +23,6 @@ Keep this file concise and under 150 lines. Root guidance belongs here; detailed
 - Prefer `compact_str::CompactString` (aliased as `CompactStr` in `vtcode_core::types`) over `String` for small string fields. Use `Cow<'static, str>` for mostly-static return strings.
 - **Shape-suffix naming**: encode the dimensional structure of data in variable/type names. For feature vectors, document a **dimension key** (table of index → name → meaning). For bare tuples holding structured data, promote to named structs so the shape is explicit in the type system (inspired by Noam Shazeer's shape-suffix convention).
 - `clippy.toml` allows `unwrap`/`panic`/indexing in tests only. Avoid Rust `unsafe` (workspace lints warn on `unsafe_code`); where it is unavoidable, keep the block minimal and justify it with a `// SAFETY:` comment (`undocumented_unsafe_blocks`).
-- Dev profile has `incremental = false` (sccache). Set `CARGO_INCREMENTAL=1` to override.
 - Treat the sandbox/exec boundary as a primary adversarial surface: use sandbox-aware launch paths and add adversarial regression coverage for command injection, path/symlink escape, environment leakage, and fail-closed behavior.
 - **All built-in themes must meet WCAG AA 4.5:1 contrast** for foreground and all accent fields against background. Validate with `cargo nextest run -p vtcode-ui -E 'test(theme)'`. See `.vtcode/memory/gotchas.md` for catppuccin-latte special-case.
 - **Every new major feature must update docs**: user-facing behavior → `docs/development/` guide + a table row/section in the relevant quick-reference; agent-facing tool surface → prompt guidance (`crates/codegen/vtcode-core/src/prompts/guidelines.rs`) + schema (`crates/common/vtcode-utility-tool-specs`); runtime contract → `vtcode-exec-events::ThreadEvent`. No feature is "done" until the docs it changes are updated and the AGENTS.md detailed-guides links still resolve.
@@ -131,8 +130,6 @@ Session-independent knowledge lives in `.vtcode/memory/` (gitignored, repo-local
 | Hawk (deny warnings)      | `./scripts/hawk.sh --deny`                           |
 | Ast-grep scan             | `ast-grep scan` (requires `sgconfig.yml` + `rules/`) |
 
-Narrow commands: `cargo check`, `cargo nextest run`, `cargo nextest run --profile quick`, `cargo fmt`, `cargo clippy`. **Never use `cargo test` — always use `cargo nextest run`.**
-
 ## Testing
 
 - Runner: `cargo nextest run` (parallel, fast). **Always use nextest — never `cargo test`**.
@@ -147,5 +144,5 @@ Narrow commands: `cargo check`, `cargo nextest run`, `cargo nextest run --profil
 
 - LLM providers: use the `adding-llm-providers` skill. The `/model` picker uses `ModelId::all_models()`; `builtin_model_presets()` is used by `ModelsManager`. Both may need updates.
 - New workspace crates: use the `adding-workspace-crate` skill. This affects more than `Cargo.toml`; all workspace path dependencies need `version` fields.
-- Structural code work: prefer `ast-grep` over text grep for code shape, calls, impls, and codemods. Use `rg` for prose, logs, and config strings. Always invoke `ast-grep`, not the `sg` alias. Use `exec_command` or the ast-grep skill for arbitrary structural patterns. Advanced `code_search` accepts one literal query and bounded filters. Rust pattern catalog: <https://ast-grep.github.io/catalog/rust/>. GitHub refs: prefer `gh` CLI over `webfetch`; for internal improvements, follow the Codex research workflow in Core Workflow.
+- Structural code work: prefer `ast-grep` over text grep for code shape, calls, impls, and codemods. Use `rg` for prose, logs, and config strings. Always invoke `ast-grep`, not the `sg` alias. Use `exec_command` or the ast-grep skill for arbitrary structural patterns. Advanced `code_search` accepts one literal query and bounded filters. Rust pattern catalog: <https://ast-grep.github.io/catalog/rust/>. GitHub refs: prefer `gh` CLI over `webfetch` (`gh` authenticates as the exported-token account — on 403/admin-rights failures, run `unset GITHUB_TOKEN && gh auth switch -u vinhnx` before retrying); for internal improvements, follow the Codex research workflow in Core Workflow.
 - Cap large command output: `COMMAND 2>&1 | head -c 4000` — but never pipe verifier commands (`cargo check --locked`, `cargo fmt --all -- --check`, `cargo nextest run`); pass `max_output_tokens` instead, since a pipe masks the verifier's exit status and never clears the verification gate.
