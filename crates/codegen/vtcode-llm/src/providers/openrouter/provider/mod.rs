@@ -60,11 +60,20 @@ impl OpenRouterProvider {
             None,
             TimeoutsConfig::default(),
             None,
+            OpenRouterAttributionConfig::default(),
         )
     }
 
     fn with_model(api_key: String, model: String) -> Self {
-        Self::with_model_internal(api_key, model, None, None, TimeoutsConfig::default(), None)
+        Self::with_model_internal(
+            api_key,
+            model,
+            None,
+            None,
+            TimeoutsConfig::default(),
+            None,
+            OpenRouterAttributionConfig::default(),
+        )
     }
 
     fn new_with_client(
@@ -120,7 +129,7 @@ impl OpenRouterProvider {
         let api_key_value = api_key.unwrap_or_default();
         let model_value = resolve_model(model, models::openrouter::DEFAULT_MODEL);
 
-        Self::with_model_internal_with_attribution(
+        Self::with_model_internal(
             api_key_value,
             model_value,
             prompt_cache,
@@ -132,25 +141,6 @@ impl OpenRouterProvider {
     }
 
     fn with_model_internal(
-        api_key: String,
-        model: String,
-        prompt_cache: Option<PromptCachingConfig>,
-        base_url: Option<String>,
-        timeouts: TimeoutsConfig,
-        model_behavior: Option<ModelConfig>,
-    ) -> Self {
-        Self::with_model_internal_with_attribution(
-            api_key,
-            model,
-            prompt_cache,
-            base_url,
-            timeouts,
-            model_behavior,
-            OpenRouterAttributionConfig::default(),
-        )
-    }
-
-    fn with_model_internal_with_attribution(
         api_key: String,
         model: String,
         prompt_cache: Option<PromptCachingConfig>,
