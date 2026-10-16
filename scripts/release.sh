@@ -994,8 +994,26 @@ main() {
 		local run_id="${CI_RUN_ID:-}"
 
 		if [[ -z "$run_id" ]]; then
-			# Try to find a successful run if CI_RUN_ID wasn't set
-			run_id=$(gh run list --workflow build-linux-windows.yml --branch main --event workflow_dispatch --limit 1 --json databaseId,conclusion --jq '.[] | select(.conclusion == "success") | .databaseId' | head -1)
+			# Newest successful run (--limit 10: the newest runs may still be
+			# in progress, or may have failed).
+			run_id=$(gh run list --workflow build-linux-windows.yml --branch main --event workflow_dispatch --limit 10 --json databaseId,conclusion --jq '.[] | select(.conclusion == "success") | .databaseId' 2>/dev/null | head -1 || true)
+		fi
+
+		if [[ -z "$run_id" ]]; then
+			# No success yet — the typical `--skip-release` resume while CI
+			# still builds. Wait for the newest active run instead of
+			# aborting into a macOS-only release.
+			local active_run=""
+			active_run=$(gh run list --workflow build-linux-windows.yml --branch main --event workflow_dispatch --limit 5 --json databaseId,status --jq '.[] | select(.status == "in_progress" or .status == "queued") | .databaseId' 2>/dev/null | head -1 || true)
+			if [[ -n "$active_run" ]]; then
+				print_info "CI run $active_run still in progress; waiting for completion..."
+				if gh run watch "$active_run" --exit-status >/dev/null 2>&1; then
+					print_success "CI builds completed successfully"
+					run_id="$active_run"
+				else
+					print_warning "CI run $active_run did not succeed - will use macOS binaries only"
+				fi
+			fi
 		fi
 
 		# Windows x86_64 is REQUIRED for the legacy updater bridge by default so
