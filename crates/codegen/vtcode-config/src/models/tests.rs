@@ -331,8 +331,11 @@ fn test_ollama_cloud_models() {
         (ModelId::OllamaGptOss20bCloud, models::ollama::GPT_OSS_20B_CLOUD),
         (ModelId::OllamaGptOss120bCloud, models::ollama::GPT_OSS_120B_CLOUD),
         (ModelId::OllamaMinimaxM3Cloud, models::ollama::MINIMAX_M3_CLOUD),
-        (ModelId::OllamaMinimaxM3Cloud, models::ollama::MINIMAX_M3_CLOUD),
-        (ModelId::OllamaKimiK3Cloud, models::ollama::KIMI_K3_CLOUD),
+        (ModelId::OllamaGlm53Cloud, models::ollama::GLM_5_3_CLOUD),
+        (ModelId::OllamaGlm53FlashCloud, models::ollama::GLM_5_3_FLASH_CLOUD),
+        (ModelId::OllamaMistralLarge4Cloud, models::ollama::MISTRAL_LARGE_4_CLOUD),
+        (ModelId::OllamaMuseSparkOpenCloud, models::ollama::MUSE_SPARK_OPEN_CLOUD),
+        (ModelId::OllamaDeepSeekV41FlashCloud, models::ollama::DEEPSEEK_V4_1_FLASH_CLOUD),
         (ModelId::OllamaKimiK3Cloud, models::ollama::KIMI_K3_CLOUD),
     ];
 
@@ -340,6 +343,24 @@ fn test_ollama_cloud_models() {
         assert_eq!(model_id.as_str(), expected_str);
         assert_eq!(ModelId::from_str(expected_str).unwrap(), model_id);
         assert_eq!(model_id.provider(), Provider::OllamaCloud);
+        assert!(ModelId::models_for_provider(Provider::OllamaCloud).contains(&model_id));
+        assert!(models::ollama::SUPPORTED_MODELS.contains(&expected_str));
+        assert!(models::ollama::REASONING_MODELS.contains(&expected_str));
+
+        if matches!(
+            model_id,
+            ModelId::OllamaGlm53FlashCloud
+                | ModelId::OllamaMistralLarge4Cloud
+                | ModelId::OllamaMuseSparkOpenCloud
+                | ModelId::OllamaDeepSeekV41FlashCloud
+        ) {
+            assert!(model_id.is_top_tier());
+        }
+
+        if matches!(model_id, ModelId::OllamaGlm53FlashCloud | ModelId::OllamaDeepSeekV41FlashCloud) {
+            assert!(model_id.is_flash_variant());
+            assert!(model_id.is_efficient_variant());
+        }
 
         // Verify display names are not empty
         assert!(!model_id.display_name().is_empty());
@@ -444,6 +465,25 @@ fn test_generated_model_capability_lookup() {
     let ollama_cloud_catalog =
         model_catalog_entry("ollama", models::ollama::GPT_OSS_20B_CLOUD).expect("Ollama Cloud metadata");
     assert_eq!(ollama_cloud_catalog.context_window, 131_072);
+    for model in [
+        models::ollama::MISTRAL_LARGE_4_CLOUD,
+        models::ollama::MUSE_SPARK_OPEN_CLOUD,
+        models::ollama::GLM_5_3_FLASH_CLOUD,
+        models::ollama::DEEPSEEK_V4_1_FLASH_CLOUD,
+    ] {
+        let catalog = model_catalog_entry("ollama", model).expect("Ollama Cloud model metadata");
+        assert_eq!(catalog.context_window, 1_000_000);
+        assert!(catalog.reasoning);
+        assert!(catalog.tool_call);
+        assert!(catalog.vision);
+        assert_eq!(catalog.input_modalities, &["text", "image"]);
+    }
+    assert_eq!(
+        model_catalog_entry("ollama", models::ollama::GLM_5_3_FLASH_CLOUD)
+            .expect("GLM Flash metadata")
+            .reasoning_efforts,
+        &["low", "high", "max"]
+    );
 
     let xai_catalog = model_catalog_entry("xai", models::xai::GROK_4_6).expect("grok-4.6 metadata");
     assert_eq!(xai_catalog.context_window, 500_000);

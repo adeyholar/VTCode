@@ -261,8 +261,10 @@ impl ModelId {
                 | ModelId::StepFun37Flash
                 | ModelId::MergeGatewayDeepseekFlash
                 | ModelId::DeepSeekFlash
+                | ModelId::OllamaDeepSeekV41FlashCloud
                 | ModelId::ZaiGlm53Flash
                 | ModelId::ZaiGlm53Flashx
+                | ModelId::OllamaGlm53FlashCloud
                 | ModelId::MergeGatewayZaiGlm53Flash
                 | ModelId::MergeGatewayZaiGlm53Flashx
                 | ModelId::HuggingFaceGlm53FlashTogether
@@ -293,12 +295,14 @@ impl ModelId {
                 | ModelId::ClaudeHaiku55
                 | ModelId::MergeGatewayAnthropicClaudeHaiku55
                 | ModelId::DeepSeekFlash
+                | ModelId::OllamaDeepSeekV41FlashCloud
                 | ModelId::MergeGatewayDeepseekFlash
                 | ModelId::MetaMuseSpark11
                 | ModelId::MergeGatewayMinimaxH3
                 | ModelId::MiMoV26Flash
                 | ModelId::ZaiGlm53Flash
                 | ModelId::ZaiGlm53Flashx
+                | ModelId::OllamaGlm53FlashCloud
                 | ModelId::MergeGatewayZaiGlm53Flash
                 | ModelId::MergeGatewayZaiGlm53Flashx
                 | ModelId::HuggingFaceGlm53FlashTogether
@@ -359,6 +363,10 @@ impl ModelId {
                 | ModelId::MoonshotKimiK3
                 | ModelId::MergeGatewayMoonshotKimiK3
                 | ModelId::OllamaGlm53Cloud
+                | ModelId::OllamaGlm53FlashCloud
+                | ModelId::OllamaDeepSeekV41FlashCloud
+                | ModelId::OllamaMistralLarge4Cloud
+                | ModelId::OllamaMuseSparkOpenCloud
                 | ModelId::XaiGrok46
                 | ModelId::XaiGrok47
                 | ModelId::MergeGatewayXaiGrok46
@@ -418,13 +426,16 @@ impl ModelId {
             ModelId::ClaudeOpus55 => "5.5",
             // DeepSeek generations
             ModelId::DeepSeekFlash => "4",
+            ModelId::OllamaDeepSeekV41FlashCloud => "4.1",
             // Mistral generations
             ModelId::MistralLarge3 => "3",
             ModelId::MistralLarge4 => "4",
+            ModelId::OllamaMistralLarge4Cloud => "4",
             ModelId::MergeGatewayDeepseekFlash => "4.1",
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",
             ModelId::MetaMuseSpark13 | ModelId::MetaMuseSpark13Contributor => "Muse-Spark-1.3",
             ModelId::MergeGatewayMetaMuseSparkOpen | ModelId::HuggingFaceMuseSparkOpenBaseten => "Muse-Spark-Open",
+            ModelId::OllamaMuseSparkOpenCloud => "Muse-Spark-Open",
             ModelId::MetaMuseWonder10 => "Muse-Wonder-1.0",
             ModelId::MetaMuseWonderFull10 => "Muse-Wonder-Full-1.0",
             // Z.AI generations
@@ -433,6 +444,7 @@ impl ModelId {
             | ModelId::ZaiGlm53Flashx
             | ModelId::MergeGatewayZaiGlm53Flash
             | ModelId::MergeGatewayZaiGlm53Flashx => "5.3",
+            ModelId::OllamaGlm53FlashCloud => "5.3",
             ModelId::Gemini38Flash => "3.8",
             ModelId::MergeGatewayGoogleGemini38Flash => "3.8",
             ModelId::Gemini4Argon => "4",

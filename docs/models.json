@@ -3177,6 +3177,62 @@
         "max_output_tokens": 128000,
         "is_pro": true
       },
+      "glm-5.3-flash:cloud": {
+        "id": "glm-5.3-flash:cloud",
+        "name": "GLM-5.3 Flash (cloud)",
+        "description": "Cloud-hosted multimodal GLM-5.3 Flash model for coding and agentic workflows via Ollama Cloud.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "reasoning_efforts": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
+      "mistral-large-4:cloud": {
+        "id": "mistral-large-4:cloud",
+        "name": "Mistral Large 4 (cloud)",
+        "description": "Cloud-hosted open-weight multimodal Mistral Large 4 model via Ollama Cloud.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000
+      },
+      "muse-spark-open:cloud": {
+        "id": "muse-spark-open:cloud",
+        "name": "Muse Spark Open (cloud)",
+        "description": "Cloud-hosted multimodal Muse Spark Open model for coding, agentic work, and long-context reasoning via Ollama Cloud.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000
+      },
       "minimax-m2.7:cloud": {
         "id": "minimax-m2.7:cloud",
         "name": "MiniMax-M2.7 (cloud)",
@@ -3292,12 +3348,13 @@
       "deepseek-v4.1-flash:cloud": {
         "id": "deepseek-v4.1-flash:cloud",
         "name": "DeepSeek V4.1 Flash (cloud)",
-        "description": "Cloud-hosted DeepSeek V4.1 Flash model via Ollama Cloud.",
+        "description": "Cloud-hosted multimodal DeepSeek V4.1 Flash model via Ollama Cloud.",
         "reasoning": true,
         "tool_call": true,
         "modalities": {
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "output": [
             "text"

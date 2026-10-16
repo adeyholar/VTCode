@@ -108,7 +108,11 @@ impl ModelId {
             ModelId::OllamaGptOss20bCloud,
             ModelId::OllamaGptOss120bCloud,
             ModelId::OllamaGlm53Cloud,
+            ModelId::OllamaGlm53FlashCloud,
             ModelId::OllamaMinimaxM3Cloud,
+            ModelId::OllamaMistralLarge4Cloud,
+            ModelId::OllamaMuseSparkOpenCloud,
+            ModelId::OllamaDeepSeekV41FlashCloud,
             ModelId::OllamaKimiK3Cloud,
             ModelId::OllamaGemma4,
             // llama.cpp models

@@ -332,6 +332,45 @@ mod tests {
     }
 
     #[test]
+    fn ollama_cloud_presets_include_requested_models() {
+        use crate::config::constants::models;
+
+        let presets = presets_for_provider(Provider::OllamaCloud);
+        for model in [
+            models::ollama::MISTRAL_LARGE_4_CLOUD,
+            models::ollama::MUSE_SPARK_OPEN_CLOUD,
+            models::ollama::GLM_5_3_FLASH_CLOUD,
+            models::ollama::DEEPSEEK_V4_1_FLASH_CLOUD,
+        ] {
+            let preset = presets
+                .iter()
+                .find(|preset| preset.model == model)
+                .expect("Ollama Cloud preset");
+            assert_eq!(preset.provider, Provider::OllamaCloud);
+            assert!(preset.show_in_picker);
+            assert_eq!(preset.context_window, Some(1_000_000));
+        }
+
+        let glm_flash = presets
+            .iter()
+            .find(|preset| preset.model == models::ollama::GLM_5_3_FLASH_CLOUD)
+            .expect("GLM-5.3 Flash preset");
+        let supported_efforts: Vec<_> = glm_flash
+            .supported_reasoning_efforts
+            .iter()
+            .map(|preset| preset.effort)
+            .collect();
+        assert_eq!(
+            supported_efforts,
+            vec![
+                ReasoningEffortLevel::Low,
+                ReasoningEffortLevel::High,
+                ReasoningEffortLevel::Max
+            ]
+        );
+    }
+
+    #[test]
     fn moonshot_presets_exist_and_default_to_kimi_k3() {
         let presets = presets::moonshot_presets();
         assert_eq!(presets.len(), 1);

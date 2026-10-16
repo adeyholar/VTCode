@@ -247,6 +247,14 @@ pub enum ModelId {
     /// GLM-5.2 Cloud - Cloud-hosted GLM-5.2 flagship model served via Ollama Cloud
     /// GLM-5.3 Cloud - Cloud-hosted GLM-5.3 flagship model served via Ollama Cloud
     OllamaGlm53Cloud,
+    /// GLM-5.3 Flash Cloud - Multimodal GLM-5.3 Flash served via Ollama Cloud
+    OllamaGlm53FlashCloud,
+    /// Mistral Large 4 Cloud - Multimodal Mistral Large 4 served via Ollama Cloud
+    OllamaMistralLarge4Cloud,
+    /// Muse Spark Open Cloud - Multimodal Muse Spark Open served via Ollama Cloud
+    OllamaMuseSparkOpenCloud,
+    /// DeepSeek V4.1 Flash Cloud - Multimodal DeepSeek V4.1 Flash served via Ollama Cloud
+    OllamaDeepSeekV41FlashCloud,
     /// Kimi K3 Cloud - Moonshot Kimi K3 via Ollama Cloud
     OllamaKimiK3Cloud,
     /// Gemma 4 - Google Gemma 4 model served via Ollama
