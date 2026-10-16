@@ -240,6 +240,7 @@ fn assert_blocked_response_surfaces(
 pub mod blocked;
 pub mod completion;
 pub mod handoff;
+pub mod mid_turn_model_switch;
 pub mod plan;
 pub mod preview;
 pub mod recovery;

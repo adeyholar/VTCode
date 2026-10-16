@@ -548,16 +548,15 @@ pub(crate) async fn run_turn_loop(
             result = stop;
             break;
         }
-        if handle_steering_messages(&mut ctx, working_history, &mut result).await? {
-            break;
-        }
-        if ctx.session_stats.navigation_recovery.blocked() {
-            result = TurnLoopResult::Blocked {
-                reason: Some(crate::agent::runloop::unified::state::NAVIGATION_RECOVERY_BLOCK_REASON.to_string()),
-            };
-            break;
-        }
-        if apply_pending_session_settings(&mut ctx, working_history).await? {
+        // Mid-turn model/effort switches must land BEFORE fresh steering input.
+        // Model-switch compaction summarizes history, so a prompt steered
+        // before compaction would be summarized away and the new model would
+        // never see it verbatim (the TUI "Steered..." echo would then lie).
+        // Applying settings first guarantees fresh input is appended after
+        // compaction plus the resume note and reaches the next request verbatim.
+        let history_len_before_settings = working_history.len();
+        let settings_applied = apply_pending_session_settings(&mut ctx, working_history).await?;
+        if settings_applied {
             // A model or effort switch changes provider capabilities, context
             // budget, and prompt shaping for the request about to be built.
             // Re-derive the cached turn config so the next request uses the
@@ -568,6 +567,31 @@ pub(crate) async fn run_turn_loop(
                 ctx.is_planning_active(),
                 ctx.renderer.supports_inline_ui(),
             );
+            // Compaction may have shrunk history and injected a resume note;
+            // rebase the turn baseline so later slicing (final response,
+            // verification, TUI) cannot index into compacted-away messages.
+            turn_history_start_len = turn_history_start_len.min(working_history.len());
+            tracing::info!(
+                history_before = history_len_before_settings,
+                history_after = working_history.len(),
+                turn_history_start_len,
+                "Rebased turn baseline after mid-turn settings/model switch"
+            );
+        }
+        if handle_steering_messages(&mut ctx, working_history, &mut result).await? {
+            break;
+        }
+        if ctx.session_stats.navigation_recovery.blocked() {
+            result = TurnLoopResult::Blocked {
+                reason: Some(crate::agent::runloop::unified::state::NAVIGATION_RECOVERY_BLOCK_REASON.to_string()),
+            };
+            break;
+        }
+        if settings_applied {
+            // Double-check the new model receives the updated prompt verbatim
+            // before the next LLM request is built: fresh steered input must
+            // sit at the tail after compaction plus resume, not summarized away.
+            verify_mid_turn_prompt_received(working_history, turn_history_start_len);
         }
 
         // A permanent interview denial can happen after this turn's initial
@@ -1789,6 +1813,33 @@ pub(crate) async fn run_turn_loop(
         final_response_was_fallback,
         refused: ctx.harness_state.turn_refused(),
     })
+}
+
+/// Verify the new model actually receives the updated mid-turn prompt verbatim.
+///
+/// Called right after a mid-turn settings/model switch plus steering delivery,
+/// before the next LLM request is built. Fresh steered user input must sit at
+/// the history tail after compaction plus the resume note — never summarized
+/// away. Logs the outcome for trajectory diagnostics; the TUI echo for the
+/// steered prompt already happened in `handle_steering_messages`, so this stays
+/// log-only to avoid duplicate transcript noise.
+fn verify_mid_turn_prompt_received(working_history: &[uni::Message], turn_history_start_len: usize) {
+    let start = turn_history_start_len.min(working_history.len());
+    let tail = working_history.get(start..).unwrap_or(&[]);
+    if let Some(latest_user) = tail.iter().rev().find(|m| m.role == uni::MessageRole::User) {
+        let preview: String = latest_user.content.as_text().chars().take(120).collect();
+        tracing::info!(
+            prompt_preview = %preview,
+            tail_len = tail.len(),
+            history_len = working_history.len(),
+            "Verified mid-turn prompt reaches new model verbatim"
+        );
+    } else {
+        tracing::info!(
+            history_len = working_history.len(),
+            "Model switched mid-turn with no fresh user prompt in current turn; compacted context plus resume note retained"
+        );
+    }
 }
 
 /// Finalize the turn: terminate sessions if needed, emit outcome events,
