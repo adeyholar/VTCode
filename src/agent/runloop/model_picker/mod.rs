@@ -10,7 +10,8 @@
 //! | `rendering` | Step-one list rendering (inline + plain) | `render_step_one_inline`, `render_step_one_plain`, `custom_provider_subtitle`, `static_model_subtitle`, `dynamic_model_subtitle` |
 //! | `rendering/prompts` | Per-step prompt text (reasoning, API key, service tier, MiMo auth, Decisions probe) | `render_reasoning_inline`, `prompt_reasoning_plain`, `show_secure_api_modal`, `prompt_api_key_plain`, `render_service_tier_inline`, `prompt_service_tier_plain`, `render_mimo_auth_method_inline`, `prompt_mimo_auth_method_plain`, `render_decisions_probe_inline`, `prompt_decisions_probe_plain` |
 //! | `interaction` | Ratatui interactive list selection for reasoning, service tier, model list, Decisions probe | `select_model_with_ratatui_list`, `select_reasoning_with_ratatui`, `select_service_tier_with_ratatui`, `select_decisions_probe_with_ratatui` |
-//! | `state_machine` | Step-transition logic: model → reasoning → MiMo auth → service tier → API key → Decisions probe | `process_model_selection`, `handle_reasoning`, `handle_mimo_auth_method`, `handle_service_tier`, `handle_api_key`, `handle_decisions_probe`, `build_result` |
+//! | `state_machine` | Step-transition logic: model → reasoning → MiMo auth → service tier → Claude speed → API key → Decisions probe | `process_model_selection`, `handle_reasoning`, `handle_mimo_auth_method`, `handle_service_tier`, `handle_api_key`, `handle_decisions_probe`, `build_result` |
+//! | `anthropic_speed` | Native Claude speed eligibility, prompts, and typed/inline/ratatui choices | `prompt_anthropic_speed`, `handle_anthropic_speed` |
 //! | `config_persistence` | Persisting completed selection to `vtcode.toml` | `persist_selection` |
 //!
 //! ## State machine contract
@@ -18,7 +19,7 @@
 //! `ModelPickerState` is the single owner of picker state. Step transitions follow this order:
 //!
 //! ```text
-//! AwaitModel -> AwaitReasoning -> AwaitMiMoAuthMethod -> AwaitServiceTier -> AwaitApiKey -> AwaitDecisionsProbe -> Completed
+//! AwaitModel -> AwaitReasoning -> AwaitMiMoAuthMethod -> AwaitServiceTier -> AwaitAnthropicSpeed -> AwaitApiKey -> AwaitDecisionsProbe -> Completed
 //! ```
 //!
 //! `AwaitDecisionsProbe` runs only for eligible OpenAI API-key selections at the
@@ -79,6 +80,7 @@ use subagent::{
     preferred_subagent_model_selection, subagent_model_shortcuts, subagent_reasoning_levels,
 };
 
+mod anthropic_speed;
 mod config_persistence;
 mod dynamic_models;
 mod interaction;
@@ -96,6 +98,24 @@ enum RatatuiOutcome {
     NeedsRefresh,
 }
 
+impl RatatuiOutcome {
+    fn from_progress(renderer: &mut AnsiRenderer, progress: ModelPickerProgress) -> Result<Self> {
+        match progress {
+            ModelPickerProgress::Completed(result) => Ok(Self::Completed(result)),
+            ModelPickerProgress::InProgress => Ok(Self::InProgress),
+            ModelPickerProgress::Cancelled => {
+                renderer.line(MessageStyle::Info, "Model picker cancelled.")?;
+                Ok(Self::Exit)
+            }
+            ModelPickerProgress::Exit => {
+                renderer.line(MessageStyle::Info, "Exiting model picker.")?;
+                Ok(Self::Exit)
+            }
+            ModelPickerProgress::NeedsRefresh => Ok(Self::NeedsRefresh),
+        }
+    }
+}
+
 pub(crate) use self::dynamic_models::DynamicModelRegistry;
 pub(crate) use selection::ModelSelectionResult;
 #[cfg(test)]
@@ -111,6 +131,7 @@ enum PickerStep {
     AwaitReasoning,
     AwaitMiMoAuthMethod,
     AwaitServiceTier,
+    AwaitAnthropicSpeed,
     AwaitApiKey,
     AwaitDecisionsProbe,
 }
@@ -146,6 +167,7 @@ pub(crate) struct ModelPickerState {
     dynamic_models: DynamicModelRegistry,
     selected_reasoning: Option<ReasoningEffortLevel>,
     selected_service_tier: Option<Option<OpenAIServiceTier>>,
+    selected_anthropic_speed: Option<vtcode_config::AnthropicSpeed>,
     selected_mimo_auth: Option<MiMoAuthMethod>,
     selected_decisions_probe: Option<bool>,
     pending_api_key: Option<String>,
@@ -226,6 +248,7 @@ impl ModelPickerState {
             custom_providers,
             selected_reasoning: None,
             selected_service_tier: None,
+            selected_anthropic_speed: None,
             selected_mimo_auth: None,
             selected_decisions_probe: None,
             pending_api_key: None,
@@ -288,6 +311,7 @@ impl ModelPickerState {
         self.selection = None;
         self.selected_reasoning = None;
         self.selected_service_tier = None;
+        self.selected_anthropic_speed = None;
         self.selected_mimo_auth = None;
         self.selected_decisions_probe = None;
         self.pending_api_key = None;
@@ -327,6 +351,7 @@ impl ModelPickerState {
         self.selection = None;
         self.selected_reasoning = None;
         self.selected_service_tier = None;
+        self.selected_anthropic_speed = None;
         self.selected_mimo_auth = None;
         self.selected_decisions_probe = None;
         self.pending_api_key = None;
@@ -375,6 +400,7 @@ impl ModelPickerState {
             PickerStep::AwaitReasoning => self.handle_reasoning(renderer, trimmed),
             PickerStep::AwaitMiMoAuthMethod => self.handle_mimo_auth_method(renderer, trimmed),
             PickerStep::AwaitServiceTier => self.handle_service_tier(renderer, trimmed),
+            PickerStep::AwaitAnthropicSpeed => self.handle_anthropic_speed(renderer, trimmed),
             PickerStep::AwaitApiKey => self.handle_api_key(renderer, trimmed, url_guard).await,
             PickerStep::AwaitDecisionsProbe => self.handle_decisions_probe(renderer, trimmed),
         }
@@ -398,19 +424,8 @@ impl ModelPickerState {
             self.storage_mode(),
         ) {
             Ok(ModelSelectionListOutcome::Predefined(detail)) => {
-                match self.process_model_selection(renderer, detail)? {
-                    ModelPickerProgress::Completed(result) => Ok(RatatuiOutcome::Completed(result)),
-                    ModelPickerProgress::InProgress => Ok(RatatuiOutcome::InProgress),
-                    ModelPickerProgress::Cancelled => {
-                        renderer.line(MessageStyle::Info, "Model picker cancelled.")?;
-                        Ok(RatatuiOutcome::InProgress)
-                    }
-                    ModelPickerProgress::Exit => {
-                        renderer.line(MessageStyle::Info, "Exiting model picker.")?;
-                        Ok(RatatuiOutcome::Exit)
-                    }
-                    ModelPickerProgress::NeedsRefresh => Ok(RatatuiOutcome::NeedsRefresh),
-                }
+                let progress = self.process_model_selection(renderer, detail)?;
+                RatatuiOutcome::from_progress(renderer, progress)
             }
             Ok(ModelSelectionListOutcome::Manual | ModelSelectionListOutcome::Cancelled) => {
                 self.plain_mode_active = true;
@@ -586,6 +601,13 @@ impl ModelPickerState {
                     renderer.line(MessageStyle::Error, "Choose an auth method for MiMo or press Esc to cancel.")?;
                     Ok(ModelPickerProgress::InProgress)
                 }
+            },
+            PickerStep::AwaitAnthropicSpeed => match choice {
+                InlineListSelection::ConfigAction(action) if action == rendering::PICKER_BACK_ACTION => {
+                    self.back_to_model_list(renderer)
+                }
+                InlineListSelection::ConfigAction(action) => self.handle_anthropic_speed(renderer, &action),
+                _ => Ok(ModelPickerProgress::InProgress),
             },
             PickerStep::AwaitServiceTier => match choice {
                 InlineListSelection::ConfigAction(action) if action == rendering::PICKER_BACK_ACTION => {

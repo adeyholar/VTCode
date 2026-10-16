@@ -79,6 +79,7 @@ pub fn create_stream(
         let mut advisor_blocks: Vec<(usize, Value)> = Vec::new();
         let mut stop_details_detail: Option<String> = None;
         let mut block_order = StreamBlockOrder::default();
+        let mut served_speed = None;
 
         while let Some(chunk_result) = body_stream.next().await {
             let chunk = chunk_result.map_err(|err| {
@@ -107,6 +108,7 @@ pub fn create_stream(
                     match event {
                         AnthropicStreamEvent::MessageStart { message } => {
                             let usage_value = serde_json::to_value(&message.usage).unwrap_or_else(|_| Value::Object(Map::new()));
+                            served_speed = super::speed::parse_served_speed(&usage_value);
                             aggregator.set_usage(parse_usage(&usage_value));
                         }
                         AnthropicStreamEvent::ContentBlockStart {
@@ -337,6 +339,7 @@ pub fn create_stream(
                             if let Some(u) = usage {
                                 let usage_value =
                                     serde_json::to_value(&u).unwrap_or_else(|_| Value::Object(Map::new()));
+                                served_speed = super::speed::parse_served_speed(&usage_value).or(served_speed);
                                 let delta_usage = parse_usage(&usage_value);
                                 let mut current_usage = aggregator.usage.take().unwrap_or_default();
 
@@ -414,6 +417,7 @@ pub fn create_stream(
         response.request_id = request_id.clone();
         response.organization_id = organization_id.clone();
 
+        super::speed::log_served_speed(&response.model, served_speed);
         yield LLMStreamEvent::Completed { response: Box::new(response) };
     };
 

@@ -1024,3 +1024,45 @@ async fn resume_wake_during_non_streaming_request_preserves_fresh_planning() {
     assert!(ctx.is_planning_active());
     assert!(!ctx.ctrl_c_state.is_cancel_requested());
 }
+
+#[tokio::test]
+async fn anthropic_fast_capacity_errors_use_existing_bounded_retries_without_clearing_preference() {
+    for status in [429, 529] {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let provider = ScriptedProvider::new(
+            "anthropic",
+            false,
+            Arc::clone(&calls),
+            vec![
+                ScriptedProviderOutcome::Error(uni::LLMError::Provider {
+                    message: "capacity unavailable".to_owned(),
+                    metadata: Some(uni::LLMErrorMetadata::new(
+                        "anthropic",
+                        Some(status),
+                        None,
+                        None,
+                        None,
+                        Some("7".to_owned()),
+                        None,
+                    )),
+                }),
+                ScriptedProviderOutcome::Success {
+                    content: Some("fast capacity recovered"),
+                    request_id: None,
+                },
+            ],
+        );
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut cfg = vtcode_config::VTCodeConfig::default();
+        cfg.provider.anthropic.speed = Some(vtcode_config::AnthropicSpeed::Fast);
+        backing.set_vt_cfg_for_test(cfg);
+        let mut ctx = backing.turn_processing_context();
+        *ctx.provider_client = Box::new(provider);
+        ctx.working_history.push(uni::Message::user("continue".to_owned()));
+        execute_llm_request(&mut ctx, 1, "claude-opus-5-5", Some(320), false, None)
+            .await
+            .unwrap();
+        assert_eq!(calls.lock().unwrap().len(), 2, "status {status}");
+        assert_eq!(ctx.vt_cfg.unwrap().provider.anthropic.speed, Some(vtcode_config::AnthropicSpeed::Fast));
+    }
+}

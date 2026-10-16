@@ -14,7 +14,7 @@ use super::super::selection::{
 use super::{KEEP_CURRENT_DESCRIPTION, STEP_FOUR_TITLE, STEP_THREE_TITLE, STEP_TWO_TITLE};
 use vtcode_commons::modal_hints::MODEL_PICKER_FOLLOW_UP_HINT;
 
-fn back_to_model_list_row() -> InlineListItem {
+pub(in crate::agent::runloop::model_picker) fn back_to_model_list_row() -> InlineListItem {
     vtcode_ui::design::list::action(
         "← Back to model list",
         "Return to step 1 without cancelling the picker.",

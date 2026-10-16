@@ -61,6 +61,7 @@ pub(crate) async fn finalize_model_selection(
     let prev_model = config.model.clone();
     let workspace = config.workspace.clone();
     let auth_cfg = vt_cfg.as_ref().cloned().unwrap_or_default();
+    selection.validate_speed(&auth_cfg)?;
     let (api_key, openai_chatgpt_auth) = resolve_runtime_api_key(&workspace, Some(&auth_cfg), &selection).await?;
     let using_chatgpt_auth = selection.provider_enum == Some(Provider::OpenAI) && openai_chatgpt_auth.is_some();
     let custom_provider_enabled = auth_cfg.custom_provider(&selection.provider).is_some();
@@ -464,16 +465,29 @@ fn selected_provider_config(
     if selection.service_tier_supported {
         openai.service_tier = selection.service_tier;
     }
+    let mut anthropic = configured_anthropic_config(Some(auth_cfg));
+    if let Some(speed) = selection.anthropic_speed
+        && let Some(anthropic) = anthropic.as_mut()
+    {
+        anthropic.speed = Some(speed);
+    }
     ProviderConfig {
         api_key: Some(api_key.to_string()),
         openai_chatgpt_auth,
         copilot_auth: Some(auth_cfg.auth.copilot.clone()),
-        base_url: None,
+        base_url: (selection.provider == "anthropic")
+            .then(|| {
+                auth_cfg
+                    .provider_overrides
+                    .get("anthropic")
+                    .and_then(|config| config.base_url.clone())
+            })
+            .flatten(),
         model: Some(selection.model.clone()),
         prompt_cache: Some(config.prompt_cache.clone()),
         timeouts: None,
         openai: Some(openai),
-        anthropic: configured_anthropic_config(Some(auth_cfg)),
+        anthropic,
         openrouter: Some(auth_cfg.provider.openrouter.clone()),
         model_behavior: config.model_behavior.clone(),
         workspace_root: Some(config.workspace.clone()),
@@ -597,6 +611,7 @@ mod tests {
             service_tier_supported: false,
             service_tier: None,
             service_tier_changed: false,
+            anthropic_speed: None,
             decisions_probe: None,
             decisions_probe_changed: false,
             api_key: api_key.map(ToString::to_string),
@@ -724,6 +739,21 @@ mod tests {
         assert_eq!(anthropic.task_budget_tokens, Some(64_000));
         assert_eq!(provider_config.model.as_deref(), Some("test-model"));
         assert_eq!(provider_config.api_key.as_deref(), Some("key"));
+    }
+
+    #[test]
+    fn selected_provider_config_applies_claude_speed_and_endpoint_without_changing_openai() {
+        let mut auth_cfg = VTCodeConfig::default();
+        auth_cfg.provider.openai.service_tier = Some(vtcode_config::OpenAIServiceTier::Ultrafast);
+        auth_cfg.provider.anthropic.speed = Some(vtcode_config::AnthropicSpeed::Fast);
+        auth_cfg.provider_overrides.entry("anthropic".to_owned()).or_default().base_url =
+            Some("https://gateway.example/v1".to_owned());
+        let mut selection = selection("anthropic", Some(Provider::Anthropic), "ANTHROPIC_API_KEY", None, true);
+        selection.anthropic_speed = Some(vtcode_config::AnthropicSpeed::Standard);
+        let provider_config = selected_provider_config(&selection, &auth_cfg, &runtime_config(), "key", None);
+        assert_eq!(provider_config.base_url.as_deref(), Some("https://gateway.example/v1"));
+        assert_eq!(provider_config.anthropic.unwrap().speed, Some(vtcode_config::AnthropicSpeed::Standard));
+        assert_eq!(provider_config.openai.unwrap().service_tier, Some(vtcode_config::OpenAIServiceTier::Ultrafast));
     }
 
     #[test]

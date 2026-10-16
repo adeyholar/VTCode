@@ -314,6 +314,11 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
 - Supported model IDs live in
   [`crates/codegen/vtcode-config/src/constants/models/anthropic.rs`](../../crates/codegen/vtcode-config/src/constants/models/anthropic.rs).
 
+- **Fast mode:** `/fast [on|off]` and `/model` support native Claude API `claude-opus-5-5`, `claude-opus-5`,
+  and explicitly selected `claude-opus-4-8`. Set `provider.anthropic.speed = "fast"` for premium pricing;
+  `"standard"` or unset uses standard speed. Other routes retain dormant preferences. Switching speeds
+  invalidates prompt-cache reuse. See [fast mode](../development/fast-mode.md).
+
 ## DeepSeek
 
 - **Provider key:** `deepseek`

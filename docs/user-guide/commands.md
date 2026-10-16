@@ -44,9 +44,9 @@ The table below maps the primary subcommands to their purpose; detailed sections
 
 | Command | Purpose |
 | --- | --- |
-| `/fast` | Toggle ultrafast on native OpenAI API-key `gpt-6-astra` or `gpt-6.1-sol` |
-| `/fast on` | Enable ultrafast at higher cost and save the choice |
-| `/fast off` | Clear the tier override and use the OpenAI project default |
+| `/fast` | Toggle native OpenAI ultrafast or Anthropic fast on eligible models |
+| `/fast on` | Enable fast processing at premium pricing and save the choice |
+| `/fast off` | Clear the active provider override and restore its default speed |
 
 Changes apply to subsequent requests and persist through the same configuration path as `/model`.
 Enabling on another route explains which models to select; it does not switch models. Disabling also works after
@@ -54,8 +54,8 @@ switching to an unsupported route or ChatGPT subscription authentication. Each a
 rebuilds the client to reconcile configuration reloads; repeated settings produce the same configuration.
 See the [fast mode guide](../development/fast-mode.md).
 
-The TUI reminds you once per session about `/fast on` when using an eligible model through an OpenAI API key and
-ultrafast is off. Using `/fast` or enabling ultrafast dismisses the reminder for that session.
+The TUI reminds you once per session about `/fast on` when using an eligible native API-key route and
+fast mode is off. Using `/fast` dismisses the reminder. Claude speed changes affect prompt-cache reuse.
 
 ## Execution explanations
 

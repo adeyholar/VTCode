@@ -364,6 +364,7 @@ pub(crate) fn convert_anthropic_to_llm_request(request: AnthropicMessagesRequest
         .and_then(|config| config.task_budget.as_ref())
         .map(|budget| budget.total);
     let anthropic_request_overrides = Some(AnthropicRequestOverrides {
+        speed: None,
         thinking_mode: compatibility_thinking_mode(&request.model, request.thinking.as_ref()),
         thinking_display: compatibility_thinking_display(request.thinking.as_ref()),
         effort: effort

@@ -633,3 +633,7 @@ workspace_trust = "full_auto"
 [acp.zed.tools]
 read_file = true
 list_files = true
+
+# Native Claude fast mode uses premium pricing. Switching speeds invalidates prompt-cache reuse.
+# [provider.anthropic]
+# speed = "fast"  # standard or fast; unset uses standard, incompatible routes keep the preference dormant

@@ -1,5 +1,6 @@
 pub mod advisor;
 pub mod agent;
+pub mod anthropic_speed;
 pub mod auth;
 pub mod automation;
 pub mod commands;
@@ -21,6 +22,7 @@ pub use agent::{
     AgentCodexAppServerConfig, AgentConfig, AgentOnboardingConfig, AgentPromptSuggestionsConfig, MemoriesConfig,
     OpenResponsesConfig, PersistentMemoryConfig,
 };
+pub use anthropic_speed::AnthropicSpeed;
 pub use auth::{AuthConfig, CopilotAuthConfig, OpenAIAuthConfig, OpenAIPreferredMethod, OpenRouterAuthConfig};
 pub use automation::{AutomationConfig, FullAutoConfig, ScheduledTasksConfig};
 pub use commands::CommandsConfig;

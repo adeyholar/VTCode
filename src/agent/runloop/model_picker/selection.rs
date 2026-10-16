@@ -63,6 +63,8 @@ pub(crate) struct ModelSelectionResult {
     pub(crate) service_tier_supported: bool,
     pub(crate) service_tier: Option<OpenAIServiceTier>,
     pub(crate) service_tier_changed: bool,
+    /// None keeps the saved provider preference; explicit values update it.
+    pub(crate) anthropic_speed: Option<vtcode_config::AnthropicSpeed>,
     pub(crate) decisions_probe: Option<bool>,
     pub(crate) decisions_probe_changed: bool,
     pub(crate) api_key: Option<String>,
@@ -73,6 +75,15 @@ pub(crate) struct ModelSelectionResult {
     pub(crate) requires_api_key: bool,
     pub(crate) uses_chatgpt_auth: bool,
     pub(crate) mimo_auth_method: Option<MiMoAuthMethod>,
+}
+
+impl ModelSelectionResult {
+    pub(crate) fn validate_speed(&self, config: &VTCodeConfig) -> Result<()> {
+        if self.anthropic_speed.is_some() && !config.anthropic_speed_supported(&self.provider, &self.model) {
+            anyhow::bail!("Claude speed requires a supported native Anthropic route");
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn parse_model_selection(

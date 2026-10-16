@@ -1305,3 +1305,5 @@ fn turn_scoped_system_capability_matches_supported_model_families() {
     assert!(capabilities::supports_turn_scoped_system_messages(models::anthropic::CLAUDE_SONNET_5_5, ""));
     assert!(!capabilities::supports_turn_scoped_system_messages(models::anthropic::CLAUDE_SONNET_5, ""));
 }
+
+mod speed;

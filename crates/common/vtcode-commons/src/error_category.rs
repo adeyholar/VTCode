@@ -742,7 +742,7 @@ impl From<&crate::llm::LLMError> for ErrorCategory {
                         404 => ErrorCategory::ResourceNotFound,
                         429 => ErrorCategory::RateLimit,
                         400 => ErrorCategory::InvalidParameters,
-                        500 | 502 | 503 | 504 => ErrorCategory::ServiceUnavailable,
+                        500 | 502 | 503 | 504 | 529 => ErrorCategory::ServiceUnavailable,
                         408 => ErrorCategory::Timeout,
                         _ => classify_error_message(message),
                     };

@@ -812,7 +812,13 @@ pub(crate) fn create_provider_client(
             api_key: Some(config.api_key.clone()),
             openai_chatgpt_auth: config.openai_chatgpt_auth.clone(),
             copilot_auth: vt_cfg.map(|cfg| cfg.auth.copilot.clone()),
-            base_url: None,
+            base_url: (provider_name == "anthropic")
+                .then(|| {
+                    vt_cfg
+                        .and_then(|cfg| cfg.provider_overrides.get("anthropic"))
+                        .and_then(|config| config.base_url.clone())
+                })
+                .flatten(),
             model: Some(config.model.clone()),
             prompt_cache: Some(config.prompt_cache.clone()),
             timeouts: None,

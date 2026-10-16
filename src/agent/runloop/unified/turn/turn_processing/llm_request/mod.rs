@@ -544,7 +544,7 @@ async fn execute_llm_request_with_options_impl(
             }
             Err(err) => {
                 let msg = err.to_string();
-                let category = classify_llm_error(&msg);
+                let category = classify_llm_error(&err);
                 let is_misconfiguration = vtcode_commons::detect_misconfiguration_in_anyhow(&err).is_some();
                 let is_retryable = category.is_retryable() && !is_misconfiguration;
                 last_error_retryable = Some(is_retryable);

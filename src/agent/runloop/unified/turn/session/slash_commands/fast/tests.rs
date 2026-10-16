@@ -69,7 +69,10 @@ fn fast_mode_transitions_persist_only_tier_and_preserve_runtime_settings() {
         for enable in [Some(true), Some(true), None, Some(false), None, Some(false)] {
             let was_enabled = cfg.as_ref().unwrap().provider.openai.service_tier == Some(OpenAIServiceTier::Ultrafast);
             let expected = enable.unwrap_or(!was_enabled).then_some(OpenAIServiceTier::Ultrafast);
-            assert_eq!(apply_fast_mode(&config, &mut cfg, &mut client, &mut manager, enable).unwrap(), expected);
+            assert_eq!(
+                apply_fast_mode(&config, &mut cfg, &mut client, &mut manager, enable).unwrap(),
+                expected.map(OpenAIServiceTier::as_str)
+            );
             assert_eq!(client.effective_context_size(&config.model), 123456);
             assert_eq!(cfg.as_ref().unwrap().provider.openai.service_tier, expected);
             let saved = ConfigManager::load_from_file(manager.config_path().unwrap()).unwrap();
@@ -118,7 +121,7 @@ fn fast_mode_failures_leave_active_state_unchanged() {
         assert!(format!("{error:#}").contains(if fail_save {
             "Failed to save service tier"
         } else {
-            "Failed to initialize provider client"
+            "/fast supports native OpenAI and Anthropic only"
         }));
         assert_eq!(toml::Value::try_from(cfg.as_ref().unwrap()).unwrap(), original);
         assert!(std::ptr::eq(original_client, client.as_ref()));
@@ -185,7 +188,10 @@ fn fast_mode_explicit_setting_reconciles_disk_when_runtime_already_matches() {
         disk_cfg.provider.openai.service_tier = persisted;
         manager.save_config(&disk_cfg).unwrap();
 
-        assert_eq!(apply_fast_mode(&config, &mut cfg, &mut client, &mut manager, Some(enable)).unwrap(), expected);
+        assert_eq!(
+            apply_fast_mode(&config, &mut cfg, &mut client, &mut manager, Some(enable)).unwrap(),
+            expected.map(OpenAIServiceTier::as_str)
+        );
 
         assert_eq!(cfg.unwrap().provider.openai.service_tier, expected);
         assert_eq!(
@@ -288,6 +294,27 @@ mod suggestions {
     }
 
     #[test]
+    fn anthropic_fast_suggestion_ignores_dormant_openai_tier_and_mentions_cache_and_price() {
+        let mut config = api_key_config();
+        config.provider = "anthropic".to_owned();
+        config.model = "claude-opus-5-5".to_owned();
+        let mut cfg = native_config();
+        cfg.provider_overrides.entry("anthropic".to_owned()).or_default().base_url =
+            Some("https://api.anthropic.com/v1".to_owned());
+        cfg.provider.openai.service_tier = Some(OpenAIServiceTier::Ultrafast);
+        let mut stats = SessionStats::default();
+        let mut ui = SuggestionUi::new();
+        maybe_render_fast_mode_suggestion(&mut ui.renderer, &config, Some(&cfg), &mut stats).unwrap();
+        let lines = ui.lines();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("/fast on"));
+        assert!(lines[0].contains("premium pricing"));
+        assert!(lines[0].contains("prompt-cache"));
+        maybe_render_fast_mode_suggestion(&mut ui.renderer, &config, Some(&cfg), &mut stats).unwrap();
+        assert!(ui.lines().is_empty());
+    }
+
+    #[test]
     fn fast_mode_suggestion_renders_actionable_info_for_both_models_and_inactive_tiers() {
         for model in ["gpt-6-astra", "gpt-6.1-sol"] {
             for tier in [None, Some(OpenAIServiceTier::Flex), Some(OpenAIServiceTier::Priority)] {
@@ -386,3 +413,6 @@ mod suggestions {
         }
     }
 }
+
+#[path = "tests/anthropic.rs"]
+mod anthropic;

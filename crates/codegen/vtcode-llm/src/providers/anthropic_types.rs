@@ -539,6 +539,8 @@ pub struct AnthropicMessageResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnthropicUsage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) speed: Option<String>,
     #[serde(default, deserialize_with = "deserialize_nullable_u32")]
     pub(crate) input_tokens: u32,
     #[serde(default, deserialize_with = "deserialize_nullable_u32")]

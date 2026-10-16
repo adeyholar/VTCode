@@ -1365,3 +1365,11 @@ continuation, turn limits, and context reuse for long-running exec sessions.
 | `providers.<name>.models`               | array                                                                  | Additional model identifiers to add to a built-in provider's model picker.                                                                                                                          |
 | `providers.<name>.base_url`             | string                                                                 | Override the provider's default API endpoint.                                                                                                                                                       |
 | `providers.<name>.api_key_env`          | string                                                                 | Override the provider's default API key environment variable.                                                                                                                                       |
+
+## Native Claude speed
+
+`provider.anthropic.speed` accepts `"standard"` or `"fast"` (unset uses standard speed). `/fast [on|off]` and
+`/model` save this preference independently of the OpenAI service tier. Fast mode applies only to the native
+Claude API with Opus 5.5, 5, or explicitly selected 4.8; other routes keep the preference dormant. An explicit
+request speed overrides configuration. Fast uses premium pricing, and switching speeds invalidates prompt-cache
+reuse. See [fast mode](../development/fast-mode.md) for eligibility, endpoint precedence, and retry behavior.

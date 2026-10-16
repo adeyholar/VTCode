@@ -442,6 +442,10 @@ pub struct OpenAIConfig {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnthropicConfig {
+    /// Native Claude speed (standard or fast). Fast uses premium pricing; unsupported routes keep this preference dormant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<super::AnthropicSpeed>,
+
     /// Enable adaptive or extended thinking for Anthropic models
     /// When enabled, Claude uses internal reasoning before responding, providing
     /// enhanced reasoning capabilities for complex tasks.
@@ -627,6 +631,7 @@ impl AnthropicFallbacks {
 impl Default for AnthropicConfig {
     fn default() -> Self {
         Self {
+            speed: None,
             extended_thinking_enabled: default_extended_thinking_enabled(),
             interleaved_thinking_beta: default_interleaved_thinking_beta(),
             interleaved_thinking_budget_tokens: default_interleaved_thinking_budget_tokens(),

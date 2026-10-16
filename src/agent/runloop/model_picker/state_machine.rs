@@ -227,6 +227,14 @@ impl ModelPickerState {
     }
 
     fn finish_after_service_tier(&mut self, renderer: &mut AnsiRenderer) -> Result<ModelPickerProgress> {
+        if self.anthropic_speed_eligible() {
+            self.step = PickerStep::AwaitAnthropicSpeed;
+            return self.prompt_anthropic_speed(renderer);
+        }
+        self.finish_after_speed(renderer)
+    }
+
+    pub(super) fn finish_after_speed(&mut self, renderer: &mut AnsiRenderer) -> Result<ModelPickerProgress> {
         if self.selection.as_ref().map(|detail| detail.requires_api_key).unwrap_or(false) {
             self.step = PickerStep::AwaitApiKey;
             self.prompt_api_key_step(renderer)?;
@@ -428,6 +436,9 @@ impl ModelPickerState {
 
     pub(super) fn build_result(&self) -> Result<ModelSelectionResult> {
         let selection = self.selection.as_ref().ok_or_else(|| anyhow!("Model selection missing"))?;
+        if self.selected_anthropic_speed.is_some() && !self.anthropic_speed_eligible() {
+            anyhow::bail!("Claude speed requires a supported native Anthropic route");
+        }
         // A model switch can land on a route that exposes structured reasoning
         // but no configurable effort. Never carry the previous route's effort
         // into that result; `None` is the explicit disable value for the new
@@ -458,6 +469,7 @@ impl ModelPickerState {
             service_tier_supported: selection.service_tier_supported,
             service_tier: chosen_service_tier,
             service_tier_changed,
+            anthropic_speed: self.selected_anthropic_speed,
             decisions_probe,
             decisions_probe_changed,
             api_key: self.pending_api_key.clone(),
@@ -509,6 +521,7 @@ impl ModelPickerState {
         }
         if provider_changed {
             self.selected_service_tier = None;
+            self.selected_anthropic_speed = None;
             self.selected_mimo_auth = None;
             self.selected_decisions_probe = None;
         }

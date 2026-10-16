@@ -1073,7 +1073,7 @@ fn save_clears_default_absent_optional_fields_from_existing_file() {
     // survived every save and the next session kept using them.
     let workspace = assert_fs::TempDir::new().expect("workspace");
     let path = workspace.path().join("vtcode.toml");
-    fs::write(&path, "[provider.openai]\nservice_tier = \"ultrafast\"\n[foreign_tool]\nkeep_me = true\n")
+    fs::write(&path, "[provider.openai]\nservice_tier = \"ultrafast\"\n[provider.anthropic]\nspeed = \"fast\"\n[foreign_tool]\nkeep_me = true\n")
         .expect("seed config");
 
     let config = VTCodeConfig::default();
@@ -1087,6 +1087,8 @@ fn save_clears_default_absent_optional_fields_from_existing_file() {
 
     let reloaded: VTCodeConfig = toml::from_str(&saved).expect("reload");
     assert_eq!(reloaded.provider.openai.service_tier, None);
+    assert_eq!(reloaded.provider.anthropic.speed, None);
+    assert!(!saved.contains("[provider.anthropic]"), "stale Claude speed must be cleared: {saved}");
 }
 
 #[test]

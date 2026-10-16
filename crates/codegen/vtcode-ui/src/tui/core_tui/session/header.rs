@@ -422,9 +422,13 @@ impl Session {
     }
 
     fn header_service_tier_span(&self, tier: &str) -> Span<'static> {
-        if tier.eq_ignore_ascii_case("ultrafast") {
+        if tier.eq_ignore_ascii_case("ultrafast") || tier.eq_ignore_ascii_case("fast") {
             Span::styled(
-                " ULTRAFAST ",
+                if tier.eq_ignore_ascii_case("fast") {
+                    " FAST "
+                } else {
+                    " ULTRAFAST "
+                },
                 ultrafast_badge_style(
                     vtcode_commons::color_policy::current_color_output_policy().enabled,
                     crate::theme::is_safe_colors_only(),

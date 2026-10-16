@@ -85,6 +85,9 @@ pub enum AnthropicOptionalU32Override {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct AnthropicRequestOverrides {
+    /// Explicit request speed takes precedence over provider configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<vtcode_config::AnthropicSpeed>,
     #[serde(default)]
     pub(crate) thinking_mode: AnthropicThinkingModeOverride,
     #[serde(default)]

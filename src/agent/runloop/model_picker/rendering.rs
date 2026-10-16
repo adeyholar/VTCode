@@ -15,10 +15,10 @@ use super::selection::SelectionDetail;
 
 mod prompts;
 pub(super) use prompts::{
-    DECISIONS_PROBE_DISABLE_ACTION, DECISIONS_PROBE_ENABLE_ACTION, DECISIONS_PROBE_SKIP_ACTION, prompt_api_key_plain,
-    prompt_custom_model_entry, prompt_decisions_probe_plain, prompt_mimo_auth_method_plain, prompt_reasoning_plain,
-    prompt_service_tier_plain, render_decisions_probe_inline, render_mimo_auth_method_inline, render_reasoning_inline,
-    render_service_tier_inline, show_secure_api_modal,
+    DECISIONS_PROBE_DISABLE_ACTION, DECISIONS_PROBE_ENABLE_ACTION, DECISIONS_PROBE_SKIP_ACTION, back_to_model_list_row,
+    prompt_api_key_plain, prompt_custom_model_entry, prompt_decisions_probe_plain, prompt_mimo_auth_method_plain,
+    prompt_reasoning_plain, prompt_service_tier_plain, render_decisions_probe_inline, render_mimo_auth_method_inline,
+    render_reasoning_inline, render_service_tier_inline, show_secure_api_modal,
 };
 
 pub(super) const CLOSE_THEME_MESSAGE: &str = "Close the active model picker before selecting a theme.";

@@ -165,7 +165,7 @@ const COMMAND_SKILL_SPECS: &[CommandSkillSpec] = &[
     },
     built_in_command_spec!(
         "fast",
-        "Toggle OpenAI ultrafast processing at higher cost (usage: /fast [on|off])",
+        "Toggle native OpenAI ultrafast or Claude fast at premium pricing (usage: /fast [on|off])",
         "/fast [on|off]",
         "configuration"
     ),

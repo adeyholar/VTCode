@@ -380,6 +380,7 @@ fn base_picker_state(current_provider: &str, current_model: &str) -> ModelPicker
         dynamic_models: DynamicModelRegistry::default(),
         selected_reasoning: None,
         selected_service_tier: None,
+        selected_anthropic_speed: None,
         selected_mimo_auth: None,
         selected_decisions_probe: None,
         pending_api_key: None,
@@ -914,3 +915,5 @@ fn handle_decisions_probe_applies_yes_no_skip() {
     assert!(matches!(progress, ModelPickerProgress::Completed(_)));
     assert_eq!(picker.selected_decisions_probe, None);
 }
+
+mod anthropic_speed;

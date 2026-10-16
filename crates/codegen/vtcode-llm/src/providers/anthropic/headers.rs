@@ -60,6 +60,8 @@ pub struct BetaHeaderConfig<'a> {
     pub include_manual_interleaved_beta: bool,
     pub request_betas: Option<&'a [String]>,
     pub include_task_budget: bool,
+    /// The effective serialized request includes speed on a preview model.
+    pub include_fast_mode: bool,
     pub server_side_fallback: Option<ServerSideFallbackForm>,
     pub include_fallback_credit: bool,
     pub include_mid_conversation_tool_changes: bool,
@@ -114,6 +116,10 @@ pub fn combined_beta_header_value(
         pieces.push(THINKING_DISPLAY_UPDATES_BETA.to_owned());
     }
 
+    if config.include_fast_mode {
+        pieces.push("fast-mode-2026-02-01".to_owned());
+    }
+
     if let Some(betas) = config.request_betas {
         for b in betas {
             if !pieces.contains(b) {
@@ -141,6 +147,7 @@ mod tests {
             include_manual_interleaved_beta: false,
             request_betas: None,
             include_task_budget: false,
+            include_fast_mode: false,
             server_side_fallback: None,
             include_fallback_credit: false,
             include_mid_conversation_tool_changes: false,

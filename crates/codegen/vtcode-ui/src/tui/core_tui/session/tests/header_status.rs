@@ -1024,48 +1024,46 @@ fn ultrafast_header_badge_is_padded_premium_gold_in_both_layouts() {
         widgets::{Paragraph, Widget},
     };
 
-    for hidden in [false, true] {
-        let amber = RgbColor(224, 176, 72);
-        let background = RgbColor(18, 20, 28);
-        let theme = InlineTheme {
-            warning: Some(AnsiColor::Rgb(amber)),
-            background: Some(AnsiColor::Rgb(background)),
-            ..Default::default()
-        };
-        let mut session = Session::new(theme, None, VIEW_ROWS);
-        session.appearance.hide_header = hidden;
-        session.apply_transcript_width(VIEW_WIDTH);
-        session.header_context.provider = format!("{}openai", ui::HEADER_PROVIDER_PREFIX);
-        session.header_context.model = format!("{}gpt-6.1-sol", ui::HEADER_MODEL_PREFIX);
-        session.header_context.service_tier = Some(format!("{}UlTrAfAsT", ui::HEADER_SERVICE_TIER_PREFIX));
-        let lines = session.header_lines();
-        let badge = lines[0]
-            .spans
-            .iter()
-            .find(|span| span.content == " ULTRAFAST ")
-            .expect("premium badge");
+    for (speed, label) in [("UlTrAfAsT", " ULTRAFAST "), ("FaSt", " FAST ")] {
+        for hidden in [false, true] {
+            let amber = RgbColor(224, 176, 72);
+            let background = RgbColor(18, 20, 28);
+            let theme = InlineTheme {
+                warning: Some(AnsiColor::Rgb(amber)),
+                background: Some(AnsiColor::Rgb(background)),
+                ..Default::default()
+            };
+            let mut session = Session::new(theme, None, VIEW_ROWS);
+            session.appearance.hide_header = hidden;
+            session.apply_transcript_width(VIEW_WIDTH);
+            session.header_context.provider = format!("{}openai", ui::HEADER_PROVIDER_PREFIX);
+            session.header_context.model = format!("{}gpt-6.1-sol", ui::HEADER_MODEL_PREFIX);
+            session.header_context.service_tier = Some(format!("{}{speed}", ui::HEADER_SERVICE_TIER_PREFIX));
+            let lines = session.header_lines();
+            let badge = lines[0].spans.iter().find(|span| span.content == label).expect("premium badge");
 
-        let colors_enabled = vtcode_commons::color_policy::color_output_enabled();
-        let (foreground, background) = if colors_enabled {
-            (Color::Rgb(0, 0, 0), Color::Rgb(0xD9, 0x9A, 0x4E))
-        } else {
-            (Color::Reset, Color::Reset)
-        };
-        assert_eq!(badge.style.fg, Some(foreground));
-        assert_eq!(badge.style.bg, Some(background));
-        assert_eq!(badge.style.add_modifier.contains(Modifier::REVERSED), !colors_enabled);
-        assert!(badge.style.sub_modifier.contains(Modifier::DIM));
-        assert_eq!(badge.style.add_modifier.contains(Modifier::BOLD), !crate::theme::is_bold_bright_mode());
+            let colors_enabled = vtcode_commons::color_policy::color_output_enabled();
+            let (foreground, background) = if colors_enabled {
+                (Color::Rgb(0, 0, 0), Color::Rgb(0xD9, 0x9A, 0x4E))
+            } else {
+                (Color::Reset, Color::Reset)
+            };
+            assert_eq!(badge.style.fg, Some(foreground));
+            assert_eq!(badge.style.bg, Some(background));
+            assert_eq!(badge.style.add_modifier.contains(Modifier::REVERSED), !colors_enabled);
+            assert!(badge.style.sub_modifier.contains(Modifier::DIM));
+            assert_eq!(badge.style.add_modifier.contains(Modifier::BOLD), !crate::theme::is_bold_bright_mode());
 
-        let area = Rect::new(0, 0, 20, 1);
-        let mut buffer = Buffer::empty(area);
-        Paragraph::new(Line::from(vec![Span::raw("tier "), badge.clone()]))
-            .style(Style::default().add_modifier(Modifier::DIM))
-            .render(area, &mut buffer);
-        assert!(buffer[(0, 0)].modifier.contains(Modifier::DIM));
-        assert!(!buffer[(6, 0)].modifier.contains(Modifier::DIM));
-        assert_eq!(buffer[(6, 0)].fg, foreground);
-        assert_eq!(buffer[(6, 0)].bg, background);
+            let area = Rect::new(0, 0, 20, 1);
+            let mut buffer = Buffer::empty(area);
+            Paragraph::new(Line::from(vec![Span::raw("tier "), badge.clone()]))
+                .style(Style::default().add_modifier(Modifier::DIM))
+                .render(area, &mut buffer);
+            assert!(buffer[(0, 0)].modifier.contains(Modifier::DIM));
+            assert!(!buffer[(6, 0)].modifier.contains(Modifier::DIM));
+            assert_eq!(buffer[(6, 0)].fg, foreground);
+            assert_eq!(buffer[(6, 0)].bg, background);
+        }
     }
 }
 

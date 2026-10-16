@@ -128,8 +128,10 @@ impl ConfigManager {
     /// resettable optional reaches a save path.
     fn prune_cleared_optional_fields(doc: &mut toml_edit::DocumentMut, config: &VTCodeConfig) {
         // Each entry: (dotted path, is_cleared).
-        let cleared: &[(&[&str], bool)] =
-            &[(&["provider", "openai", "service_tier"], config.provider.openai.service_tier.is_none())];
+        let cleared: &[(&[&str], bool)] = &[
+            (&["provider", "openai", "service_tier"], config.provider.openai.service_tier.is_none()),
+            (&["provider", "anthropic", "speed"], config.provider.anthropic.speed.is_none()),
+        ];
         for (path, is_cleared) in cleared {
             if *is_cleared {
                 Self::remove_path_and_prune_empty_parents(doc.as_table_mut(), path);

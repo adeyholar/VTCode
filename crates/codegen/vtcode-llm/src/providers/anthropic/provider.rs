@@ -11,9 +11,9 @@
 
 use crate::client::LLMClient;
 use crate::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, LLMStream, LLMStreamEvent, ToolDefinition};
-use vtcode_config::TimeoutsConfig;
-use vtcode_config::constants::{env_vars, models, urls};
+use vtcode_config::constants::{models, urls};
 use vtcode_config::core::{AnthropicConfig, AnthropicPromptCacheSettings, ModelConfig, PromptCachingConfig};
+use vtcode_config::{AnthropicSpeed, TimeoutsConfig};
 
 use super::capabilities;
 use super::fallback_retry::{self, RefusalRetryPlan};
@@ -23,7 +23,7 @@ use super::response_parser;
 use super::stream_decoder;
 use super::validation;
 
-use crate::providers::common::{extract_prompt_cache_settings, override_base_url, resolve_model};
+use crate::providers::common::{extract_prompt_cache_settings, resolve_model};
 use crate::providers::error_handling::{format_network_error, format_parse_error, handle_anthropic_http_error};
 use crate::providers::openai::CustomProviderAuthHandle;
 
@@ -56,6 +56,7 @@ pub struct AnthropicProvider {
     prompt_cache_settings: AnthropicPromptCacheSettings,
     anthropic_config: AnthropicConfig,
     custom_provider_auth: Option<CustomProviderAuthHandle>,
+    custom_provider: bool,
     model_behavior: Option<ModelConfig>,
 }
 
@@ -100,6 +101,7 @@ impl AnthropicProvider {
             prompt_cache_settings: AnthropicPromptCacheSettings::default(),
             anthropic_config: AnthropicConfig::default(),
             custom_provider_auth: None,
+            custom_provider: false,
             model_behavior: None,
         }
     }
@@ -148,7 +150,7 @@ impl AnthropicProvider {
         let base_url_value = if models::minimax::SUPPORTED_MODELS.contains(&model.as_str()) {
             crate::providers::minimax::resolve_minimax_base_url(base_url)
         } else {
-            override_base_url(urls::ANTHROPIC_API_BASE, base_url, Some(env_vars::ANTHROPIC_BASE_URL))
+            AnthropicSpeed::resolve_base_url(base_url.as_deref())
         };
 
         Self {
@@ -160,12 +162,14 @@ impl AnthropicProvider {
             prompt_cache_settings,
             anthropic_config,
             custom_provider_auth: None,
+            custom_provider: false,
             model_behavior,
         }
     }
 
     pub(crate) fn with_custom_auth(mut self, custom_provider_auth: Option<CustomProviderAuthHandle>) -> Self {
         self.custom_provider_auth = custom_provider_auth;
+        self.custom_provider = true;
         self
     }
 
@@ -335,7 +339,18 @@ impl AnthropicProvider {
     }
 
     fn convert_to_anthropic_format(&self, request: &LLMRequest) -> Result<Value, LLMError> {
-        request_builder::convert_to_anthropic_format(request, &self.request_builder_context())
+        let mut body = request_builder::convert_to_anthropic_format(request, &self.request_builder_context())?;
+        super::speed::apply_speed(&mut body, self.resolve_speed(request)?);
+        Ok(body)
+    }
+
+    fn resolve_speed(&self, request: &LLMRequest) -> Result<Option<AnthropicSpeed>, LLMError> {
+        super::speed::resolve_speed(
+            request,
+            self.anthropic_config.speed,
+            self.resolved_request_model(request),
+            !self.custom_provider && AnthropicSpeed::is_native_endpoint(&self.base_url),
+        )
     }
 
     fn beta_header_for_request(
@@ -356,6 +371,8 @@ impl AnthropicProvider {
                 .and_then(Value::as_str)
                 == Some("enabled"),
             request_betas,
+            include_fast_mode: anthropic_request.get("speed").is_some()
+                && AnthropicSpeed::requires_beta(self.resolved_request_model(request)),
             include_task_budget: anthropic_request
                 .get("output_config")
                 .and_then(|value| value.get("task_budget"))
@@ -408,7 +425,7 @@ impl AnthropicProvider {
     ) -> Result<AnthropicHttpResponse, LLMError> {
         let include_advanced_tool_use = self.requires_advanced_tool_use_beta(request);
         let betas = self.effective_betas(request);
-        let url = format!("{}/messages", self.base_url);
+        let url = format!("{}/messages", self.base_url.trim_end_matches('/'));
 
         let beta_header =
             self.beta_header_for_request(request, anthropic_request, include_advanced_tool_use, betas.as_deref());
@@ -542,6 +559,15 @@ impl AnthropicProvider {
         plan: &RefusalRetryPlan,
     ) -> Option<AnthropicHttpResponse> {
         let fallback_retry::RefusalRetryBody { mut body, with_token } = plan.retry_body(original_body, &self.model);
+        let retry_request = plan.retry_request(request, with_token);
+        let speed = match self.resolve_speed(&retry_request) {
+            Ok(speed) => speed,
+            Err(err) => {
+                tracing::warn!(provider = "anthropic", error = %err, "refusal retry has incompatible requested speed");
+                return None;
+            }
+        };
+        super::speed::apply_speed(&mut body, speed);
         tracing::info!(
             provider = "anthropic",
             recommended_model = %plan.model,
@@ -761,6 +787,7 @@ impl LLMProvider for AnthropicProvider {
     }
 
     fn validate_request(&self, request: &LLMRequest) -> Result<(), LLMError> {
+        self.resolve_speed(request)?;
         validation::validate_request(request, &self.model, &self.anthropic_config, "Anthropic")
     }
 }
