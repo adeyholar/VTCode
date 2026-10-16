@@ -132,6 +132,44 @@ fn is_read_file_style_record(record: &ToolExecutionRecord) -> bool {
     tool_intent::file_operation_action_is(&record.args, "read")
 }
 
+/// Read-target identity for cross-turn reuse matching: what was read and how
+/// the read was scoped. `verbatim` distinguishes raw file-line output (bare
+/// `sed -n '<range>p'`) from transformed output (piped stages, awk programs);
+/// a verbatim record can only serve a verbatim query with an identical slice,
+/// and a transformed record can only serve an identically-transformed one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExecTargetIdentity {
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    verbatim: bool,
+}
+
+impl ExecTargetIdentity {
+    /// Identity of a command's bounded slice read, when the command parses as
+    /// one. Returns `None` for mutating or dynamic shapes.
+    fn from_args(args: &Value) -> Option<Self> {
+        let target = crate::tools::parse_exec_read_target(args)?;
+        Some(Self {
+            path: target.path,
+            start_line: target.start_line,
+            end_line: target.end_line,
+            verbatim: target.verbatim,
+        })
+    }
+
+    /// Serve-ability: a served read must be the same positioned slice with the
+    /// same transform class. Superset coverage is deliberately out of scope
+    /// for command reads — the command text, not a structured offset, scopes
+    /// the read, so nothing here proves a wider command covers a narrower one.
+    fn serves(&self, query: &Self) -> bool {
+        self.path == query.path
+            && self.start_line == query.start_line
+            && self.end_line == query.end_line
+            && self.verbatim == query.verbatim
+    }
+}
+
 impl ToolExecutionHistory {
     /// Find the most recent spooled output for a tool call with identical args.
     pub fn find_recent_spooled_result(&self, tool_name: &str, args: &Value, max_age: Duration) -> Option<Value> {
@@ -147,6 +185,13 @@ impl ToolExecutionHistory {
     /// targets the same file path and compatible read shape. This enables
     /// cross-turn dedup only when the cached read covers the new request.
     ///
+    /// For command-session tools (`exec_command`, `unified_exec`), only a
+    /// read-only-classified command that parses as a bounded slice read
+    /// (`sed -n '<range>p' <file>`, `awk '<NR program>' <file>`) participates;
+    /// the served read must be the identical slice with the same transform
+    /// class (verbatim vs piped). Mutating commands and dynamic shapes never
+    /// reuse.
+    ///
     /// Returns `None` for non-read-only tools or when no matching path can be
     /// extracted from the args.
     pub fn find_recent_successful_by_read_target(
@@ -155,6 +200,9 @@ impl ToolExecutionHistory {
         query_args: &Value,
         max_age: Duration,
     ) -> Option<Value> {
+        if matches!(tool_name, tools::EXEC_COMMAND | tools::UNIFIED_EXEC) {
+            return self.find_recent_successful_by_exec_slice(tool_name, query_args, max_age);
+        }
         let query_path = Self::extract_read_target(tool_name, query_args)?;
         self.find_recent_matching_with_predicate(tool_name, max_age, ReplayMode::Any, |record| {
             let record_path = Self::extract_read_target(tool_name, &record.args)?;
@@ -166,6 +214,37 @@ impl ToolExecutionHistory {
             // already an exact read-shape match. Other read tools use the
             // generic extent check below to allow cached supersets.
             if tool_name != tools::CODE_SEARCH && !Self::read_extent_matches(&record.args, query_args) {
+                return None;
+            }
+            Some(())
+        })
+    }
+
+    /// Exec-slice variant of [`Self::find_recent_successful_by_read_target`]:
+    /// cross-turn reuse for bounded shell reads. Validated by the shared
+    /// read-only classification plus per-record intent re-check, so a mutating
+    /// command recorded under the same tool name can never be served.
+    fn find_recent_successful_by_exec_slice(
+        &self,
+        tool_name: &str,
+        query_args: &Value,
+        max_age: Duration,
+    ) -> Option<Value> {
+        let query_identity = ExecTargetIdentity::from_args(query_args)?;
+        // Fail closed: the query itself must be read-only, not just slice-shaped.
+        if tool_intent::classify_tool_intent(tool_name, query_args).mutating {
+            return None;
+        }
+        self.find_recent_matching_with_predicate(tool_name, max_age, ReplayMode::Any, |record| {
+            let record_identity = ExecTargetIdentity::from_args(&record.args)?;
+            if !record_identity.serves(&query_identity) {
+                return None;
+            }
+            // The parsed shape is identical, but the recorded command may
+            // still have been mutating (e.g. `sed -i '1,2p;d' file` masks as
+            // a slice). A record is servable only when the registry recorded
+            // it as a non-mutating call.
+            if tool_intent::classify_tool_intent(tool_name, &record.args).mutating {
                 return None;
             }
             Some(())
