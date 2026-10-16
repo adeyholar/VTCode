@@ -1805,6 +1805,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about HumanEval Benchmark Results - October 22, 2025?", "How does
     Executive Summary work?", "How does Configuration work?"
 
+- **File**: `docs/benchmarks/PLAN-VTCODE-SWEBENCH-LITE.md`
+  - **Content**: Plan: Evaluate VT Code on SWE-bench Lite
+  - **Topics**: Goal, Benchmark choice, Phases, Cost controls, Success criteria
+  - **User Questions**: "What can you tell me about Plan: Evaluate VT Code on SWE-bench Lite?", "How does Goal work?",
+    "How does Benchmark choice work?"
+
 - **File**: `docs/benchmarks/README.md`
   - **Content**: VT Code Benchmarks
   - **Topics**: Overview, Next.js AI Agent Evaluations, HumanEval Benchmark, Contributing, References

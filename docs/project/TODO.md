@@ -54,3 +54,9 @@ $openai-docs make a plan to migrate this project to the latest model family. sug
 use Codex `Plugin Creator`, Help me build a plugin. Start by asking what it should do, then help me package it as a ZIP for upload to OpenAI Platform.
 ```
 ````
+
+## Benchmarking TODO
+
+- [ ] Run a real VT Code evaluation on SWE-bench Lite. Follow the
+	[evaluation plan](../benchmarks/PLAN-VTCODE-SWEBENCH-LITE.md), pilot first, and submit reproducible
+	results if eligible.
