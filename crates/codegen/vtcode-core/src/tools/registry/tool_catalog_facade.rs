@@ -275,7 +275,10 @@ impl SessionToolCatalogState {
                 })
                 .cloned()
         } {
-            return entry.snapshot.with_cache_hit(true);
+            let mut snapshot = entry.snapshot.with_cache_hit(true);
+            // Stable catalogs share definitions across modes, not turn state.
+            snapshot.planning_active = planning_active;
+            return snapshot;
         }
 
         let filtered = filter_tool_definitions_for_mode_with_stability(
@@ -434,6 +437,44 @@ mod tests {
 
     fn function_tool(name: &str) -> ToolDefinition {
         ToolDefinition::function(name.to_string(), name.to_string(), serde_json::json!({}))
+    }
+
+    #[tokio::test]
+    async fn stable_catalog_cache_rebinds_live_planning_state_without_rebuilding_definitions() {
+        for initial_planning in [false, true] {
+            let state = SessionToolCatalogState::new();
+            let tools = Arc::new(RwLock::new(vec![
+                function_tool(tools::EXEC_COMMAND),
+                function_tool(tools::APPLY_PATCH),
+                function_tool(tools::REQUEST_USER_INPUT),
+            ]));
+            let first = state
+                .filtered_snapshot_with_stats_ex(&tools, initial_planning, true, true)
+                .await;
+            for planning in [!initial_planning, initial_planning] {
+                let next = state.filtered_snapshot_with_stats_ex(&tools, planning, true, true).await;
+                assert!(next.cache_hit);
+                assert_eq!(next.planning_active, planning);
+                assert_eq!(next.tool_catalog_hash, first.tool_catalog_hash);
+                assert_eq!(next.epoch, first.epoch);
+                assert!(Arc::ptr_eq(next.snapshot.as_ref().unwrap(), first.snapshot.as_ref().unwrap()));
+                let prompt = crate::prompts::system::PLANNING_WORKFLOW_INTERVIEW_POLICY_LINE;
+                assert!(
+                    crate::core::agent::runner::prompt_alignment::validate_prompt_catalog_alignment(
+                        prompt, &next, planning, true
+                    )
+                    .is_ok()
+                );
+            }
+            let disabled = state
+                .filtered_snapshot_with_stats_ex(&tools, !initial_planning, false, true)
+                .await;
+            assert!(!disabled.cache_hit);
+            assert_eq!(disabled.planning_active, !initial_planning);
+            assert!(!disabled.request_user_input_enabled);
+            assert!(!disabled.active_tool_names.iter().any(|name| name == tools::REQUEST_USER_INPUT));
+            assert_ne!(disabled.tool_catalog_hash, first.tool_catalog_hash);
+        }
     }
 
     #[tokio::test]

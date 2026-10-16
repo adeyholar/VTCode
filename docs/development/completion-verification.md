@@ -102,6 +102,11 @@ establishes a build result; behavioral correctness still needs an appropriate
 regression or exercised user flow. Automatic coverage selection, browser checks,
 and fingerprints for external workspace changes are outside this policy.
 
+Source-repair flags such as `cargo clippy --fix`, `ruff check --fix`, `--fix-only`, and suppression-writing options
+create mutation debt. Run a separate checker after repairs; a declared tracker requirement cannot turn a repair into
+verification. Ruff invocations carrying explicit repair flags remain conservative even when combined with `--diff`.
+Requirements are preserved for explicit correction rather than silently rewritten.
+
 ## Implementation boundaries
 
 The registry owns freshness and required-check evidence.

@@ -4,6 +4,7 @@ use super::*;
 async fn interrupted_provider_follow_up_stops_after_completed_tool_without_recovery() {
     struct InterruptedProvider {
         requests: Arc<AtomicUsize>,
+        stop: Arc<crate::agent::runloop::unified::state::CtrlCState>,
     }
     #[async_trait::async_trait]
     impl uni::LLMProvider for InterruptedProvider {
@@ -16,6 +17,7 @@ async fn interrupted_provider_follow_up_stops_after_completed_tool_without_recov
         async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
             let call = self.requests.fetch_add(1, Ordering::SeqCst);
             if call == 1 {
+                self.stop.request_local_cancel();
                 return Err(uni::LLMError::Provider {
                     message: "Provider error: Interrupted by user".to_owned(),
                     metadata: None,
@@ -55,7 +57,8 @@ async fn interrupted_provider_follow_up_stops_after_completed_tool_without_recov
     let requests = Arc::new(AtomicUsize::new(0));
     let mut backing = TestTurnProcessingBacking::new(8).await;
     let harness_path = backing.enable_harness_emitter();
-    backing.set_provider(Box::new(InterruptedProvider { requests: requests.clone() }));
+    let stop = backing.turn_loop_context().ctrl_c_state.clone();
+    backing.set_provider(Box::new(InterruptedProvider { requests: requests.clone(), stop }));
     let mut history = vec![uni::Message::user("write the file".to_owned())];
     let context = backing.turn_loop_context();
     let emitter = context.harness_emitter.cloned().unwrap();
@@ -77,16 +80,18 @@ async fn interrupted_provider_follow_up_stops_after_completed_tool_without_recov
 }
 
 #[test]
-fn provider_cancellation_and_shared_exit_precede_other_errors() {
+fn local_cancellation_and_exit_precede_provider_errors() {
     let state = crate::agent::runloop::unified::state::CtrlCState::new();
     let error = anyhow::anyhow!("Interrupted by user");
-    assert!(matches!(provider_stop_outcome(&state, &error), Some(TurnLoopResult::Cancelled)));
+    assert!(provider_stop_outcome(&state, &error).is_none(), "provider prose cannot request local cancellation");
     assert!(provider_stop_outcome(&state, &anyhow::anyhow!("invalid schema")).is_none());
     state.request_local_cancel();
     assert!(matches!(
         provider_stop_outcome(&state, &anyhow::anyhow!("invalid schema")),
         Some(TurnLoopResult::Cancelled)
     ));
+    state.mark_cancel_handled();
+    assert!(matches!(provider_stop_outcome(&state, &error), Some(TurnLoopResult::Cancelled)));
     state.request_exit();
     assert!(matches!(provider_stop_outcome(&state, &error), Some(TurnLoopResult::Exit)));
 }
@@ -227,4 +232,56 @@ async fn approved_plan_handoff_without_assistant_response_stays_completed() {
         }),
         "approved-plan handoff must not synthesize a final assistant item"
     );
+}
+
+#[tokio::test]
+async fn session_164101_provider_cancellation_without_local_stop_can_resume_planning() {
+    struct PlanningProvider {
+        calls: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for PlanningProvider {
+        fn name(&self) -> &str {
+            "openai"
+        }
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            match self.calls.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(uni::LLMResponse { tool_calls: Some(vec![uni::ToolCall::function("read".into(), tool_names::READ_FILE.into(), json!({"path":"README.md"}).to_string())]), ..uni::LLMResponse::new(request.model, "") }),
+                // Exact provider-error wording from the session's seventh request.
+                1 => Err(uni::LLMError::Provider { message: "Provider error: \u{1b}[2m\u{1b}[36mmerge-gateway\u{1b}[0m \u{1b}[31mInterrupted by user\u{1b}[0m".into(), metadata: None }),
+                2 => Ok(uni::LLMResponse::new(request.model, format!("<proposed_plan>\n{STREAMED_VALID_PLAN}\n</proposed_plan>"))),
+                _ => panic!("unexpected recovery request"),
+            }
+        }
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".into()]
+        }
+        fn validate_request(&self, _: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+    }
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    backing.activate_planning_for_test();
+    fs::write(backing.workspace_path().join("README.md"), "# Readme\n").unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    backing.set_provider(Box::new(PlanningProvider { calls: calls.clone() }));
+    let mut history = vec![uni::Message::user("Refine README prose.".into())];
+    let first = run_turn_loop(&mut history, backing.turn_loop_context())
+        .await
+        .expect("provider failure handoff");
+    assert!(
+        matches!(first.result, TurnLoopResult::Blocked { .. }),
+        "provider prose cannot become user cancellation"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    history.push(uni::Message::user("Continue drafting the proposal.".into()));
+    let second = run_turn_loop(&mut history, backing.turn_loop_context())
+        .await
+        .expect("explicit fresh continuation");
+    assert!(second.plan_approved_execution_pending);
+    assert!(matches!(second.result, TurnLoopResult::Completed { plan_approved_execution_pending: true }));
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }

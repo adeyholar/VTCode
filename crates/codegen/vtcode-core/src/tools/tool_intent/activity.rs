@@ -60,6 +60,13 @@ fn python_verification_arguments(arguments: &[String]) -> bool {
 }
 
 fn is_verification_invocation(words: &[String]) -> bool {
+    // Verifiers may emit build artifacts; reject source-repair modes without
+    // applying the stricter inspection-only output restrictions to compilers.
+    if crate::tools::command_args::command_uses_source_repair(words)
+        || crate::tools::command_args::environment_prefix_has_injection_keys(words)
+    {
+        return false;
+    }
     let command_words = crate::tools::command_args::command_words_after_environment_prefix(words);
     let first = command_words.first().map(String::as_str).unwrap_or_default();
     let second = command_words.get(1).map(|word| word.to_ascii_lowercase());
@@ -124,16 +131,11 @@ fn is_verification_invocation(words: &[String]) -> bool {
         "deno" => matches!(second.as_deref(), Some("test" | "lint" | "check")),
         "make" | "gmake" | "just" => make_like_verification_targets(command_words),
         "uv" => {
-            if command_words.get(1).is_none_or(|word| word != "run") {
+            let Some(arguments) = crate::tools::command_args::uv_run_command_words(command_words) else {
                 return false;
-            }
-            let mut arguments = command_words[2..].iter();
-            let target = arguments.find(|word| {
-                !matches!(
-                    word.as_str(),
-                    "--frozen" | "--locked" | "--no-sync" | "--offline" | "--no-project" | "--quiet" | "-q"
-                )
-            });
+            };
+            let mut arguments = arguments.iter();
+            let target = arguments.next();
             match target.map(String::as_str) {
                 Some("pytest") => true,
                 Some("ruff") => arguments.next().is_some_and(|argument| argument == "check"),
@@ -1113,6 +1115,53 @@ mod tests {
 
     fn exec_command(command: &str) -> Value {
         json!({"cmd": command})
+    }
+
+    #[test]
+    fn source_repair_commands_create_debt_instead_of_verifying() {
+        for command in [
+            "cargo clippy --fix --allow-dirty",
+            "env LD_PRELOAD=./rewrite.so cargo clippy",
+            "cargo +nightly clippy --fix",
+            "cargo fix --allow-dirty",
+            "ruff check --fix .",
+            "ruff check --fix-only .",
+            "ruff check --add-noqa .",
+            "ruff check --add-ignore=reason .",
+            "uv run --frozen --offline ruff check --fix .",
+            "cargo clippy --fix && cargo check",
+            "ruff check --fix . | head -20",
+            // Do not treat an operand value as a safe preview flag.
+            "ruff check --fix --exclude --diff .",
+        ] {
+            let args = exec_command(command);
+            assert_eq!(classify_shell_activity(tools::EXEC_COMMAND, &args), ShellActivity::Mutation, "{command}");
+            assert!(!shell_command_is_admitted_verification_attempt(&args), "{command}");
+            assert!(exec_mutation_should_incur_debt(command, &json!({"exit_code": 0})), "{command}");
+        }
+        for command in [
+            "cargo clippy --locked",
+            "cargo nextest run fix",
+            "ruff check --no-fix .",
+            "ruff check --diff .",
+            "uv run --frozen --offline ruff check --no-fix .",
+        ] {
+            let args = exec_command(command);
+            assert_eq!(classify_shell_activity(tools::EXEC_COMMAND, &args), ShellActivity::Verification, "{command}");
+            assert!(shell_command_is_admitted_verification_attempt(&args), "{command}");
+            assert!(!exec_mutation_should_incur_debt(command, &json!({"exit_code": 0})), "{command}");
+        }
+    }
+
+    #[test]
+    fn compiler_artifact_writes_remain_eligible_verification() {
+        let command = "rustc --crate-type lib sample.rs -o checked.rlib";
+        let args = exec_command(command);
+        assert_eq!(classify_shell_activity(tools::EXEC_COMMAND, &args), ShellActivity::Verification);
+        assert!(shell_command_is_admitted_verification_attempt(&args));
+        // The inspection proof still sees a write; verifier eligibility owns
+        // the build-artifact exemption, not the read-only permission boundary.
+        assert!(exec_mutation_should_incur_debt(command, &json!({"exit_code":0})));
     }
 
     #[test]

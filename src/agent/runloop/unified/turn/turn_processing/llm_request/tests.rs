@@ -11,6 +11,13 @@ struct ScriptedProvider {
     supports_streaming: bool,
     recorded_previous_response_ids: Arc<Mutex<Vec<Option<String>>>>,
     outcomes: Mutex<VecDeque<ScriptedProviderOutcome>>,
+    resume_wake: Option<ResumeWake>,
+}
+
+struct ResumeWake {
+    notify: Arc<tokio::sync::Notify>,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
 }
 
 enum ScriptedProviderOutcome {
@@ -34,6 +41,7 @@ impl ScriptedProvider {
             supports_streaming: false,
             recorded_previous_response_ids,
             outcomes: Mutex::new(VecDeque::from(outcomes)),
+            resume_wake: None,
         }
     }
 
@@ -62,6 +70,12 @@ impl uni::LLMProvider for ScriptedProvider {
             .lock()
             .expect("previous_response_id recorder")
             .push(request.previous_response_id.clone());
+
+        if let Some(wake) = &self.resume_wake {
+            wake.entered.notify_one();
+            wake.notify.notify_one();
+            wake.release.notified().await;
+        }
 
         match self
             .outcomes
@@ -969,4 +983,44 @@ fn harness_streaming_bridge_tracks_streamed_tool_call_item_ids() {
         Some("turn_tool_map-step-5-assistant-stream-2-tool-call-call_42")
     );
     assert_eq!(item_ids.get("call_42").map(|(_, name)| name.as_str()), Some("shell"));
+}
+
+#[tokio::test]
+async fn resume_wake_during_non_streaming_request_preserves_fresh_planning() {
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    backing.activate_planning_for_test();
+    let mut ctx = backing.turn_processing_context();
+    ctx.ctrl_c_state.request_local_cancel();
+    ctx.ctrl_c_state.mark_cancel_handled();
+    ctx.ctrl_c_state.reset();
+    let mut provider = ScriptedProvider::new(
+        "mycorp",
+        false,
+        Arc::new(Mutex::new(Vec::new())),
+        vec![ScriptedProviderOutcome::Success {
+            content: Some("continued planning"),
+            request_id: None,
+        }],
+    );
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    provider.resume_wake = Some(ResumeWake {
+        notify: ctx.ctrl_c_notify.clone(),
+        entered: entered.clone(),
+        release: release.clone(),
+    });
+    *ctx.provider_client = Box::new(provider);
+    ctx.working_history
+        .push(uni::Message::user("Continue drafting the proposal.".into()));
+    let request = execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None);
+    let finish = async {
+        entered.notified().await;
+        task::yield_now().await;
+        release.notify_one();
+    };
+    let (response, ()) = tokio::join!(request, finish);
+    let response = response.expect("fresh planning request");
+    assert_eq!(response.0.content.as_deref(), Some("continued planning"));
+    assert!(ctx.is_planning_active());
+    assert!(!ctx.ctrl_c_state.is_cancel_requested());
 }

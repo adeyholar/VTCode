@@ -3,6 +3,128 @@ const CLOSE_TAG: &str = "</proposed_plan>";
 const ALT_OPEN_TAG: &str = "<plan>";
 const ALT_CLOSE_TAG: &str = "</plan>";
 
+/// Detect whether a planning-mode text response is a clarifying question
+/// posed to the user rather than a plan or research prose. The deterministic
+/// interview-denial recovery must NOT force plan synthesis when the model is
+/// legitimately asking the user a question in plain text (the text-mode
+/// equivalent of the unavailable `request_user_input` modal). Without this
+/// check, the retry directive suppresses the question and the agent proceeds
+/// to propose a plan without waiting for the user's answer (checkpoint
+/// turn_856).
+///
+/// Heuristic: the last non-empty line ends with `?`. This is a strong signal
+/// that the model is asking a question, and it does not match completed plans
+/// (which end with Assumptions/Validation prose) or research dumps.
+pub(crate) fn looks_like_clarifying_question(text: &str) -> bool {
+    text.lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(|last_line| last_line.trim().ends_with('?'))
+}
+
+/// Detect whether a planning-mode text response is an attempted plan emitted
+/// without the required `<proposed_plan>` tags (checkpoint turn_1075: a
+/// `## Simple plan` markdown answer with seven numbered steps but no tags,
+/// no `files:` targets, and no `verify:` checks). Without this check the
+/// turn ends with only the generic "no approval-ready plan" hint and the
+/// model never learns the canonical step contract, so it repeats the same
+/// tagless shape every turn.
+///
+/// Heuristic (conservative by design): the text has a markdown heading naming
+/// an implementation section (`## Implementation Steps`, or `## Goal`
+/// together with `## Plan`) or contains at least two numbered-step lines
+/// (`1. ...`, `1) ...`). Single numbered lines in research prose do not
+/// trigger; clarifying questions are excluded by the caller, not here, so
+/// this stays a pure shape check.
+pub(crate) fn looks_like_attempted_plan(text: &str) -> bool {
+    fn heading_rest(line: &str) -> Option<&str> {
+        let trimmed = line.trim().trim_start_matches('>').trim_start();
+        let without_hashes = trimmed.trim_start_matches('#');
+        if without_hashes.len() == trimmed.len() {
+            return None;
+        }
+        Some(without_hashes.trim_start().trim_start_matches(['*', '_', '`']).trim_start())
+    }
+
+    fn is_heading_name(line: &str, name: &str) -> bool {
+        let Some(rest) = heading_rest(line) else {
+            return false;
+        };
+        if !rest.get(..name.len()).is_some_and(|prefix| prefix.eq_ignore_ascii_case(name)) {
+            return false;
+        }
+        // Word boundary: `## Planning` must not match a `## Plan` heading,
+        // and `## Goals` must not match `## Goal`.
+        rest[name.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| !next.is_ascii_alphanumeric())
+    }
+
+    let mut has_implementation_heading = false;
+    let mut has_plan_heading = false;
+    let mut has_goal_heading = false;
+    for line in text.lines() {
+        if !has_implementation_heading && is_heading_name(line, "implementation steps") {
+            has_implementation_heading = true;
+        }
+        if !has_plan_heading && is_heading_name(line, "plan") {
+            has_plan_heading = true;
+        }
+        if !has_goal_heading && is_heading_name(line, "goal") {
+            has_goal_heading = true;
+        }
+        if has_implementation_heading || (has_plan_heading && has_goal_heading) {
+            break;
+        }
+    }
+    if has_implementation_heading {
+        return true;
+    }
+    if has_plan_heading && has_goal_heading {
+        return true;
+    }
+
+    let mut numbered_steps = 0usize;
+    for line in text.lines() {
+        let trimmed = line.trim().trim_start_matches('>').trim_start();
+        // Tolerate a `Step ` prefix (`Step 1: ...`), mirroring
+        // `numbered_line_parts` in planning_workflow/artifacts.rs: only strip
+        // when a digit follows so `stepwise` is never mistaken for a step.
+        let trimmed = trimmed
+            .get(..4)
+            .filter(|prefix| prefix.eq_ignore_ascii_case("step"))
+            .map(|_| trimmed[4..].trim_start())
+            .filter(|rest| rest.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+            .unwrap_or(trimmed);
+        let mut digits_len = 0usize;
+        for ch in trimmed.chars() {
+            if ch.is_ascii_digit() {
+                digits_len += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if digits_len == 0 {
+            continue;
+        }
+        let rest = trimmed[digits_len..].trim_start();
+        let mut chars = rest.chars();
+        // Accept the same step punctuation as the artifact validator
+        // (`numbered_line_parts` in planning_workflow/artifacts.rs).
+        match chars.next() {
+            Some('.') | Some(')') | Some(':') if chars.next().is_some_and(|next| next.is_whitespace()) => {
+                numbered_steps += 1;
+                if numbered_steps >= 2 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProposedPlanExtraction {
     pub stripped_text: String,

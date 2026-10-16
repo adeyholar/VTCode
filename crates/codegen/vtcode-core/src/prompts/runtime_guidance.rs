@@ -20,7 +20,7 @@ pub(crate) const RUNTIME_GUIDANCE_SECTION: &str = r#"## Runtime Guidance
 - HOVER: Hypothesize, Observe, Verify, Evaluate, Revise, Repeat. On mismatch inspect evidence and revise before retrying.
 - User cancellation ends the current task: do not retry, recover, call tools, or auto-continue cancelled work. Preserve output/state. Resume only on fresh user input. Exit takes priority.
 - Reuse evidence; read missing/changed ranges. At caps, edit/verify, never copy. Verify standalone; use `max_output_tokens`, exit codes, never `; echo $?`.
-- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reread cleared context selectively.
+- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reuse retained source.
 - Say in one sentence what you will do before starting; update only on findings, direction changes, or blockers. Do not repeat plans or narrate calls. The UI reports runtime phases; do not echo them or invent percentages. Finish with the outcome, then what changed, checks, and user action. Be concise by being selective.
 - Write plain text without emojis, including verification results (`pass (6/6)`).
 "#;
@@ -127,7 +127,7 @@ mod tests {
         assert!(RUNTIME_GUIDANCE_SECTION.contains("resume note"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("status-only recap"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Recovery expires at a fresh turn"));
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("Reread cleared context selectively"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("Reuse retained source"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("is not executable; rebuild arguments"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Tracker notes append"));
         // Verification-first autonomy (docs/harness/ARCHITECTURAL_INVARIANTS.md
@@ -184,7 +184,7 @@ mod tests {
         // Per-result preview bounds and spool paging share one home here; Active Tools
         // does not restate them.
         assert!(RUNTIME_GUIDANCE_SECTION.contains(
-            "- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {\"cleared\":\"tool_input\"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reread cleared context selectively.\n"
+            "- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {\"cleared\":\"tool_input\"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reuse retained source.\n"
         ));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("accumulated output never exhausts tool access"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("preview_budget_exhausted"));

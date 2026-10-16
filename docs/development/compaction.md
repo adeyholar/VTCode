@@ -25,19 +25,34 @@ ceiling means automatic capacity resolution. If capacity remains unknown, the co
 32,000-token capacity with 4,000 tokens reserved for output and 2,000 for the prefix, the local cap is 15,600 tokens.
 Lower configured triggers still win. `enabled = false` opts out; native edit thresholds retain their configured values.
 
-Retention protects the union of the newest `keep_tool_uses` results (expanded to their complete originating
+Retention protects a recent evidence window bounded by half the resolved local trigger (20,000 tokens with the
+default 40,000-token trigger), counting both assistant inputs and tool results. It walks complete batches newest-first
+and stops before the next batch would exceed that budget. This keeps source available across short follow-up searches
+without leaving an unbounded tail when projecting full durable history. Count-based retention additionally protects
+the union of the newest `keep_tool_uses` results (expanded to their complete originating
 assistant tool-call batches) and the newest `keep_recent_tool_batches` assistant messages containing tool calls.
 Recent batches are selected by originating message order, independently of completion order. For batches of 1, 4,
-and 3 results, the default protects the newest two rounds: 7 results. Setting `keep_recent_tool_batches = 0`
-restores count-based batch retention: keeping 2 results protects the newest batch of 3.
-The `clear_old_tool_results` API remains a compatibility wrapper with zero additional recent batches.
+and 3 results, the default count policy protects the newest two rounds: 7 results; the evidence window may retain more.
+Setting `keep_recent_tool_batches = 0`
+disables additional batch-count retention; the bounded evidence window still applies.
+The `clear_old_tool_results` API remains a wrapper with zero additional recent batches.
 
 Call-ID matching handles reused IDs, reordered completions, and intervening system messages. Unmatched results retain
 the count-based policy. Small results stay unchanged when a stub would not reduce estimated tokens. Paired arguments
-and signatures are retained for protected results; input clearing applies only to results actually replaced and cannot
+and signatures are retained for protected results. When replacing a result, arguments and freeform inputs of at most
+1,024 bytes stay intact so ordinary commands and paths remain useful history rather than invalid callable examples.
+Larger inputs are replaced when input clearing is enabled, and thought signatures are removed for cleared results.
+Input clearing applies only to results actually replaced and cannot
 increase the total projected estimate. Reapplying clearing is idempotent. The recent-batch setting applies only to local
 clearing; native Anthropic edits keep their existing count-based behavior. Oversized protected evidence proceeds through
 existing compaction.
+
+Session `20261015T232419Z` demonstrated the failure: later searches displaced six README pages, rereads hit the path
+cap, and placeholder arguments triggered validation recovery. Its successful read outputs now replay through request
+assembly in a regression, covering parallel and sequential batches. This is a local retention fix, not an increase to
+read, retry, or execution limits. Upstream discovery was checked against
+[Codex history recording at `f0c5077`](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/core/src/context_manager/history.rs#L555-L577),
+which bounds tool outputs during recording; the local window and small-input policy are VT Code-specific.
 
 The [bounded retention pilot](../../scripts/evals/README.md#recent-tool-batch-retention-pilot) compares settings 0 and 2
 with fixed tools and planning. Numeric debug diagnostics report original/projected token estimates, cleared-result count,

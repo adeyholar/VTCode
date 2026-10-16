@@ -755,3 +755,126 @@ async fn dynamic_suppression_does_not_flush_pending_reasoning_after_mutation() {
     assert!(!rendered_text.contains("hidden pending reasoning"));
     assert!(!rendered_text.contains("final response"));
 }
+
+struct ResumeWakeProvider {
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+#[async_trait]
+impl uni::LLMProvider for ResumeWakeProvider {
+    fn name(&self) -> &str {
+        "mock"
+    }
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+    async fn generate(&self, _: uni::LLMRequest) -> Result<LLMResponse, uni::LLMError> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(completed_response_with_content(Some("resumed planning")))
+    }
+    async fn stream_normalized(&self, request: uni::LLMRequest) -> Result<uni::LLMNormalizedStream, uni::LLMError> {
+        let response = self.generate(request).await?;
+        Ok(Box::pin(stream::iter(vec![Ok(uni::NormalizedStreamEvent::Done { response: Box::new(response) })])))
+    }
+    fn supported_models(&self) -> Vec<String> {
+        vec!["mock-model".into()]
+    }
+    fn validate_request(&self, _: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn resume_wake_during_stream_establishment_is_not_cancellation() {
+    for cancel in [false, true] {
+        let provider = ResumeWakeProvider {
+            entered: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        };
+        let state = Arc::new(CtrlCState::new());
+        let notify = Arc::new(Notify::new());
+        let spinner = build_spinner();
+        let mut renderer = AnsiRenderer::stdout();
+        let request = super::stream_and_render_response_with_options_impl(
+            &provider,
+            uni::LLMRequest::default(),
+            &spinner,
+            &mut renderer,
+            &state,
+            &notify,
+            StreamSpinnerOptions::default(),
+            None,
+        );
+        let wake = async {
+            provider.entered.notified().await;
+            if cancel {
+                state.request_local_cancel();
+            }
+            notify.notify_one();
+            tokio::task::yield_now().await;
+            provider.release.notify_one();
+        };
+        let (result, ()) = tokio::join!(request, wake);
+        if cancel {
+            assert!(result.is_err());
+        } else {
+            assert_eq!(
+                result.expect("fresh input must remain runnable").0.content.as_deref(),
+                Some("resumed planning")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn resume_wake_during_stream_events_is_not_cancellation() {
+    for cancel in [false, true] {
+        let state = Arc::new(CtrlCState::new());
+        let notify = Arc::new(Notify::new());
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let stream_entered = entered.clone();
+        let stream_release = release.clone();
+        let mut events: uni::LLMStream = Box::pin(async_stream::stream! {
+            stream_entered.notify_one();
+            stream_release.notified().await;
+            yield Ok(LLMStreamEvent::Completed { response: Box::new(completed_response_with_content(Some("resumed proposal"))) });
+        });
+        let spinner = build_spinner();
+        let mut renderer = AnsiRenderer::stdout();
+        let request = render_stream_with_options_and_copilot_runtime_impl(
+            "mock",
+            &mut events,
+            None,
+            None,
+            None,
+            None,
+            &spinner,
+            &mut renderer,
+            &state,
+            &notify,
+            StreamSpinnerOptions::default(),
+            None,
+        );
+        let wake = async {
+            entered.notified().await;
+            if cancel {
+                state.request_local_cancel();
+            }
+            notify.notify_one();
+            tokio::task::yield_now().await;
+            release.notify_one();
+        };
+        let (result, ()) = tokio::join!(request, wake);
+        if cancel {
+            assert!(result.is_err());
+        } else {
+            assert_eq!(
+                result.expect("wake cannot stop stream delivery").0.content.as_deref(),
+                Some("resumed proposal")
+            );
+        }
+    }
+}

@@ -1065,3 +1065,37 @@ async fn docs_session_path_glob_does_not_activate_a_malformed_tracker_verifier()
         Some("rg -n \"brew trust\" README.md && ! rg -n \"brew tap\" README.md")
     );
 }
+
+#[tokio::test]
+async fn declared_source_repair_cannot_clear_completion_verification() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+    for command in [
+        "cargo clippy --fix",
+        "ruff check --fix-only .",
+        "uv run --locked ruff check --fix .",
+        "echo before && cargo clippy --fix",
+    ] {
+        registry.restore_completion_verification_debt();
+        registry.set_required_completion_verifiers(vec![command.into()]);
+        let args = json!({"cmd":command});
+        let id = registry.begin_completion_verifier(&args);
+        assert!(id.is_none(), "repair cannot launch a verification attempt: {command}");
+        let generation = registry.harness_context.completion_verification.lock().generation;
+        registry.observe_completion_mutation(tools::EXEC_COMMAND, &args, &json!({"exit_code":0}));
+        assert_eq!(registry.harness_context.completion_verification.lock().generation, generation + 1, "{command}");
+        registry.observe_completion_verifier(id, &args, &Ok(json!({"exit_code":0})));
+        assert!(registry.completion_verification_pending(), "{command}");
+        assert_eq!(
+            registry.next_required_completion_verifier().as_deref(),
+            Some(command),
+            "requirements must not be silently replaced"
+        );
+    }
+    registry.set_required_completion_verifiers(vec!["cargo clippy --locked".into()]);
+    let args = json!({"cmd":"cargo clippy --locked"});
+    let id = registry.begin_completion_verifier(&args);
+    assert!(id.is_some());
+    registry.observe_completion_verifier(id, &args, &Ok(json!({"exit_code":0})));
+    assert!(!registry.completion_verification_pending());
+}

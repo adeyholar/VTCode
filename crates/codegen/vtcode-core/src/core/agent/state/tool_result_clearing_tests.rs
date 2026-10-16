@@ -4,6 +4,68 @@ use crate::llm::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, Messa
 
 struct CapacityProvider(usize);
 
+#[test]
+fn clearing_retains_small_arguments_at_the_byte_boundary() {
+    for (bytes, cleared) in [(1024, false), (1025, true)] {
+        let mut messages = batch_history();
+        let arguments = serde_json::json!({"cmd": "x".repeat(bytes - 10)}).to_string();
+        assert_eq!(arguments.len(), bytes);
+        let call = &mut messages[1].tool_calls.as_mut().unwrap()[0];
+        call.function.as_mut().unwrap().arguments = arguments.clone();
+        call.text = Some("y".repeat(bytes));
+        let projected = clear_old_tool_results(&messages, 1, 1, 1, true);
+        assert!(projected[3].content.as_text().contains("\"cleared\":\"tool_result\""));
+        let call = &projected[1].tool_calls.as_ref().unwrap()[0];
+        assert_eq!(
+            call.function.as_ref().unwrap().arguments,
+            if cleared {
+                CLEARED_TOOL_INPUT_PLACEHOLDER
+            } else {
+                &arguments
+            }
+        );
+        assert_eq!(
+            call.text.as_deref().unwrap(),
+            if cleared {
+                CLEARED_TOOL_INPUT_PLACEHOLDER.to_owned()
+            } else {
+                "y".repeat(bytes)
+            }
+        );
+        assert!(call.thought_signature.is_none());
+    }
+}
+
+#[test]
+fn recent_evidence_window_stays_bounded_when_durable_history_grows() {
+    for count in [12, 120] {
+        let mut messages = vec![Message::user("earlier context ".repeat(4000))];
+        for index in 0..count {
+            let mut assistant = Message::assistant(String::new());
+            assistant.tool_calls = Some(vec![ToolCall::function(
+                format!("call_{index}"),
+                "exec_command".into(),
+                serde_json::json!({"cmd": format!("sed -n '{index}p' README.md")}).to_string(),
+            )]);
+            messages.push(assistant);
+            messages.push(Message::tool_response(format!("call_{index}"), format!("source_{index} ").repeat(300)));
+        }
+        let projected = clear_old_tool_results_with_recent_batches(&messages, 8000, 1, 1, 1, true);
+        let retained: Vec<_> = projected
+            .iter()
+            .filter(|message| {
+                message.role == MessageRole::Tool && !message.content.as_text().contains("\"cleared\":\"tool_result\"")
+            })
+            .collect();
+        assert!(retained.len() > 2, "retain more than two short tool batches");
+        assert!(retained.len() < count, "old evidence is still reclaimed");
+        assert!(retained.iter().map(|message| message.estimate_tokens()).sum::<usize>() <= 4000);
+        assert_eq!(retained.last().unwrap().tool_call_id, Some(format!("call_{}", count - 1)));
+        assert!(validate_history_invariants(&projected).is_valid());
+        assert_eq!(clear_old_tool_results_with_recent_batches(&projected, 8000, 1, 1, 1, true), projected);
+    }
+}
+
 #[async_trait::async_trait]
 impl LLMProvider for CapacityProvider {
     fn name(&self) -> &str {
@@ -66,7 +128,8 @@ fn batch_history() -> Vec<Message> {
                 let mut tool_call = ToolCall::function(
                     format!("batch_{batch}_{call}"),
                     "read_file".into(),
-                    format!("{{\"path\":\"evidence_{batch}_{call}\"}}"),
+                    serde_json::json!({"path": format!("evidence_{batch}_{call}"), "payload": "x".repeat(1024)})
+                        .to_string(),
                 );
                 tool_call.thought_signature = Some(format!("signature_{batch}_{call}"));
                 tool_call

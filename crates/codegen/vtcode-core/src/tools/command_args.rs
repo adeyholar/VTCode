@@ -528,6 +528,56 @@ pub fn environment_prefix_has_injection_keys(words: &[String]) -> bool {
     scan_environment_prefix(words).has_injection
 }
 
+/// Resolve the executable behind the supported flag-only `uv run` prefix.
+/// Unknown/value-taking wrapper options remain unclassified.
+pub(crate) fn uv_run_command_words(words: &[String]) -> Option<&[String]> {
+    if words.get(1).map(String::as_str) != Some("run") {
+        return None;
+    }
+    let index = words
+        .iter()
+        .enumerate()
+        .skip(2)
+        .find(|(_, word)| {
+            !matches!(
+                word.as_str(),
+                "--frozen" | "--locked" | "--no-sync" | "--offline" | "--no-project" | "--quiet" | "-q"
+            )
+        })?
+        .0;
+    (!words.get(index)?.starts_with('-')).then(|| &words[index..])
+}
+
+/// Explicit source repair modes cannot serve as completion verifiers, even
+/// when declared by a tracker. Command admission remains policy-owned.
+pub(crate) fn command_uses_source_repair(words: &[String]) -> bool {
+    let words = command_words_after_environment_prefix(words);
+    let Some(program) = words
+        .first()
+        .and_then(|word| Path::new(word).file_name())
+        .and_then(|name| name.to_str())
+    else {
+        return false;
+    };
+    let program = program.to_ascii_lowercase();
+    match program.as_str() {
+        "cargo" => {
+            let mut arguments = words.iter().skip(1).take_while(|word| word.as_str() != "--");
+            arguments.clone().any(|word| word.split('=').next() == Some("--fix"))
+                || arguments
+                    .find(|word| !word.starts_with(['-', '+']))
+                    .is_some_and(|word| word == "fix")
+        }
+        "ruff" => {
+            words.iter().skip(1).take_while(|word| word.as_str() != "--").any(|word| {
+                matches!(word.split('=').next(), Some("--fix" | "--fix-only" | "--add-noqa" | "--add-ignore"))
+            })
+        }
+        "uv" => uv_run_command_words(words).is_some_and(command_uses_source_repair),
+        _ => false,
+    }
+}
+
 /// Return whether a parsed command uses an option or environment assignment
 /// that can turn an otherwise read-only inspection program into a writer or
 /// command launcher.
@@ -537,6 +587,9 @@ pub fn environment_prefix_has_injection_keys(words: &[String]) -> bool {
 /// rules here lets raw argument validation and activity classification share
 /// the same token-aware guard without searching quoted text.
 pub(crate) fn has_unsafe_readonly_options(words: &[String]) -> bool {
+    if command_uses_source_repair(words) {
+        return true;
+    }
     // Single prefix walk: the scan yields both the injection verdict and the
     // stripped executable offset, replacing the historical two-walk sequence
     // (`environment_prefix_has_injection_keys` then

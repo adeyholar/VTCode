@@ -24,6 +24,7 @@ mod streaming;
 mod tests;
 mod tool_shaping;
 
+use crate::agent::runloop::unified::stop_requests::wait_for_stop;
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -248,15 +249,13 @@ async fn execute_llm_request_with_options_impl(
                 max_retries,
                 "LLM request failed; retrying after backoff"
             );
-            let cancel_notifier = ctx.ctrl_c_notify.notified();
+            let cancel_notifier = wait_for_stop(ctx.ctrl_c_state, ctx.ctrl_c_notify);
             tokio::pin!(cancel_notifier);
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {}
                 _ = &mut cancel_notifier => {
-                    if ctx.ctrl_c_state.is_cancel_requested() || ctx.ctrl_c_state.is_exit_requested() {
-                        llm_result = Err(interrupted_provider_error(&turn_snapshot.provider_name));
-                        break;
-                    }
+                    llm_result = Err(interrupted_provider_error(&turn_snapshot.provider_name));
+                    break;
                 }
             }
         }
@@ -392,7 +391,7 @@ async fn execute_llm_request_with_options_impl(
                         FirstProgressTimeout::starting_now(Duration::from_secs(first_progress_timeout_secs));
                     let prompt_session = tokio::select! {
                         biased;
-                        _ = ctx.ctrl_c_notify.notified() => {
+                        _ = wait_for_stop(ctx.ctrl_c_state, ctx.ctrl_c_notify) => {
                             return Err(interrupted_provider_error(&turn_snapshot.provider_name));
                         }
                         _ = tokio::time::sleep_until(first_progress_timeout.deadline) => {
@@ -465,16 +464,17 @@ async fn execute_llm_request_with_options_impl(
             let wait_subject = format!("LLM request for model '{active_model}'");
 
             loop {
-                let cancel_notifier = ctx.ctrl_c_notify.notified();
+                let cancel_notifier = wait_for_stop(ctx.ctrl_c_state, ctx.ctrl_c_notify);
                 tokio::pin!(cancel_notifier);
                 let keepalive_sleep = tokio::time::sleep_until(next_keepalive_at);
                 tokio::pin!(keepalive_sleep);
 
                 let outcome = tokio::select! {
-                    res = &mut generate_future => Some(res.map_err(anyhow::Error::from)),
+                    biased;
                     _ = &mut cancel_notifier => {
                         Some(Err(interrupted_provider_error(&turn_snapshot.provider_name)))
                     }
+                    res = &mut generate_future => Some(res.map_err(anyhow::Error::from)),
                     _ = &mut keepalive_sleep => None,
                 };
 

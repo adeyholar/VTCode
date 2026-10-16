@@ -1,5 +1,7 @@
 use super::*;
-use crate::agent::runloop::unified::plan_blocks::strip_plan_persistence_policy_line;
+use crate::agent::runloop::unified::plan_blocks::{
+    looks_like_attempted_plan, looks_like_clarifying_question, strip_plan_persistence_policy_line,
+};
 use crate::agent::runloop::unified::planning_workflow::{
     PlanApprovalRoute, PlanArtifactError, ValidatedPlanArtifact, allocate_plan_file_if_missing,
     build_plan_repair_directive, emit_plan_ready_events, persist_plan_draft, persisted_plan_is_ready,
@@ -25,128 +27,6 @@ const PLAN_APPROVAL_DISMISSED_NOTICE: &str = "Plan review ended without starting
 /// draft instead of resubmitting the same invalid shape.
 fn terminal_plan_rejection_message(notice: &str, error: &PlanArtifactError) -> String {
     format!("{notice}\n\n{}", plan_rejection_history_feedback(error))
-}
-
-/// Detect whether a planning-mode text response is a clarifying question
-/// posed to the user rather than a plan or research prose. The deterministic
-/// interview-denial recovery must NOT force plan synthesis when the model is
-/// legitimately asking the user a question in plain text (the text-mode
-/// equivalent of the unavailable `request_user_input` modal). Without this
-/// check, the retry directive suppresses the question and the agent proceeds
-/// to propose a plan without waiting for the user's answer (checkpoint
-/// turn_856).
-///
-/// Heuristic: the last non-empty line ends with `?`. This is a strong signal
-/// that the model is asking a question, and it does not match completed plans
-/// (which end with Assumptions/Validation prose) or research dumps.
-pub(super) fn looks_like_clarifying_question(text: &str) -> bool {
-    text.lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .is_some_and(|last_line| last_line.trim().ends_with('?'))
-}
-
-/// Detect whether a planning-mode text response is an attempted plan emitted
-/// without the required `<proposed_plan>` tags (checkpoint turn_1075: a
-/// `## Simple plan` markdown answer with seven numbered steps but no tags,
-/// no `files:` targets, and no `verify:` checks). Without this check the
-/// turn ends with only the generic "no approval-ready plan" hint and the
-/// model never learns the canonical step contract, so it repeats the same
-/// tagless shape every turn.
-///
-/// Heuristic (conservative by design): the text has a markdown heading naming
-/// an implementation section (`## Implementation Steps`, or `## Goal`
-/// together with `## Plan`) or contains at least two numbered-step lines
-/// (`1. ...`, `1) ...`). Single numbered lines in research prose do not
-/// trigger; clarifying questions are excluded by the caller, not here, so
-/// this stays a pure shape check.
-pub(super) fn looks_like_attempted_plan(text: &str) -> bool {
-    fn heading_rest(line: &str) -> Option<&str> {
-        let trimmed = line.trim().trim_start_matches('>').trim_start();
-        let without_hashes = trimmed.trim_start_matches('#');
-        if without_hashes.len() == trimmed.len() {
-            return None;
-        }
-        Some(without_hashes.trim_start().trim_start_matches(['*', '_', '`']).trim_start())
-    }
-
-    fn is_heading_name(line: &str, name: &str) -> bool {
-        let Some(rest) = heading_rest(line) else {
-            return false;
-        };
-        if rest.len() < name.len() || !rest[..name.len()].eq_ignore_ascii_case(name) {
-            return false;
-        }
-        // Word boundary: `## Planning` must not match a `## Plan` heading,
-        // and `## Goals` must not match `## Goal`.
-        rest[name.len()..]
-            .chars()
-            .next()
-            .is_none_or(|next| !next.is_ascii_alphanumeric())
-    }
-
-    let mut has_implementation_heading = false;
-    let mut has_plan_heading = false;
-    let mut has_goal_heading = false;
-    for line in text.lines() {
-        if !has_implementation_heading && is_heading_name(line, "implementation steps") {
-            has_implementation_heading = true;
-        }
-        if !has_plan_heading && is_heading_name(line, "plan") {
-            has_plan_heading = true;
-        }
-        if !has_goal_heading && is_heading_name(line, "goal") {
-            has_goal_heading = true;
-        }
-        if has_implementation_heading || (has_plan_heading && has_goal_heading) {
-            break;
-        }
-    }
-    if has_implementation_heading {
-        return true;
-    }
-    if has_plan_heading && has_goal_heading {
-        return true;
-    }
-
-    let mut numbered_steps = 0usize;
-    for line in text.lines() {
-        let trimmed = line.trim().trim_start_matches('>').trim_start();
-        // Tolerate a `Step ` prefix (`Step 1: ...`), mirroring
-        // `numbered_line_parts` in planning_workflow/artifacts.rs: only strip
-        // when a digit follows so `stepwise` is never mistaken for a step.
-        let trimmed = trimmed
-            .get(..4)
-            .filter(|prefix| prefix.eq_ignore_ascii_case("step"))
-            .map(|_| trimmed[4..].trim_start())
-            .filter(|rest| rest.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
-            .unwrap_or(trimmed);
-        let mut digits_len = 0usize;
-        for ch in trimmed.chars() {
-            if ch.is_ascii_digit() {
-                digits_len += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-        if digits_len == 0 {
-            continue;
-        }
-        let rest = trimmed[digits_len..].trim_start();
-        let mut chars = rest.chars();
-        // Accept the same step punctuation as the artifact validator
-        // (`numbered_line_parts` in planning_workflow/artifacts.rs).
-        match chars.next() {
-            Some('.') | Some(')') | Some(':') if chars.next().is_some_and(|next| next.is_whitespace()) => {
-                numbered_steps += 1;
-                if numbered_steps >= 2 {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-    }
-    false
 }
 
 impl<'a> TurnProcessingContext<'a> {

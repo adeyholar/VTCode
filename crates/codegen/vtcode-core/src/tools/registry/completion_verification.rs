@@ -375,6 +375,14 @@ impl ToolRegistry {
     fn completion_verifier_command(&self, args: &Value) -> Option<String> {
         let executed = tool_intent::shell_args_as_executed(tools::UNIFIED_EXEC, args);
         let command = command_args::raw_command_text(&executed)?.trim().to_owned();
+        // A declared repair action still invalidates verification. Inspect all
+        // static segments so a harmless prefix cannot hide a source rewrite.
+        if tool_intent::readonly::static_shell_command_words(&command)
+            .or_else(|| tool_intent::readonly::static_shell_command_words_with_output_plumbing(&command))
+            .is_some_and(|segments| segments.iter().any(|words| command_args::command_uses_source_repair(words)))
+        {
+            return None;
+        }
         if tool_intent::classify_shell_activity(tools::UNIFIED_EXEC, &executed)
             != tool_intent::ShellActivity::Verification
             && !self.harness_context.completion_verification.lock().requires_command(&command)

@@ -8,7 +8,7 @@ pub const PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE: &str = "Mutating file edits a
 /// Shared Planning workflow instruction line for transitioning to implementation.
 pub const PLANNING_WORKFLOW_EXIT_INSTRUCTION_LINE: &str = "Only a validated plan persisted under `.vtcode/plans/` is ready for user approval. Mutating tools stay disabled until the user approves.";
 /// Canonical contract for model-authored plan output and runtime-owned persistence.
-pub const PLANNING_WORKFLOW_PLAN_PERSISTENCE_POLICY_LINE: &str = "Emit exactly one final `<proposed_plan>` block and no surrounding prose. Do not use shell commands or file-writing tools to create or modify `.vtcode/plans/`; runtime owns plan/tracker persistence and validation, and exposes approval controls only after successful persistence.";
+pub const PLANNING_WORKFLOW_PLAN_PERSISTENCE_POLICY_LINE: &str = "Emit exactly one final `<proposed_plan>` block and no surrounding prose. Do not use shell commands or file-writing tools to create or modify `.vtcode/plans/`; runtime owns plan/tracker persistence and validation, and exposes approval controls only after successful persistence. Checklists do not persist plans. Resume cancelled planning only on fresh input.";
 /// Compact, spec-like plan quality line. The previous wording ("summary,
 /// steps, test cases, assumptions") let the model emit verbosely large plans
 /// that blew the generation token budget and were cut off mid-`<proposed_plan>`

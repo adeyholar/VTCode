@@ -404,11 +404,11 @@ pub fn resolve_tool_result_clearing_trigger(
 /// Providers without `context_management.edits` never get native tool-result
 /// clearing, so long histories keep paying full price for every old tool body
 /// on each request. Once estimated history tokens exceed `trigger_tokens`, this
-/// rewrites every tool-result *request* message except the newest
-/// `keep_tool_uses` and their complete originating tool-call batches to a
+/// rewrites old tool-result *request* messages outside a bounded recent
+/// evidence window and the newest `keep_tool_uses` originating batches to a
 /// bounded stub. Small results stay intact when a stub would not save tokens.
 /// `clear_at_least_tokens` is a floor on reclaimed tokens (not a ceiling):
-/// clearing must stub all eligible non-kept results so
+/// clearing must stub all eligible non-retained results so
 /// re-running on full durable history cannot leave a permanently growing tail.
 ///
 /// Contract (same as [`normalize_history_for_request`]):
@@ -419,8 +419,8 @@ pub fn resolve_tool_result_clearing_trigger(
 ///   trigger and cannot re-clear stubs usefully.
 ///
 /// When `clear_tool_inputs` is set, assistant `tool_calls[].function.arguments`
-/// and freeform `text` for cleared results are replaced with a JSON placeholder
-/// (never prose — providers send those fields verbatim on the wire).
+/// and freeform `text` larger than 1 KiB for cleared results are replaced with
+/// a JSON placeholder. Small arguments retain usable command/path identity.
 pub fn clear_old_tool_results(
     messages: &[Message],
     trigger_tokens: u64,
@@ -483,6 +483,30 @@ pub fn clear_old_tool_results_with_recent_batches(
     // Analysis records assistant messages in source order, independently of
     // completion order and reused call IDs.
     retained_batches.extend((0..analysis.batches.len()).rev().take(keep_recent_tool_batches as usize));
+    // Two batches can be only two short searches. Clearing everything before
+    // them discards the source needed for the pending edit, provoking rereads
+    // that the navigation guards correctly bound. Reserve half of the
+    // already capacity-capped trigger for recent complete evidence batches.
+    // This window stays bounded when rebuilding from full durable history.
+    let evidence_budget = trigger_tokens / 2;
+    let mut batch_tokens: Vec<u64> = analysis
+        .batches
+        .iter()
+        .map(|batch| messages[batch.assistant_index].estimate_tokens() as u64)
+        .collect();
+    for (&result_index, &batch_index) in &analysis.result_batch_by_index {
+        batch_tokens[batch_index] =
+            batch_tokens[batch_index].saturating_add(messages[result_index].estimate_tokens() as u64);
+    }
+    let mut retained_tokens = 0u64;
+    for (batch_index, &tokens) in batch_tokens.iter().enumerate().rev() {
+        let next_tokens = retained_tokens.saturating_add(tokens);
+        if next_tokens > evidence_budget {
+            break;
+        }
+        retained_tokens = next_tokens;
+        retained_batches.insert(batch_index);
+    }
     let mut cleared_result_count = 0usize;
     let mut cleared_calls_by_assistant: HashMap<usize, HashSet<&str>> = HashMap::new();
     // Stub every eligible non-kept tool result (oldest-first). `clear_at_least_tokens`
@@ -536,14 +560,16 @@ pub fn clear_old_tool_results_with_recent_batches(
             };
             for call in tool_calls.iter_mut() {
                 if cleared_call_ids.contains(call.id.as_str()) {
-                    if let Some(function) = call.function.as_mut() {
+                    if let Some(function) = call.function.as_mut()
+                        && function.arguments.len() > RETAINED_TOOL_INPUT_BYTES
+                    {
                         // Valid JSON placeholder: providers send `arguments`
                         // verbatim; prose would break OpenAI tool-call parsing.
                         function.arguments = CLEARED_TOOL_INPUT_PLACEHOLDER.to_string();
                     }
                     // Freeform custom tool payloads ride in `text`, not
                     // `function.arguments` (see ToolCall::custom).
-                    if call.text.is_some() {
+                    if call.text.as_ref().is_some_and(|text| text.len() > RETAINED_TOOL_INPUT_BYTES) {
                         call.text = Some(CLEARED_TOOL_INPUT_PLACEHOLDER.to_string());
                     }
                     call.thought_signature = None;
@@ -575,6 +601,9 @@ pub fn clear_old_tool_results_with_recent_batches(
 
 /// JSON placeholder for cleared tool-call inputs (must stay valid JSON).
 const CLEARED_TOOL_INPUT_PLACEHOLDER: &str = "{\"cleared\":\"tool_input\"}";
+// Keep ordinary command/path arguments intact instead of teaching providers
+// to emit synthetic arguments that cannot pass the tool's declared schema.
+const RETAINED_TOOL_INPUT_BYTES: usize = 1024;
 
 /// Whether request assembly should apply local [`clear_old_tool_results`].
 ///
@@ -1223,7 +1252,7 @@ mod tests {
             .and_then(|calls| calls.first_mut())
             .and_then(|call| call.function.as_mut())
         {
-            call.arguments = "{\"path\":\"secret-path\"}".to_string();
+            call.arguments = serde_json::json!({"path": "secret-path", "padding": "x".repeat(1024)}).to_string();
         }
 
         let cleared = clear_old_tool_results(&messages, 1, 1, 1, true);
@@ -1270,7 +1299,9 @@ mod tests {
             .and_then(|calls| calls.first_mut())
             .and_then(|call| call.function.as_mut())
         {
-            call.arguments = "{\"input\":\"*** Begin Patch\\n*** End Patch\"}".to_string();
+            call.arguments =
+                serde_json::json!({"input": format!("*** Begin Patch\n{}\n*** End Patch", "x".repeat(1024))})
+                    .to_string();
         }
 
         let cleared = clear_old_tool_results(&messages, 1, 1, 1, default_clear_tool_inputs);
@@ -1360,7 +1391,7 @@ mod tests {
             .and_then(|m| m.tool_calls.as_mut())
             .and_then(|calls| calls.first_mut())
         {
-            call.text = Some("raw freeform payload".to_string());
+            call.text = Some("raw freeform payload".repeat(100));
             call.thought_signature = Some("sig".to_string());
         }
         let cleared = clear_old_tool_results(&messages, 1, 1, 1, true);

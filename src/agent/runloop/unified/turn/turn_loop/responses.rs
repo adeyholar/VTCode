@@ -452,10 +452,15 @@ pub(super) fn provider_stop_outcome(
     state: &crate::agent::runloop::unified::state::CtrlCState,
     error: &anyhow::Error,
 ) -> Option<TurnLoopResult> {
-    crate::agent::runloop::unified::stop_requests::stop_outcome(state).or_else(|| {
-        matches!(vtcode_commons::classify_anyhow_error(error), vtcode_commons::ErrorCategory::Cancelled)
-            .then_some(TurnLoopResult::Cancelled)
-    })
+    let outcome = crate::agent::runloop::unified::stop_requests::stop_outcome(state)
+        .or_else(|| state.is_cancel_handled().then_some(TurnLoopResult::Cancelled));
+    if outcome.is_none()
+        && matches!(vtcode_commons::classify_anyhow_error(error), vtcode_commons::ErrorCategory::Cancelled)
+    {
+        // Provider text is failure evidence, not authority to cancel a local turn.
+        tracing::warn!(error = %error, "provider reported cancellation without a local stop request");
+    }
+    outcome
 }
 
 /// True when a `Completed` turn must publish a final assistant response.

@@ -59,6 +59,20 @@ pub(crate) fn stop_outcome(state: &CtrlCState) -> Option<super::turn::context::T
     }
 }
 
+/// Wait until authoritative stop state is set. Notifications also wake fresh
+/// submissions after a handled cancellation, so a permit alone is not a stop.
+pub(crate) async fn wait_for_stop(state: &CtrlCState, notify: &Notify) {
+    loop {
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if stop_outcome(state).is_some() || state.is_cancel_handled() {
+            return;
+        }
+        notified.await;
+    }
+}
+
 /// Wait for a cancellation-safe future, with stop requests taking priority
 /// over a simultaneously ready result. Blocking workers must own their
 /// cleanup independently of this future.
@@ -193,6 +207,30 @@ pub(crate) async fn finish_initialization_exit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn resume_wake_requires_authoritative_stop_before_cancelling() {
+        let state = CtrlCState::new();
+        let notify = Notify::new();
+        state.request_local_cancel();
+        state.mark_cancel_handled();
+        state.reset();
+        // The fresh-submission callback wakes initialization after clearing cancel.
+        notify.notify_one();
+        let waiting = wait_for_stop(&state, &notify);
+        tokio::pin!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+        notify.notify_one();
+        assert!(futures::poll!(&mut waiting).is_pending());
+        state.request_local_cancel();
+        notify.notify_one();
+        assert!(futures::poll!(&mut waiting).is_ready());
+        state.mark_cancel_handled();
+        assert!(futures::poll!(std::pin::pin!(wait_for_stop(&state, &notify))).is_ready());
+        state.reset();
+        state.request_exit();
+        assert!(futures::poll!(std::pin::pin!(wait_for_stop(&state, &notify))).is_ready());
+    }
 
     #[tokio::test]
     async fn pending_preparation_stops_and_a_ready_result_cannot_erase_exit() {

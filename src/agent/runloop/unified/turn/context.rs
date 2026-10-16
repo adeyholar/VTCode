@@ -38,13 +38,13 @@ use self::message_history::{
     should_suppress_redundant_diff_recap,
 };
 pub(crate) use self::message_history::{last_user_message, last_user_message_index};
-#[cfg(test)]
-use self::response_handling::looks_like_clarifying_question;
 pub(crate) use self::runtime_context::{
     LLMContext, ToolContext, TurnHandlerOutcome, TurnOutcomeContext, TurnProcessingContext, TurnProcessingContextParts,
     TurnProcessingResult, TurnProcessingState, UIContext,
 };
 use crate::agent::runloop::mcp_events;
+#[cfg(test)]
+use crate::agent::runloop::unified::plan_blocks::looks_like_clarifying_question;
 use crate::agent::runloop::unified::run_loop_context::{RecoveryMode, RunLoopContext};
 use crate::agent::runloop::unified::state::{CtrlCState, SessionStats};
 use crate::agent::runloop::unified::tool_catalog::ToolCatalogState;

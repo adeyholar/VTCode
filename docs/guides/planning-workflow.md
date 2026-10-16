@@ -27,14 +27,31 @@ tooling solely for this check. Lint errors from an available tool are failures t
 
 The planning agent does not implement changes, shell-write plan files, or use file-writing tools for plan persistence.
 It emits exactly one final `<proposed_plan>` block when the plan is ready. The runtime validates and persists that plan,
-then exposes approval controls. During an approved handoff, the runtime creates and persists the `task_tracker` before
-handing off to the write-capable `build` agent or configured `auto` workflow.
+then exposes approval controls. A completed planning checklist alone does not persist a plan. Untagged Markdown drafts
+are retained for validation before fallback interviews: invalid drafts receive bounded repair feedback, and corrected
+drafts reach the same persistence and approval gate. Clarifying questions still wait for user input; exhausted repair
+attempts end with the validator's reasons instead of claiming readiness. During an approved handoff, the runtime creates
+and persists the `task_tracker` before handing off to the write-capable `build` agent or configured `auto` workflow.
 
 The built-in `plan` agent's permission rules allow `read`, `request_user_input`, and `bash` so its wire catalog keeps
 `exec_command`, `code_search`, `grep_file`, and the interview tool visible. Read-only enforcement is not delegated to
 those permissions: the planning dispatch gate hard-blocks every mutating tool call (and non-allow-listed shell command)
 before execution, so granting `bash` admits the tool without weakening plan-mode safety. The `plan` agent is also
 excluded by name from approved-plan execution routing — selecting it always re-enters planning, never implementation.
+
+The session-derived regression exercises draft extraction, interview gating, validation repair, persistence,
+and the emitted HITL approval overlay. This retains VT Code's validation gate; the corresponding Codex
+[plan implementation prompt](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/tui/src/chatwidget/turn_runtime.rs#L243)
+also waits for a plan item before offering implementation. No upstream code was copied.
+
+A cancelled planning task resumes only after fresh user input. Resume notifications wake the runtime but cannot cancel
+a provider request unless local cancellation or exit state is set. Provider error text such as “Interrupted by user”
+without a local stop request is a provider failure with retained planning context, not a user cancellation. Streaming
+setup, streamed events, non-streaming requests, and retry waits share this state-based stop check. Stable tool catalogs
+reuse their definitions across mode switches while rebinding planning metadata to the current mode, so prompt/catalog
+validation does not repeatedly rebuild a stale Build snapshot during planning.
+The pinned [Codex sampling path](https://github.com/openai/codex/blob/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec/codex-rs/core/src/session/turn.rs#L1819)
+also checks authoritative cancellation state; VT Code retains its existing `CtrlCState` and notification mechanism.
 
 ## Bounded blocked-call recovery
 

@@ -72,17 +72,18 @@ async fn planning_prompt_size_fixed_fixture() {
     // Zero-on-success planning/runtime guidance adds 253 bytes and about 51 tokens.
     // Action-specific tracker examples measure 9997 bytes/2146 tokens for Default
     // and 10269 bytes/2216 tokens for Minimal; keep tight caps and presence checks.
+    // Cancelled planning resumes on fresh input; retain a 50-byte allowance for this policy.
     for case in [
         PlanningPromptSizeCase {
             density: "Default",
             prompt_budget_tokens: 100_000,
-            max_prompt_bytes: 10_950,
+            max_prompt_bytes: 11_000,
             max_estimated_tokens: 2_360,
         },
         PlanningPromptSizeCase {
             density: "Minimal",
             prompt_budget_tokens: 1,
-            max_prompt_bytes: 11_250,
+            max_prompt_bytes: 11_300,
             max_estimated_tokens: 2_430,
         },
     ] {
@@ -123,6 +124,7 @@ async fn planning_prompt_size_fixed_fixture() {
             estimate_tokens(&prompt)
         );
         assert!(prompt.contains(PLANNING_WORKFLOW_PLAN_PERSISTENCE_POLICY_LINE));
+        assert!(prompt.contains("Checklists do not persist plans"));
         assert!(prompt.contains("Rejected plans stay blocked; repair before approval"));
         assert!(prompt.len() <= case.max_prompt_bytes, "{} planning fixture exceeded byte budget", case.density);
         assert!(
@@ -414,6 +416,8 @@ fn planning_workflow_persistence_policy_assigns_plan_lifecycle_to_runtime() {
     assert!(line.contains("Do not use shell commands or file-writing tools to create or modify `.vtcode/plans/`"));
     assert!(line.contains("runtime owns plan/tracker persistence and validation"));
     assert!(line.contains("approval controls only after successful persistence"));
+    assert!(line.contains("Checklists do not persist plans"));
+    assert!(line.contains("Resume cancelled planning only on fresh input"));
 }
 
 #[test]
@@ -1435,7 +1439,7 @@ Work the way a senior engineer on this codebase would: understand the relevant c
 - HOVER: Hypothesize, Observe, Verify, Evaluate, Revise, Repeat. On mismatch inspect evidence and revise before retrying.
 - User cancellation ends the current task: do not retry, recover, call tools, or auto-continue cancelled work. Preserve output/state. Resume only on fresh user input. Exit takes priority.
 - Reuse evidence; read missing/changed ranges. At caps, edit/verify, never copy. Verify standalone; use `max_output_tokens`, exit codes, never `; echo $?`.
-- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reread cleared context selectively.
+- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reuse retained source.
 - Say in one sentence what you will do before starting; update only on findings, direction changes, or blockers. Do not repeat plans or narrate calls. The UI reports runtime phases; do not echo them or invent percentages. Finish with the outcome, then what changed, checks, and user action. Be concise by being selective.
 - Write plain text without emojis, including verification results (`pass (6/6)`).
 
@@ -1512,7 +1516,7 @@ You are VT Code (Build mode), a coding agent working in the user's repository an
 - HOVER: Hypothesize, Observe, Verify, Evaluate, Revise, Repeat. On mismatch inspect evidence and revise before retrying.
 - User cancellation ends the current task: do not retry, recover, call tools, or auto-continue cancelled work. Preserve output/state. Resume only on fresh user input. Exit takes priority.
 - Reuse evidence; read missing/changed ranges. At caps, edit/verify, never copy. Verify standalone; use `max_output_tokens`, exit codes, never `; echo $?`.
-- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reread cleared context selectively.
+- Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reuse retained source.
 - Say in one sentence what you will do before starting; update only on findings, direction changes, or blockers. Do not repeat plans or narrate calls. The UI reports runtime phases; do not echo them or invent percentages. Finish with the outcome, then what changed, checks, and user action. Be concise by being selective.
 - Write plain text without emojis, including verification results (`pass (6/6)`).
 
@@ -1554,7 +1558,7 @@ Use a skill only when the user names it or the task clearly matches. Load detail
 - Batch independent read-only calls; order dependent reads, and serialize mutations.
 - Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks. In one-shot `exec_command` calls, do not use `!!`, `!$`, `!ssh`, or `fc`; write full command arguments explicitly from conversation or tool results. Interactive shells: review-safe history expansion (Bash `histverify`, zsh `HIST_VERIFY`).
 - For long-lived commands, set `background: true` on `exec_command`; it returns a bounded preview plus a stable `session_id` and wait arguments. At most three live background processes are retained per runtime, with no automatic eviction; `write_stdin` drives the session lifecycle.
-- Prefer standalone verifiers with `max_output_tokens`. Pure `head`/`tail` tails run standalone; static read-only filtering pipelines use fail-closed `pipefail`. Only terminal exit 0 clears verification; dynamic syntax, mutating tails, `;`, and `||` do not qualify.
+- Prefer standalone verifiers with `max_output_tokens`. Pure `head`/`tail` tails run standalone; static read-only filtering pipelines use fail-closed `pipefail`. Only terminal exit 0 clears verification; dynamic syntax, mutating tails, `;`, and `||` do not qualify. Recheck after `--fix`.
 - Run a real check that exercises the change; syntax-only or failed-to-start checks do not count. Install missing deps via the project's package manager, never sudo; if no check can run, say which and why.
 - Run fast checks before full builds.
 - `code_search`: omit unused filters; no empty values (`path: ""`).

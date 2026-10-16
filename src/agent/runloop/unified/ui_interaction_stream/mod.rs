@@ -19,6 +19,7 @@ use vtcode_core::llm::provider::{self as uni, LLMStreamEvent, NormalizedStreamEv
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
 use super::state::CtrlCState;
+use super::stop_requests::wait_for_stop;
 use super::ui_interaction::{PlaceholderSpinner, StreamProgressEvent, StreamSpinnerOptions};
 use super::ui_interaction_stream_helpers::{common_prefix_len, map_render_error, reasoning_matches_content};
 mod streaming_reasoning;
@@ -193,7 +194,7 @@ pub(crate) async fn stream_and_render_response_with_options_impl_first_progress_
 
     let normalized_stream = tokio::select! {
         biased;
-        _ = ctrl_c_notify.notified() => {
+        _ = wait_for_stop(ctrl_c_state, ctrl_c_notify) => {
             spinner.finish_with_restore(true);
             return Err(uni::LLMError::Provider { message: error_display::format_llm_error(provider_name, "Interrupted by user"), metadata: None });
         }
@@ -392,7 +393,7 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
 
         let maybe_event = tokio::select! {
             biased;
-            _ = ctrl_c_notify.notified() => {
+            _ = wait_for_stop(ctrl_c_state, ctrl_c_notify) => {
                 finish_spinner(&mut spinner_active, true);
                 reasoning_state
                     .handle_stream_failure(renderer)
