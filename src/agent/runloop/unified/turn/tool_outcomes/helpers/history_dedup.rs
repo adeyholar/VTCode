@@ -411,8 +411,7 @@ pub(super) fn navigation_evidence(
         if output.get("exit_code").and_then(serde_json::Value::as_i64) != Some(0) {
             return None;
         }
-        let target =
-            crate::agent::runloop::unified::turn::tool_outcomes::handlers::parse_simple_exec_read_target(args)?;
+        let target = vtcode_core::tools::parse_exec_read_target(args)?;
         // Piped stages and awk programs transform the output (column widths,
         // counts), so those lines are not the file's own content and must
         // never be fingerprinted as positioned evidence. Loop guards still

@@ -185,6 +185,45 @@ pub(super) fn maybe_inline_spooled(tool_name: &str, output: &serde_json::Value) 
     serialize_output(&compacted)
 }
 
+/// Replace an already-serialized reuse response whose identical copy remains
+/// verbatim in the working history with a bounded reference stub. The model
+/// is told the content stays where it is — no second copy of the payload is
+/// attached to the request. Bulky content keys are dropped; loop metadata
+/// (`reused_recent_result`, `loop_detected_note`, …), the command echo, and
+/// outcome fields survive because `apply_reused_read_only_loop_metadata`
+/// already ran on the caller's object before this serialization.
+///
+/// Fails open: when the serialized text is not a JSON object (prose exec
+/// output, spool summaries), the caller keeps the original. The loop
+/// metadata note for non-empty content already points at "the result above",
+/// which remains true — the identical content sits in the same conversation
+/// window the model re-reads every turn.
+pub(super) fn build_reuse_reference_stub(serialized: &str) -> String {
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(serialized) else {
+        return serialized.to_string();
+    };
+
+    const CONTENT_KEYS: &[&str] = &[
+        "output", "content", "stdout", "stderr", "matches", "results", "files", "entries",
+    ];
+    let mut stub = serde_json::Map::new();
+    for (key, value) in map {
+        if CONTENT_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        stub.insert(key, value);
+    }
+    stub.insert(
+        "reuse_reference".to_string(),
+        serde_json::Value::String(
+            "Identical tool output is already present earlier in this conversation (see the previous result for \
+             this same call); this response intentionally does not repeat it."
+                .to_string(),
+        ),
+    );
+    serde_json::to_string(&serde_json::Value::Object(stub)).unwrap_or_else(|_| serialized.to_string())
+}
+
 /// Shape a spooled result for the model using the bounded preview produced by
 /// the core spooler. Consumers never reopen `spool_path` on this response path.
 pub(super) fn maybe_inline_spooled_with_preview(tool_name: &str, output: &serde_json::Value) -> String {

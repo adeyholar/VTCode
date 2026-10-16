@@ -12,6 +12,7 @@
 
 use serde_json::{Value, json};
 use vtcode_core::config::constants::tools as tool_names;
+use vtcode_core::llm::provider as uni;
 
 use super::super::ValidationResult;
 use super::super::looping::low_signal_family_key;
@@ -137,6 +138,111 @@ pub(crate) fn check_read_family_cap(
     ReadFamilyCapDecision::Tripped { target, block_reason, error_content }
 }
 
+/// Serve a cache/history reuse verdict for a read-only call.
+///
+/// `register_signature` distinguishes the exact-args path (signature already
+/// recorded — no-op needed) from the read-target path (record it now so a
+/// later identical call takes the cheaper exact-args lookup).
+///
+/// Redundancy guard: when the served payload already sits verbatim in the
+/// working history (the model is re-attaching content it can already see),
+/// the response is replaced by a bounded reference stub. This is session-
+/// evidence-driven (20261015T232419: a same-turn cache-served duplicate
+/// re-attached the full 1.6 KiB output plus a 264 B loop banner — the model
+/// held the identical 1.6 KiB two messages earlier). The stub keeps the
+/// loop metadata and key outcome fields but drops the bulky content keys.
+/// Only the current *request* history is consulted; if compaction already
+/// pruned the earlier copy, the full payload is served again (correctness
+/// over savings).
+fn reuse_read_only_result(
+    ctx: &mut TurnProcessingContext<'_>,
+    tool_call_id: &str,
+    canonical_tool_name: &str,
+    effective_args: &Value,
+    mut reused_value: Value,
+    register_signature: bool,
+) {
+    if let Some(obj) = reused_value.as_object_mut() {
+        super::super::apply_reused_read_only_loop_metadata(obj);
+    }
+    let serialized = maybe_inline_spooled(canonical_tool_name, &reused_value);
+    let content_already_in_history = content_dupes_history(&serialized, ctx.working_history);
+    let final_content = if content_already_in_history {
+        crate::agent::runloop::unified::turn::tool_outcomes::response_content::build_reuse_reference_stub(&serialized)
+    } else {
+        serialized
+    };
+    ctx.push_reused_tool_response(tool_call_id, canonical_tool_name, effective_args, final_content);
+    if register_signature {
+        let signature = signature_key_for(canonical_tool_name, effective_args);
+        ctx.harness_state.record_successful_readonly_signature(signature);
+    }
+    ctx.harness_state.record_reused_result();
+}
+
+/// Bounded-content check: does this serialized output appear as a tool
+/// response in the current working history? Compares the trimmed string rows
+/// of the parsed JSON trees (key-order- and numeric-metadata-insensitive), so
+/// only a provably-identical copy suppresses re-attachment. Non-JSON history
+/// entries and non-JSON serialized output never match (fail open).
+fn content_dupes_history(serialized: &str, history: &[uni::Message]) -> bool {
+    let Some(needle) = serde_json::from_str::<Value>(serialized).ok().map(|parsed| {
+        let mut rows = Vec::new();
+        flatten_string_values(&parsed, &mut rows);
+        rows
+    }) else {
+        return false;
+    };
+    if needle.is_empty() {
+        return false;
+    }
+    const MAX_HISTORY_SCAN: usize = 120;
+    let scan_start = history.len().saturating_sub(MAX_HISTORY_SCAN);
+    for message in &history[scan_start..] {
+        if !matches!(message.role, uni::MessageRole::Tool) {
+            continue;
+        }
+        let hay = message.content.as_text();
+        if hay.is_empty() {
+            continue;
+        }
+        // Structural confirmation only: the serialized form is JSON text, so
+        // raw character containment can never match (decoded newlines etc.
+        // live behind JSON escapes). Parse and compare trimmed string rows.
+        if let Ok(candidate) = serde_json::from_str::<Value>(hay.as_ref()) {
+            if candidate.as_object().is_none() {
+                continue;
+            }
+            let mut rows = Vec::new();
+            flatten_string_values(&candidate, &mut rows);
+            if rows == needle {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Depth-bounded collection of all string values in a JSON tree, so the
+/// content comparison ignores key order and volatile numeric metadata
+/// (timestamps, pids) while remaining sensitive to ordering of text rows.
+fn flatten_string_values(value: &Value, rows: &mut Vec<String>) {
+    match value {
+        Value::String(text) => rows.push(text.trim().to_string()),
+        Value::Array(items) => {
+            for item in items {
+                flatten_string_values(item, rows);
+            }
+        }
+        Value::Object(map) => {
+            for (_key, item) in map {
+                flatten_string_values(item, rows);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Get the family key for a read-file call.
 fn repeated_file_read_family_key(canonical_tool_name: &str, args: &Value) -> Option<String> {
     use super::super::looping::spool_chunk_read_path;
@@ -150,8 +256,9 @@ fn repeated_file_read_family_key(canonical_tool_name: &str, args: &Value) -> Opt
         tool_names::CODE_SEARCH => vtcode_core::tools::normalised_code_search_loop_identity(args)
             .map(|identity| format!("code_search::{identity}")),
         tool_names::UNIFIED_EXEC | tool_names::EXEC_COMMAND | "command_session" => {
-            if let Some(exec_read) = parse_simple_exec_read_target(args) {
-                return Some(format!("unified_exec::read::{}{}", exec_read.path, exec_read.slice_suffix));
+            if let Some(exec_read) = vtcode_core::tools::parse_exec_read_target(args) {
+                let slice_suffix = exec_read_slice_suffix(&exec_read);
+                return Some(format!("unified_exec::read::{}{}", exec_read.path, slice_suffix));
             }
             // Track remaining file-reading shell commands in the family guard to
             // prevent bypass via unified_exec. Simple `sed -n` ranges and `awk`
@@ -171,194 +278,17 @@ fn repeated_file_read_family_key(canonical_tool_name: &str, args: &Value) -> Opt
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExecReadTarget {
-    pub(crate) path: String,
-    pub(crate) start_line: usize,
-    slice_suffix: String,
-    /// Whether the command output is the file's own lines. Only a bare
-    /// `sed -n '<range>p' <file>` (no pipe) is verbatim: piped stages and awk
-    /// programs transform the output, so it must never be fingerprinted as
-    /// positioned file evidence (see `navigation_evidence`). Loop guards use
-    /// path/slice regardless of this flag.
-    pub(crate) verbatim: bool,
+/// Family-key slice encoding shared with the core `ExecReadTarget` identity so
+/// the guard and replay can never disagree on the shape.
+fn exec_read_slice_suffix(exec_read: &vtcode_core::tools::ExecReadTarget) -> String {
+    let limit = exec_read.end_line.saturating_sub(exec_read.start_line).saturating_add(1);
+    format!("::off={}::lim={limit}", exec_read.start_line)
 }
 
-/// Lexically normalize a shell-measurement target path so spelling variants
-/// (`./README.md`, `docs/../README.md`) share one family key, path count, and
-/// evidence identity. Reuses the shared code_search loop-identity normalizer:
-/// leading `..` is preserved (fail-closed, never collides with in-workspace
-/// entries), so workspace escape via `../` cannot masquerade as a local read.
-fn normalised_shell_read_path(path: &str) -> String {
-    vtcode_core::tools::normalised_code_search_path(path)
-}
-
-pub(crate) fn parse_simple_exec_read_target(args: &Value) -> Option<ExecReadTarget> {
-    let parts = vtcode_core::tools::command_args::command_words(args).ok()??;
-    // Measurement loops hide a simple read behind a pipe
-    // (`sed -n '65,71p' README.md | awk ...`, `awk 'NR...' README.md | cat`):
-    // only the leading pipeline stage determines what is read, so parse that
-    // and ignore trailing pipe stages. Only `|` is split: `;`/`&&`/`||`
-    // compounds keep their legacy untracked behavior (the full word list
-    // fails the simple-shape parse below), which under-counts rather than
-    // over-blocks multi-read one-liners.
-    let leading = leading_shell_segment(parts.as_slice());
-    let piped = leading.len() != parts.len();
-    parse_simple_sed_read_target(leading)
-        .or_else(|| parse_simple_awk_read_target(leading))
-        .map(|mut target| {
-            // A stripped pipe stage transforms the output downstream, so the
-            // lines that reach the model are not the file's own lines.
-            target.verbatim = target.verbatim && !piped;
-            target
-        })
-}
-
-/// Leading pipeline stage before the first `|` token. `command_words` splits
-/// via `shell_words`, so a `|` inside a quoted awk program stays embedded in
-/// the program word and never splits; only a standalone pipe operator cuts.
-fn leading_shell_segment(parts: &[String]) -> &[String] {
-    let end = parts.iter().position(|part| part.as_str() == "|").unwrap_or(parts.len());
-    &parts[..end]
-}
-
-/// Parse `awk '<program>' <single-file>` ranged measurement reads.
-///
-/// KISS scope: exactly `awk`, one program word, one file word — no options
-/// (`-F`, `-v` fail closed to `None`), no multi-file scans, and the program
-/// must reference an `NR` line range (see [`awk_nr_line_range`]). Whole-file
-/// scans stay untracked: distinct whole-file queries are diverse research, not
-/// pagination (mirrors the `code_search` per-path exclusion), so counting them
-/// would false-trip the path cap. The read guard only runs for
-/// readonly-classified calls, so mutating programs (`>`, `|`, `system()`, `@`)
-/// never reach here; no need to re-scan the program for writes. The file word
-/// must not look like a flag. Awk output is always computed, never the file's
-/// own lines, so `verbatim` is always false.
-fn parse_simple_awk_read_target(parts: &[String]) -> Option<ExecReadTarget> {
-    if parts.len() != 3 || parts.first().map(String::as_str) != Some("awk") {
-        return None;
-    }
-    let program = parts.get(1)?.as_str();
-    if program.trim().is_empty() {
-        return None;
-    }
-    let path = parts.get(2)?.as_str();
-    if path.starts_with('-') || path.is_empty() {
-        return None;
-    }
-
-    let (start, end) = awk_nr_line_range(program)?;
-    let limit = end.saturating_sub(start).saturating_add(1);
-    Some(ExecReadTarget {
-        path: normalised_shell_read_path(path),
-        start_line: start,
-        slice_suffix: format!("::off={start}::lim={limit}"),
-        verbatim: false,
-    })
-}
-
-/// Extract the line range referenced by `NR` comparisons in an awk program.
-///
-/// Scans for `NR` then an optional comparison operator (`>`, `<`, `=`, `!`
-/// combos) then a decimal number. Only numbers in that position count, so
-/// thresholds like `length > 120` (no `NR`) do not masquerade as line ranges.
-/// Requires at least two numbers: a single `NR` reference (`NR>1` header-skip,
-/// one `NR==67` probe, one `/NR==65/` regex hit) cannot delimit a range, and
-/// grouping all such open-ended scans by path alone would trip the family cap
-/// on diverse column queries over the same file. Returns `(min, max)` over
-/// all matches.
-fn awk_nr_line_range(program: &str) -> Option<(usize, usize)> {
-    let bytes = program.as_bytes();
-    let mut numbers: Vec<usize> = Vec::new();
-    let mut index = 0;
-    while index + 1 < bytes.len() {
-        if bytes[index] == b'N' && bytes[index + 1] == b'R' {
-            let mut cursor = index + 2;
-            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-                cursor += 1;
-            }
-            while cursor < bytes.len() && matches!(bytes[cursor], b'>' | b'<' | b'=' | b'!') {
-                cursor += 1;
-            }
-            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-                cursor += 1;
-            }
-            let start = cursor;
-            while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-                cursor += 1;
-            }
-            if start < cursor
-                && let Ok(number) = program[start..cursor].parse::<usize>()
-            {
-                numbers.push(number);
-            }
-            index = cursor.max(index + 1);
-        } else {
-            index += 1;
-        }
-    }
-    let min = *numbers.iter().min()?;
-    let max = *numbers.iter().max()?;
-    // A lone `NR` reference cannot delimit a range (see doc comment); without
-    // this, every `NR>1` header-skip would collapse to `off=1::lim=1` and trip
-    // the family cap on diverse same-file queries.
-    if numbers.len() < 2 {
-        return None;
-    }
-    // Sanity: line numbers, not byte counts. Ranges spanning millions of
-    // lines are not real file slices; leave untracked.
-    if max == 0 || max.saturating_sub(min) > 1_000_000 {
-        return None;
-    }
-    Some((min, max))
-}
-
-fn parse_simple_sed_read_target(parts: &[String]) -> Option<ExecReadTarget> {
-    if parts.first().map(String::as_str) != Some("sed") {
-        return None;
-    }
-
-    let mut cursor = 1usize;
-    if parts.get(cursor).map(String::as_str) != Some("-n") {
-        return None;
-    }
-    cursor += 1;
-
-    let script = parts.get(cursor)?.as_str();
-    cursor += 1;
-
-    let path = parts.get(cursor)?.as_str();
-    if cursor + 1 != parts.len() {
-        return None;
-    }
-    // Fail closed on flag-like paths (`sed -n '1p' --help`); mirrors the awk
-    // parser below. `-` (stdin) is not a file read either.
-    if path.starts_with('-') {
-        return None;
-    }
-
-    let (start, end) = parse_simple_sed_print_range(script)?;
-    let limit = end.saturating_sub(start).saturating_add(1);
-    Some(ExecReadTarget {
-        path: normalised_shell_read_path(path),
-        start_line: start,
-        slice_suffix: format!("::off={start}::lim={limit}"),
-        // Bare `sed -n '<range>p' <file>` prints the file's own lines. The
-        // caller clears this when a pipe stage was stripped.
-        verbatim: true,
-    })
-}
-
-fn parse_simple_sed_print_range(script: &str) -> Option<(usize, usize)> {
-    let range = script.strip_suffix('p')?;
-    let (start, end) = match range.split_once(',') {
-        Some((start, end)) => (start, end),
-        None => (range, range),
-    };
-
-    let start = start.parse::<usize>().ok()?;
-    let end = end.parse::<usize>().ok()?;
-    (start <= end).then_some((start, end))
+/// Binary-crate alias over the shared core parser so guard and evidence
+/// consumers keep their stable import path without re-deriving the shape.
+pub(crate) fn parse_simple_exec_read_target(args: &Value) -> Option<vtcode_core::tools::ExecReadTarget> {
+    vtcode_core::tools::parse_exec_read_target(args)
 }
 
 fn repeated_read_path(canonical_tool_name: &str, effective_args: &Value) -> Option<String> {
@@ -624,22 +554,13 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
     // preserves the identical-slice loop guard: serving a cached hit must not
     // hide a retry loop that should force tool-free recovery.
     if ctx.harness_state.has_successful_readonly_signature(signature.as_str())
-        && let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_output(
+        && let Some(reused_value) = ctx.tool_registry.find_recent_successful_output(
             canonical_tool_name,
             effective_args,
             ctx.harness_state.max_tool_wall_clock,
         )
     {
-        if let Some(obj) = reused_value.as_object_mut() {
-            super::super::apply_reused_read_only_loop_metadata(obj);
-        }
-        ctx.push_reused_tool_response(
-            tool_call_id,
-            canonical_tool_name,
-            effective_args,
-            maybe_inline_spooled(canonical_tool_name, &reused_value),
-        );
-        ctx.harness_state.record_reused_result();
+        reuse_read_only_result(ctx, tool_call_id, canonical_tool_name, effective_args, reused_value, false);
         return Some(ValidationResult::Handled);
     }
 
@@ -647,23 +568,13 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
     // via `read_extent_matches`). Plan artifacts already looked this up before
     // the caps above, so skip the duplicate lookup for them.
     if !plan_lookup_done
-        && let Some(mut reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
+        && let Some(reused_value) = ctx.tool_registry.find_recent_successful_by_read_target(
             canonical_tool_name,
             effective_args,
             ctx.harness_state.max_tool_wall_clock,
         )
     {
-        if let Some(obj) = reused_value.as_object_mut() {
-            super::super::apply_reused_read_only_loop_metadata(obj);
-        }
-        ctx.push_reused_tool_response(
-            tool_call_id,
-            canonical_tool_name,
-            effective_args,
-            maybe_inline_spooled(canonical_tool_name, &reused_value),
-        );
-        ctx.harness_state.record_successful_readonly_signature(signature);
-        ctx.harness_state.record_reused_result();
+        reuse_read_only_result(ctx, tool_call_id, canonical_tool_name, effective_args, reused_value, true);
         return Some(ValidationResult::Handled);
     }
 
@@ -699,6 +610,71 @@ mod tests {
     use vtcode_core::config::constants::tools as tool_names;
 
     use super::*;
+
+    #[test]
+    fn content_dupes_history_matches_identical_tool_response() {
+        let payload = r#"{"output":"alpha\nbeta","exit_code":0}"#;
+        let history = vec![uni::Message::tool_response("call-1".to_string(), payload.to_string())];
+        assert!(content_dupes_history(payload, &history));
+        // Key order and numeric formatting must not matter.
+        let reordered = r#"{"exit_code":0,"output":"alpha\nbeta"}"#;
+        assert!(content_dupes_history(reordered, &history));
+    }
+
+    #[test]
+    fn content_dupes_history_rejects_different_or_absent_content() {
+        let payload = r#"{"output":"alpha\nbeta","exit_code":0}"#;
+        // Different content must not match.
+        let different = vec![uni::Message::tool_response(
+            "call-1".to_string(),
+            r#"{"output":"gamma","exit_code":0}"#.to_string(),
+        )];
+        assert!(!content_dupes_history(payload, &different));
+        // Empty history must not match.
+        assert!(!content_dupes_history(payload, &[]));
+        // Prose (non-JSON) serialized output fails open.
+        assert!(!content_dupes_history("plain text result", &[]));
+        // History entry that is not JSON must not match a JSON needle.
+        let prose = vec![uni::Message::tool_response(
+            "call-1".to_string(),
+            "plain text".to_string(),
+        )];
+        assert!(!content_dupes_history(payload, &prose));
+        // Volatile numeric metadata alone must not create a match: different
+        // command output rows mean different content.
+        let volatile = vec![uni::Message::tool_response(
+            "call-1".to_string(),
+            r#"{"output":"alpha\nbeta","exit_code":0,"pid":99999}"#.to_string(),
+        )];
+        // pid differs only in metadata — string rows are equal, so this DOES match.
+        assert!(content_dupes_history(payload, &volatile));
+    }
+
+    #[test]
+    fn build_reuse_reference_stub_strips_content_and_keeps_metadata() {
+        let serialized = r#"{"tool":"exec_command","exit_code":0,"loop_detected":true,"output":"alpha\nbeta","reused_recent_result":true}"#;
+        let stub = crate::agent::runloop::unified::turn::tool_outcomes::response_content::build_reuse_reference_stub(
+            serialized,
+        );
+        let parsed: Value = serde_json::from_str(&stub).expect("stub is valid json");
+        assert!(parsed.get("output").is_none(), "content key stripped");
+        assert_eq!(parsed.get("exit_code"), Some(&serde_json::json!(0)));
+        assert_eq!(parsed.get("loop_detected"), Some(&serde_json::json!(true)));
+        assert!(
+            parsed
+                .get("reuse_reference")
+                .and_then(Value::as_str)
+                .is_some_and(|s| !s.is_empty())
+        );
+    }
+
+    #[test]
+    fn build_reuse_reference_stub_fails_open_on_prose() {
+        let stub = crate::agent::runloop::unified::turn::tool_outcomes::response_content::build_reuse_reference_stub(
+            "plain prose",
+        );
+        assert_eq!(stub, "plain prose");
+    }
 
     #[test]
     fn repeated_file_read_family_key_tracks_cat_via_unified_exec() {
