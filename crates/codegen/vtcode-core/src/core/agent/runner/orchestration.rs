@@ -598,7 +598,7 @@ fn bounded_failure_sample(text: &str) -> String {
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
-    let marker = (end < text.len()).then_some("…").unwrap_or_default();
+    let marker = if end < text.len() { "…" } else { "" };
     format!("{}{marker}", &text[..end])
 }
 
