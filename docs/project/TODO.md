@@ -58,5 +58,5 @@ use Codex `Plugin Creator`, Help me build a plugin. Start by asking what it shou
 ## Benchmarking TODO
 
 - [ ] Run a real VT Code evaluation on SWE-bench Lite. Follow the
-	[evaluation plan](../benchmarks/PLAN-VTCODE-SWEBENCH-LITE.md), pilot first, and submit reproducible
-	results if eligible.
+      [evaluation plan](../benchmarks/PLAN-VTCODE-SWEBENCH-LITE.md), pilot first, and submit reproducible
+      results if eligible.
