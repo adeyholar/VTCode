@@ -70,12 +70,20 @@ pub(crate) struct TrackerRow {
     pub(crate) leaf: bool,
 }
 
+/// Current-task marker shared by plan and todo tracker surfaces.
+///
+/// `»` replaces the old geometric `▶` so the focused row stays readable
+/// on plain terminals while keeping a distinct single-glyph visual.
+pub(crate) const TRACKER_CURRENT_MARKER: &str = "»";
+/// Full current-task prefix (`marker + space`) for `strip_prefix`/`starts_with`.
+pub(crate) const TRACKER_CURRENT_PREFIX: &str = "» ";
+
 /// Transcript lines for a tracker payload, honoring display mode.
 ///
 /// Status surfaces through text styling only (no leaf glyphs): done rows
 /// render struck-through, the current row renders bold in the theme accent,
 /// blocked rows use the warning token. Compact (`expanded = false`) shows
-/// header plus the single current task row (`  ▶ …`); expanded appends the
+/// header plus the single current task row (`  » …`); expanded appends the
 /// glyphless tree body (truncated). Errors and diagnostics never expand.
 pub(crate) fn tracker_transcript_lines(val: &Value, expanded: bool) -> Vec<TrackerLine> {
     if !expanded {
@@ -223,7 +231,8 @@ fn tracker_visible_tree_rows(val: &Value) -> Vec<String> {
 
 /// Whether a transcript line is the compact-mode focused TODO row.
 pub(crate) fn is_tracker_current_row(line: &str) -> bool {
-    line.trim_start().starts_with("▶ ")
+    let trimmed = line.trim_start();
+    trimmed.starts_with(TRACKER_CURRENT_PREFIX) || trimmed.starts_with("▶ ")
 }
 
 /// Compact-mode focused row: the single most actionable task.
@@ -231,7 +240,7 @@ pub(crate) fn is_tracker_current_row(line: &str) -> bool {
 /// Reuses the leaf-aware pick from [`tracker_panel_rows`] so transcript and
 /// panel always agree on which task is focused. All-completed and empty
 /// checklists return `None` so compact stays header-only. The returned row
-/// uses the distinct `  ▶ ` visual without a status glyph; styling carries
+/// uses the distinct `  » ` visual without a status glyph; styling carries
 /// the status.
 pub(crate) fn tracker_current_tree_row(val: &Value) -> Option<TrackerLine> {
     let rows = tracker_rich_tree_rows(val);
@@ -345,7 +354,7 @@ fn format_tracker_current_row(glyphless_text: &str) -> String {
         }
         break;
     }
-    format!("  ▶ {}", rest.trim_start())
+    format!("  {TRACKER_CURRENT_MARKER} {}", rest.trim_start())
 }
 
 /// Title + progress only — no next-step snippet, no tree rows.

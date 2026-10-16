@@ -10,6 +10,7 @@
 pub use vtcode_commons::ui_protocol::{InlineItemKind, InlineListItem, InlineListSelection, InlineStatus, InlineTone};
 
 /// Section header: bold title with blank spacing above and below.
+/// Renders as `» Title` (leading anchor) to diff it from items.
 #[must_use]
 pub fn group_header(title: impl Into<String>) -> InlineListItem {
     InlineListItem::group_header(title)

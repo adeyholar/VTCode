@@ -14,7 +14,7 @@ between the agent and the TUI).
 
 ## Row contract
 
-- **Group header** — bold title, blank spacing above and below. Non-selectable.
+- **Group header** — `» Title` (leading anchor), bold title, blank spacing above and below. Non-selectable.
 - **Setting** — `title` + accent `value` + dimmed description. Tone via `badge_tone`.
 - **Action** — imperative row with explicit tone (Neutral/Accent/Success/Warning/Danger).
 - **Choice / current_choice** — list options; `current_choice` marks `Current`.

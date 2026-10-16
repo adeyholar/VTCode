@@ -3,6 +3,7 @@
 use super::super::layout::ModalRenderStyles;
 use super::super::state::ModalListState;
 use super::ModalInlineEditor;
+use crate::design::constants::GROUP_HEADER_ANCHOR;
 use crate::tui::config::constants::ui;
 use crate::tui::ui::tui::session::inline_list::{list_cursor, selection_padding, selection_padding_width};
 use crate::tui::ui::tui::types::InlineTone;
@@ -189,18 +190,22 @@ pub fn modal_list_item_lines(
         primary_spans.push(Span::raw(" "));
     }
 
+    let is_header_row = item.is_header();
     let title_style = if item.is_hint() {
         styles.detail
     } else if is_selected && item.selection.is_some() {
         styles.highlight
     } else if item.selection.is_some() {
         styles.selectable
-    } else if item.is_header() {
+    } else if is_header_row {
         styles.header
     } else {
         styles.detail
     };
 
+    if is_header_row {
+        primary_spans.push(Span::styled(GROUP_HEADER_ANCHOR, title_style));
+    }
     let title_spans = highlight_segments(item.title.as_str(), title_style, styles.search_match, list.highlight_terms());
     primary_spans.extend(title_spans);
 
@@ -230,12 +235,14 @@ pub fn modal_list_item_lines(
             list.highlight_terms(),
         ));
     }
+    // Group headers open with the shared `»` anchor so sections read as
+    // labeled headings (`» Title`) instead of plain bold text.
 
     // Shared rhythm: every selectable row keeps one blank separator row
     // after it so dense subtitle lists (settings, model picker, permission
     // groups) stay scannable. Dividers keep a single full-width rule.
     let mut lines = Vec::new();
-    if item.is_header() {
+    if is_header_row {
         if visible_index > 0 {
             lines.push(Line::default());
         }

@@ -32,7 +32,7 @@ fn dummy_handle() -> InlineHandle {
 #[serial_test::serial(transcript_state)]
 fn successful_task_tracker_replacement_contains_header_plus_current_task() {
     // Compact transcript contract: header plus the single current-task row
-    // with the distinct `▶` visual. The full compact tree stays panel-only.
+    // with the distinct `»` visual. The full compact tree stays panel-only.
     let (sender, mut receiver) = unbounded_channel();
     let handle = InlineHandle::new_for_tests(sender);
     let first = serde_json::json!({
@@ -63,7 +63,7 @@ fn successful_task_tracker_replacement_contains_header_plus_current_task() {
     let first_panel = crate::agent::runloop::tool_output::tracker_tree_body_lines(&first);
     let second_panel = crate::agent::runloop::tool_output::tracker_tree_body_lines(&second);
 
-    assert_eq!(tracker_texts(&first_progress), vec!["• Release 1/3", "  ▶ Run checks"]);
+    assert_eq!(tracker_texts(&first_progress), vec!["• Release 1/3", "  » Run checks"]);
     assert_eq!(
         first_progress[1].status,
         Some(TaskItemStatus::InProgress),
@@ -152,11 +152,11 @@ fn looks_like_tracker_content_accepts_tree_rows_and_truncation() {
     assert!(looks_like_tracker_content("  ├ Investigate cache miss"));
     assert!(looks_like_tracker_content("  └ Verify with cargo check"));
     assert!(looks_like_tracker_content("  │ Defer eager setup"));
-    assert!(looks_like_tracker_content("  ▶ Defer eager setup"));
+    assert!(looks_like_tracker_content("  » Defer eager setup"));
     // Legacy glyph rows remain recognizable so in-flight blocks still
     // replace cleanly across the upgrade.
     assert!(looks_like_tracker_content("  ├ □ Investigate cache miss"));
-    assert!(looks_like_tracker_content("  ▶ [-] Defer eager setup"));
+    assert!(looks_like_tracker_content("  » [-] Defer eager setup"));
     assert!(looks_like_tracker_content("  … 5 more"));
     assert!(!looks_like_tracker_content("• Questions 2/5 answered"));
     assert!(!looks_like_tracker_content("• Ran cargo check"));
@@ -180,7 +180,7 @@ fn task_tracker_block_lines_expanded_shows_items_with_asymmetric_statuses() {
     let compact = task_tracker_block_lines(&payload, false);
     let expanded = task_tracker_block_lines(&payload, true);
 
-    assert_eq!(tracker_texts(&compact), vec!["• Release 1/3", "  ▶ Defer eager setup"]);
+    assert_eq!(tracker_texts(&compact), vec!["• Release 1/3", "  » Defer eager setup"]);
     assert_eq!(compact[1].status, Some(TaskItemStatus::InProgress));
     assert_eq!(
         expanded,
@@ -446,7 +446,7 @@ fn task_tracker_done_rows_render_struck_through_dimmed_italic() {
     assert!(!rows[3][1].style.effects.contains(Effects::STRIKETHROUGH));
     // Non-current in-progress rows use the primary accent (the markdown
     // base style contributes weight pipeline-wide; the focused current row
-    // adds the `▶` marker on top).
+    // adds the `»` marker on top).
     let expected = convert_style(theme::active_styles().primary);
     assert_eq!(rows[2][1].style.color, expected.color);
 }
@@ -457,13 +457,13 @@ fn task_tracker_current_row_segments_carry_primary_accent() {
 
     let rows = task_tracker_block_segments(&[
         TrackerLine::plain("• Release 1/3".to_string()),
-        TrackerLine::row("  ▶ Defer eager setup".to_string(), TaskItemStatus::InProgress),
+        TrackerLine::row("  » Defer eager setup".to_string(), TaskItemStatus::InProgress),
     ]);
 
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0][0].text, "• Release 1/3");
     let text = rows[1].iter().map(|segment| segment.text.as_str()).collect::<String>();
-    assert_eq!(text, "  ▶ Defer eager setup");
+    assert_eq!(text, "  » Defer eager setup");
     let expected = convert_style(theme::active_styles().primary);
     assert!(expected.color.is_some(), "primary accent must resolve to a concrete color for the TODO visual");
     assert_eq!(
@@ -481,7 +481,7 @@ fn task_tracker_current_row_segments_carry_primary_accent() {
 fn split_tracker_row_prefix_handles_nested_and_parent_rows() {
     assert_eq!(split_tracker_row_prefix("  ├ Investigate"), Some(("  ├ ", "Investigate")));
     assert_eq!(split_tracker_row_prefix("  │ Update version"), Some(("  │ ", "Update version")));
-    assert_eq!(split_tracker_row_prefix("  ▶ Defer eager setup"), Some(("  ▶ ", "Defer eager setup")));
+    assert_eq!(split_tracker_row_prefix("  » Defer eager setup"), Some(("  » ", "Defer eager setup")));
     // Legacy glyph rows still split so in-flight blocks degrade gracefully.
     assert_eq!(split_tracker_row_prefix("  ├ □ Investigate"), Some(("  ├ □ ", "Investigate")));
     assert_eq!(split_tracker_row_prefix("  ├ Prepare release"), Some(("  ├ ", "Prepare release")));

@@ -44,6 +44,13 @@ pub const SPACING_LOOSE: u16 = 4;
 /// model capabilities). Shorter titles are padded so values line up.
 pub const VALUE_COL: usize = 28;
 
+// ── Group header chrome ───────────────────────────────────────────────────
+
+/// Anchor prefix for modal group headers (`» Title`).
+/// Reuses the tracker current-task marker so section headings and focused
+/// rows read as one system on plain terminals.
+pub const GROUP_HEADER_ANCHOR: &str = "» ";
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -54,7 +54,7 @@ fn tracker_rows_and_current_row_share_one_short_description() {
     assert!(!rows[0].contains("headless"), "detail tail must not surface: {rows:?}");
 
     let current = tracker_current_tree_row(&payload).expect("pending row is the current task");
-    assert_eq!(current.text, "  ▶ Update the Everyday recipes block");
+    assert_eq!(current.text, "  » Update the Everyday recipes block");
 }
 
 #[test]
@@ -1118,7 +1118,7 @@ fn tracker_transcript_lines_compact_shows_header_plus_current_task() {
 
     let rows = tracker_transcript_lines(&payload, false);
 
-    assert_eq!(transcript_texts(&rows), vec!["• Release 1/3", "  ▶ Defer eager setup"]);
+    assert_eq!(transcript_texts(&rows), vec!["• Release 1/3", "  » Defer eager setup"]);
     assert_eq!(transcript_statuses(&rows), vec![None, Some(TaskItemStatus::InProgress)]);
     assert!(rows.iter().all(|row| !row.text.contains("[-]") && !row.text.contains("□")));
 }
@@ -1144,7 +1144,7 @@ fn tracker_panel_and_transcript_focus_actionable_leaf_before_parent() {
     assert_eq!(statuses[2], TaskItemStatus::Pending);
     assert_eq!(
         tracker_current_tree_row(&payload),
-        Some(TrackerLine::row("  ▶ Run checks".to_string(), TaskItemStatus::Pending))
+        Some(TrackerLine::row("  » Run checks".to_string(), TaskItemStatus::Pending))
     );
 }
 
@@ -1166,7 +1166,7 @@ fn tracker_current_tree_row_prefers_in_progress_over_pending_and_blocked() {
 
     assert_eq!(
         tracker_current_tree_row(&payload),
-        Some(TrackerLine::row("  ▶ Defer eager setup".to_string(), TaskItemStatus::InProgress))
+        Some(TrackerLine::row("  » Defer eager setup".to_string(), TaskItemStatus::InProgress))
     );
 }
 
@@ -1184,7 +1184,7 @@ fn tracker_current_tree_row_falls_back_to_pending_then_blocked() {
     });
     assert_eq!(
         tracker_current_tree_row(&pending_only),
-        Some(TrackerLine::row("  ▶ Defer eager setup".to_string(), TaskItemStatus::Pending))
+        Some(TrackerLine::row("  » Defer eager setup".to_string(), TaskItemStatus::Pending))
     );
 
     let blocked_only = json!({
@@ -1199,7 +1199,7 @@ fn tracker_current_tree_row_falls_back_to_pending_then_blocked() {
     });
     assert_eq!(
         tracker_current_tree_row(&blocked_only),
-        Some(TrackerLine::row("  ▶ Resolve dependency".to_string(), TaskItemStatus::Blocked))
+        Some(TrackerLine::row("  » Resolve dependency".to_string(), TaskItemStatus::Blocked))
     );
 }
 
@@ -1227,8 +1227,8 @@ fn tracker_current_tree_row_stays_header_only_when_all_completed_or_empty() {
 
 #[test]
 fn tracker_current_row_marker_is_detected() {
-    assert!(is_tracker_current_row("  ▶ Defer eager setup"));
-    assert!(is_tracker_current_row("  ▶ Verify with cargo check"));
+    assert!(is_tracker_current_row("  » Defer eager setup"));
+    assert!(is_tracker_current_row("  » Verify with cargo check"));
     assert!(!is_tracker_current_row("  ├ Defer eager setup"));
     assert!(!is_tracker_current_row("• Release 1/3"));
 }

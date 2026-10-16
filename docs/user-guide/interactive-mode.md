@@ -279,7 +279,7 @@ VT Code supports an optional Vim-style prompt editor.
 - Picking a suggestion inserts it into the composer. Empty drafts are replaced; non-empty drafts keep their content and
   append the suggestion after a blank line.
 - `/config tasks` toggles the dedicated TODO panel. It is fed directly from `task_tracker` output. Display mode controls
-  the transcript: compact shows header such as `• Release 3/8` plus the single current-task row (`▶ …`, bold theme
+  the transcript: compact shows header such as `• Release 3/8` plus the single current-task row (`» …`, bold theme
   `primary` accent), expanded shows header plus truncated tree (max 30 rows + `… N more`) so each task item is visible
   inline, while the panel body keeps the full tree when opened with per-row status styling (done rows struck-through,
   italic, dimmed; current row bold accent; blocked rows warning). Every visible row is bounded to one short description

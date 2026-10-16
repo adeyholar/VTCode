@@ -143,7 +143,7 @@ Reads and no-op updates do not rewrite identical mirrors.
 All tracker artifacts are read before an update is published. Reported publication failures roll back earlier
 writes; detected concurrent edits are preserved and rollback failures remain visible in the error.
 
-Successful tracker updates honor display mode: compact shows header plus the single current task (`▶ …`, first
+Successful tracker updates honor display mode: compact shows header plus the single current task (`» …`, first
 `in_progress` leaf else first `pending`/`blocked`; header-only when all done) while expanded shows header plus truncated
 tree (max 30 rows + `… N more`) so each task item is visible inline. The full hierarchical tree is always TODO-panel
 body content when the user opens the panel. Parent rows show their branch and description; leaf status surfaces through

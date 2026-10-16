@@ -12,14 +12,14 @@ mod tracker;
 use tracker::render_tracker_view;
 #[cfg(test)]
 pub(crate) use tracker::tracker_tree_body_lines;
+pub(crate) use tracker::{
+    TRACKER_CURRENT_PREFIX, TrackerLine, humanize_tracker_title, is_tracker_current_row, tracker_panel_metadata,
+    tracker_panel_rows, tracker_transcript_lines,
+};
 #[cfg(test)]
 use tracker::{
     TRACKER_ROW_DESCRIPTION_MAX_BYTES, TRACKER_TRANSCRIPT_MAX_ROWS, tracker_current_tree_row, tracker_progress_lines,
     tracker_row_text, tracker_summary_lines,
-};
-pub(crate) use tracker::{
-    TrackerLine, humanize_tracker_title, is_tracker_current_row, tracker_panel_metadata, tracker_panel_rows,
-    tracker_transcript_lines,
 };
 
 // Re-export stream utilities

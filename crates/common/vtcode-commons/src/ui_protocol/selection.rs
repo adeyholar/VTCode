@@ -132,6 +132,8 @@ impl InlineListItem {
     }
 
     /// Shared group header: bold title, blank spacing above and below.
+    /// Renders as a labeled heading (`» Title`) so sections
+    /// stay distinct from plain items and full-width dividers.
     /// Use for every grouped modal list so sections read the same way.
     #[must_use]
     pub fn group_header(title: impl Into<String>) -> Self {

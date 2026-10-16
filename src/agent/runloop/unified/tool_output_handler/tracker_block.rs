@@ -143,7 +143,7 @@ pub(super) fn render_tracker_line(
 
 /// Split a tree row into its structural prefix and markdown body.
 ///
-/// Handles the current-task marker (`  ▶ `), branch prefixes (`  ├ `), and —
+/// Handles the current-task marker (`  » `), branch prefixes (`  ├ `), and —
 /// for tolerance with legacy payloads — one leading status glyph. Returns
 /// `None` for title/diagnostic lines so they keep their plain style.
 pub(super) fn split_tracker_row_prefix(line: &str) -> Option<(&str, &str)> {
@@ -151,7 +151,10 @@ pub(super) fn split_tracker_row_prefix(line: &str) -> Option<(&str, &str)> {
     let mut consumed_prefix = false;
     let leading_spaces = rest.len() - rest.trim_start_matches(' ').len();
     rest = &rest[leading_spaces..];
-    if let Some(after) = rest.strip_prefix("▶ ") {
+    if let Some(after) = rest
+        .strip_prefix(crate::agent::runloop::tool_output::TRACKER_CURRENT_PREFIX)
+        .or_else(|| rest.strip_prefix("▶ "))
+    {
         rest = after;
         consumed_prefix = true;
     }
@@ -393,7 +396,7 @@ pub(super) fn looks_like_tracker_progress_line(line: &str) -> bool {
 
 pub(super) fn looks_like_tracker_tree_row(line: &str) -> bool {
     let trimmed = line.trim_start();
-    if trimmed.starts_with("▶ ") {
+    if trimmed.starts_with(crate::agent::runloop::tool_output::TRACKER_CURRENT_PREFIX) || trimmed.starts_with("▶ ") {
         return true;
     }
     if trimmed.starts_with("├ ") || trimmed.starts_with("└ ") || trimmed.starts_with("│ ") {
