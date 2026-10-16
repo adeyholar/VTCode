@@ -61,14 +61,14 @@ Choose the model and permission level; VT Code manages context, tool calls, and 
 
 <!-- markdownlint-disable MD013 -->
 
-| At a glance      | What you get                                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------   |
-| **Planning**     | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs.                                                                |
-| **Safety**       | [Auditable command policy](./docs/security/SECURITY_MODEL.md) and sandboxing.                                                                |
-| **Self-correct** | [HOVER loop](./docs/development/hypothesis-revision-validation.md): Hypothesize, Observe, Verify, Evaluate, Revise, Repeat on tool mismatch. |
-| **Long runs**    | [Headless exec](./docs/user-guide/exec-mode.md) with compaction, resumption, and logs.                                                       |
-| **Integrations** | [MCP](./docs/guides/mcp-integration.md), Skills, plugins, and editor bridges.                                                                |
-| **Models**       | [Hosted or local providers](./docs/README.md#provider-index), chosen per task.                                                               |
+| At a glance      | What you get                                                                 |
+| ---------------- | ---------------------------------------------------------------------------- |
+| **Planning**     | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs. |
+| **Safety**       | [Auditable command policy](./docs/security/SECURITY_MODEL.md) and sandboxing. |
+| **Self-correct** | [HOVER loop](./docs/development/hypothesis-revision-validation.md) on tool mismatch. |
+| **Long runs**    | [Headless exec](./docs/user-guide/exec-mode.md) with compaction and resumption. |
+| **Integrations** | [MCP](./docs/guides/mcp-integration.md), Skills, plugins, and editor bridges. |
+| **Models**       | [Hosted or local providers](./docs/README.md#provider-index) per task.       |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -127,8 +127,7 @@ irm https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.ps1 | i
 
 ### 2. Configure your project
 
-From your project directory, scaffold the configuration and agent instructions, then add credentials for your chosen
-provider. For example, to use OpenAI:
+From your project directory, scaffold the configuration and agent instructions, then add credentials for your chosen provider. For example, to use OpenAI:
 
 ```bash
 cd path/to/your/project
@@ -234,14 +233,14 @@ Enable these only when you need them; none are required for the quick start.
 
 <!-- markdownlint-disable MD013 -->
 
-| Integration                                   | What it gives you                                                                                                                                                                                                                                                                 |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------   |
-| [MCP](./docs/guides/mcp-integration.md)       | Connect external tools and data sources.                                                                                                                                                                                                                                          |
-| [Agent Skills](./docs/skills/SKILLS_GUIDE.md) | Load reusable prompt packages on demand.                                                                                                                                                                                                                                          |
-| [Plugins](./docs/guides/agent-plugins.md)     | Extend the agent with plugin manifests.                                                                                                                                                                                                                                           |
-| [ACP with Zed](./docs/guides/zed-acp.md)      | Drive VT Code from the Zed editor.                                                                                                                                                                                                                                                |
+| Integration                                   | What it gives you                                                                                                                                                                                            |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [MCP](./docs/guides/mcp-integration.md)       | Connect external tools and data sources.                                                                                                                                                                     |
+| [Agent Skills](./docs/skills/SKILLS_GUIDE.md) | Load reusable prompt packages on demand.                                                                                                                                                                     |
+| [Plugins](./docs/guides/agent-plugins.md)     | Extend the agent with plugin manifests.                                                                                                                                                                      |
+| [ACP with Zed](./docs/guides/zed-acp.md)      | Drive VT Code from the Zed editor.                                                                                                                                                                           |
 | [WebMCP](./docs/user-guide/webmcp.md)         | Pair the TUI with an authenticated browser editor via `/webmcp pair <origin>`; the hosted app ([site](https://vtcode.vinhnx.chatgpt.site/), [mirror](https://vinhnx.github.io/VTCode/)) connects through this bridge. See the [deployment reference](./docs/reference/webmcp.md). |
-| [Memcode MCP](./docs/guides/memcode-mcp.md)   | Carry context between tasks; see the [design write-up](https://memcode.in/blogs/vt-code-memory-across-threads).                                                                                                                                                                   |
+| [Memcode MCP](./docs/guides/memcode-mcp.md)   | Carry context between tasks; see the [design write-up](https://memcode.in/blogs/vt-code-memory-across-threads).                                                                                              |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -252,12 +251,12 @@ Guides grouped by task. The full catalog lives in the [documentation index](./do
 
 <!-- markdownlint-disable MD013 -->
 
-| Goal                 | Guides                                                                                                                                                                                                                                                                                                                                           |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------                                                                  |
-| Get started          | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [FAQ](./docs/FAQ.md) · [Compatibility](./docs/COMPATIBILITY.md)                                                              |
-| Work in the TUI      | [TUI](./docs/user-guide/interactive-mode.md) · [Command reference](./docs/user-guide/commands.md) · [Planning](./docs/guides/planning-workflow.md) · [Turn diffs](./docs/development/diff-preview.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) · [Safety](./docs/security/SECURITY_MODEL.md)                                   |
-| Automate             | [Exec mode](./docs/user-guide/exec-mode.md) · [Full automation](./docs/guides/full-automation.md) · [Decisions probe](./docs/guides/decisions-probe.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [Hooks](./docs/guides/hooks-guide.md)                                                                                        |
-| Extend and integrate | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Memcode](./docs/guides/memcode-mcp.md)                                                                                      |
+| Goal                 | Guides                                                                                                                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Get started          | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Providers](./docs/providers/PROVIDER_GUIDES.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [FAQ](./docs/FAQ.md) · [Compatibility](./docs/COMPATIBILITY.md) |
+| Work in the TUI      | [TUI](./docs/user-guide/interactive-mode.md) · [Command reference](./docs/user-guide/commands.md) · [Planning](./docs/guides/planning-workflow.md) · [Turn diffs](./docs/development/diff-preview.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) · [Safety](./docs/security/SECURITY_MODEL.md) |
+| Automate             | [Exec mode](./docs/user-guide/exec-mode.md) · [Full automation](./docs/guides/full-automation.md) · [Decisions probe](./docs/guides/decisions-probe.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [Hooks](./docs/guides/hooks-guide.md) |
+| Extend and integrate | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Memcode](./docs/guides/memcode-mcp.md) |
 | Develop and evaluate | [Development](./docs/development/README.md) · [Testing](./docs/development/testing.md) · [Evals](./docs/guides/eval.md) · [Architecture](./docs/ARCHITECTURE.md) · [HOVER](./docs/development/hypothesis-revision-validation.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) |
 
 <!-- markdownlint-enable MD013 -->
@@ -279,10 +278,9 @@ graph LR
 To build, use Rust 1.98.1+ (edition 2024); to run tests, install `cargo-nextest`. See the
 [architecture guide](./docs/ARCHITECTURE.md) for the full 23-crate map.
 
-Context handling separates session history from provider request projections. Local clearing protects complete recent
-tool batches; headless runs estimate the cleared projection before automatic compaction. See
-[context architecture](./docs/ARCHITECTURE.md#request-projection-and-context-budgets) and the
-[compaction guide](./docs/development/compaction.md) for budgets, provider strategies, and persistence boundaries.
+Context handling separates session history from provider request projections; local clearing protects complete recent
+tool batches before automatic compaction. See [context architecture](./docs/ARCHITECTURE.md#request-projection-and-context-budgets)
+and the [compaction guide](./docs/development/compaction.md) for details.
 
 ```bash
 git clone https://github.com/vinhnx/VTCode.git
