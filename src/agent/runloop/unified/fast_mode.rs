@@ -44,9 +44,9 @@ pub(crate) fn effective_speed_label(config: &AgentConfig, cfg: &VTCodeConfig) ->
 }
 
 pub(crate) fn fast_mode_selected(config: &AgentConfig, cfg: &VTCodeConfig) -> bool {
-    if config.provider.eq_ignore_ascii_case("anthropic") {
+    if Provider::Anthropic.name_matches(&config.provider) {
         cfg.provider.anthropic.speed == Some(AnthropicSpeed::Fast)
-    } else if config.provider.eq_ignore_ascii_case("openai") {
+    } else if Provider::OpenAI.name_matches(&config.provider) {
         cfg.provider.openai.service_tier == Some(OpenAIServiceTier::Ultrafast)
     } else {
         false

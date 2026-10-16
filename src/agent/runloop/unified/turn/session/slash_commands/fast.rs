@@ -51,14 +51,14 @@ fn apply_fast_mode(
     enable: Option<bool>,
 ) -> Result<Option<&'static str>> {
     let mut runtime_cfg = vt_cfg.as_ref().unwrap_or_else(|| manager.config()).clone();
-    if runtime_cfg.custom_provider(&config.provider).is_some()
-        || !matches!(config.provider.to_ascii_lowercase().as_str(), "openai" | "anthropic")
-    {
+    let is_openai = vtcode_commons::provider::Provider::OpenAI.name_matches(&config.provider);
+    let is_anthropic = vtcode_commons::provider::Provider::Anthropic.name_matches(&config.provider);
+    if runtime_cfg.custom_provider(&config.provider).is_some() || !(is_openai || is_anthropic) {
         bail!(
             "/fast supports native OpenAI and Anthropic only. Select an eligible route with /model; saved preferences are unchanged."
         );
     }
-    let anthropic = config.provider.eq_ignore_ascii_case("anthropic");
+    let anthropic = is_anthropic;
     let enabled = enable.unwrap_or(!fast_mode_selected(config, &runtime_cfg));
     if enabled && !supports_fast_mode(config, &runtime_cfg) {
         bail!(

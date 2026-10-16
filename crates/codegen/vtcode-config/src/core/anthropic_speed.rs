@@ -66,7 +66,7 @@ impl AnthropicSpeed {
 impl VTCodeConfig {
     /// Mirror native dispatch eligibility for commands, picker, and display.
     pub fn anthropic_speed_supported(&self, provider: &str, model: &str) -> bool {
-        provider.eq_ignore_ascii_case("anthropic")
+        vtcode_commons::provider::Provider::Anthropic.name_matches(provider)
             && self.custom_provider(provider).is_none()
             && AnthropicSpeed::supports_model(model)
             && AnthropicSpeed::is_native_endpoint(&AnthropicSpeed::resolve_base_url(
