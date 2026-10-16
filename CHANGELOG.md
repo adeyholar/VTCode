@@ -5,18 +5,10 @@ All notable changes to vtcode will be documented in this file.
 ## 0.179.1 - 2026-10-16
 
 ### Highlights
-#### Documentation
+#### Bug Fixes
 
-- Fix private intra-doc links and bare URLs (777071cc) (@vinhnx)
+- Tolerate clock skew and slow CI run registration (d2080edf) 
 ### Other Changes
-#### CI
-
-- Dedup man pages, gate heavy jobs, trim cache costs (1cecef2a) (@vinhnx)
-- Overlap man pages, parallelize uploads, prune dead paths (ae19ee4a) 
-#### Performance
-
-- Extend tui_hotpath with channel, mutex and CPU coverage (62d8d748) 
-- Hotpath fast-paths, I/O demo, bench hygiene (a8abdada) 
 ## 0.179.0 - 2026-10-16
 
 ### Highlights
