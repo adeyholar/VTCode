@@ -18,28 +18,6 @@ computer use
 
 ---
 
-check and fix the tool call issues and other related problems in the session, check for missing or invalid arguments, repeated calls, and execution failures. Ensure proper context management and resource cleanup. check for wasted resources and optimize tool usage where applicable.
-
-Tool 'exec_command' failed: Tool preflight validation failed for 'exec_command': Tool preflight validation failed
-for 'exec_command': Missing required argument: command
-Tool 'exec_command' failed: Tool preflight validation failed for 'exec_command': Repeated invalid arguments
-Tool 'code_search' failed: The 'code_search' tool reported a execution failure (Execution failed): all requested
-code_search result categories are unavailable
-
-Tool 'code_search' failed: The 'code_search' tool reported a execution failure (Execution failed): all requested
-code_search result categories are unavailable
-Reached maximum tool loops (20)
-
---
-
-ALSO CRITICAL: check
-[!] Turn balancer: repeated low-signal navigation detected (navigation::retained_evidence ×3); scheduling an early
-recovery pass.. It seems when VT Code encounters repeated low-signal navigation, it triggers an early recovery to maintain session stability and doesn't automatically continue normal operation until the recovery is complete. The agent should able to detect this situation and handle it appropriately to avoid further disruptions.
-
-session: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261015T083154Z_961005-54191
-
----
-
 https://deepswe.datacurve.ai/
 
 https://deepswe.datacurve.ai/run
@@ -47,7 +25,3 @@ https://deepswe.datacurve.ai/run
 ---
 
 https://www.tbench.ai/
-
----
-
-opt-in openrouter attribution https://openrouter.ai/docs/app-attribution
