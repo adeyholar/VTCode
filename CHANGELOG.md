@@ -7,7 +7,8 @@ All notable changes to vtcode will be documented in this file.
 ### Highlights
 #### Bug Fixes
 
-- Tolerate clock skew and slow CI run registration (d2080edf) 
+- Tolerate clock skew and slow CI run registration (d2080edf) (@vinhnx)
+- Use --locked instead of --frozen for Windows release build (2fea0c40) (@vinhnx)
 ### Other Changes
 ## 0.179.0 - 2026-10-16
 
