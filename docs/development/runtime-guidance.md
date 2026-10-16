@@ -298,9 +298,7 @@ all increment the same reuse counter. Request assembly also collapses legacy dup
 current marker. Cross-turn target caches match bounded shell slice reads (`sed -n '<range>p' <file>`, `awk '<NR program>'
 <file>`) at the identical slice with the same transform class (verbatim vs piped), so a stale re-emit of a slice read
 within the reuse window is served from the cache instead of re-executing; mutating/dynamic command shapes and
-different slices never reuse. When a served reuse response duplicates content that is still verbatim in the current
-working history, the response carries a bounded `reuse_reference` stub instead of a second copy of the payload; if
-compaction has pruned the earlier copy, the full payload is served again.
+different slices never reuse.
 
 Interactive follow-ups are durable steering intents. Each queued intent has a UUID, the session envelope stores at most
 16 pending intents and a 64-ID applied window, and the intent is acknowledged only after its tagged user message is

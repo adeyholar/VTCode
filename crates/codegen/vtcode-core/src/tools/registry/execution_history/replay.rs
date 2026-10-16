@@ -334,20 +334,45 @@ impl ToolExecutionHistory {
     /// Used when a write tool modifies a file: only the records that could
     /// contain stale content for that file are dropped, instead of wiping
     /// every cached read-only result.
+    ///
+    /// Covers both structured file reads (`read_file`, `unified_file`) and
+    /// bounded shell slice reads (`sed -n '<range>p' <file>`), because both
+    /// participate in cross-turn reuse and both go stale after a mutation of
+    /// their target.
     pub fn invalidate_for_path(&self, target_path: &str) {
         let Ok(mut records) = self.records.write() else {
             return;
         };
-        records.retain(|record| {
-            if record.tool_name == tools::READ_FILE || record.tool_name == tools::UNIFIED_FILE {
-                if let Some(record_path) = Self::extract_read_target(&record.tool_name, &record.args) {
-                    if record_path == target_path {
-                        return false;
-                    }
-                }
-            }
-            true
-        });
+        records.retain(|record| !Self::record_reads_path(record, target_path).unwrap_or(false));
+    }
+
+    /// Return `Some(true)` when `record` is a read of `target_path`
+    /// (structured file read or bounded shell slice), `Some(false)` when it is
+    /// a read of a different path, and `None` when it is not a path-scoped read
+    /// at all. Shared by the path-scoped invalidators so the two read families
+    /// cannot drift.
+    fn record_reads_path(record: &ToolExecutionRecord, target_path: &str) -> Option<bool> {
+        if matches!(record.tool_name.as_str(), tools::READ_FILE | tools::UNIFIED_FILE) {
+            let record_path = Self::extract_read_target(&record.tool_name, &record.args)?;
+            return Some(record_path == target_path);
+        }
+        if matches!(record.tool_name.as_str(), tools::EXEC_COMMAND | tools::UNIFIED_EXEC) {
+            let identity = ExecTargetIdentity::from_args(&record.args)?;
+            return Some(identity.path == target_path);
+        }
+        None
+    }
+
+    /// Whether `record` is any path-scoped read (structured file read or
+    /// bounded shell slice) that a pathless mutation must conservatively drop.
+    /// Structured file reads are always path-scoped; command records only count
+    /// when they parse as a slice read.
+    fn record_is_path_scoped_read(record: &ToolExecutionRecord) -> bool {
+        if matches!(record.tool_name.as_str(), tools::READ_FILE | tools::UNIFIED_FILE) {
+            return true;
+        }
+        matches!(record.tool_name.as_str(), tools::EXEC_COMMAND | tools::UNIFIED_EXEC)
+            && ExecTargetIdentity::from_args(&record.args).is_some()
     }
 
     /// Conservatively drop every cached read-only result.
@@ -355,12 +380,14 @@ impl ToolExecutionHistory {
     /// Used when a mutating shell command produces no identifiable target path
     /// (e.g. `sed -i`), so we cannot know which files may now be stale. A
     /// pathless mutation could have touched anything, so no read record can be
-    /// trusted afterward.
+    /// trusted afterward. Covers structured file reads and bounded shell slice
+    /// reads; other command records (e.g. `cargo build`) are not reads and
+    /// survive.
     pub fn invalidate_all_reads(&self) {
         let Ok(mut records) = self.records.write() else {
             return;
         };
-        records.retain(|record| !(record.tool_name == tools::READ_FILE || record.tool_name == tools::UNIFIED_FILE));
+        records.retain(|record| !Self::record_is_path_scoped_read(record));
     }
 
     /// Check whether the cached record's read shape covers the new query's shape.

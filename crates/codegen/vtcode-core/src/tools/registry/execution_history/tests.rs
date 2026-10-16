@@ -1419,3 +1419,83 @@ fn exec_slice_read_rejects_expired_ttl_and_fresh_after_mutation() {
     // (`invalidate_for_path`). This documents that expectation explicitly.
     assert!(after_mutation.is_some(), "mutating records of other tools are skipped, not scanned");
 }
+
+#[test]
+fn mutation_invalidates_cached_exec_slice_read_of_same_path() {
+    let history = ToolExecutionHistory::new(10);
+    history.add_record(ToolExecutionRecord::success(
+        tools::EXEC_COMMAND.to_string(),
+        tools::EXEC_COMMAND.to_string(),
+        false,
+        None,
+        json!({"action":"run","cmd":"sed -n '1,5p' README.md","command":"sed -n '1,5p' README.md"}),
+        json!({"output":"stale\n","exit_code":0}),
+        make_snapshot(),
+        None,
+        None,
+        None,
+        None,
+        false,
+    ));
+
+    // A write to the same path must drop the exec-slice record; otherwise the
+    // cross-turn cache would serve stale pre-mutation content.
+    history.invalidate_for_path("README.md");
+    assert!(
+        history
+            .find_recent_successful_by_read_target(
+                tools::EXEC_COMMAND,
+                &json!({"cmd":"sed -n '1,5p' README.md"}),
+                Duration::from_secs(600),
+            )
+            .is_none(),
+        "a mutation of the read path must invalidate the cached exec slice"
+    );
+}
+
+#[test]
+fn invalidate_all_reads_drops_exec_slice_records() {
+    let history = ToolExecutionHistory::new(10);
+    history.add_record(ToolExecutionRecord::success(
+        tools::EXEC_COMMAND.to_string(),
+        tools::EXEC_COMMAND.to_string(),
+        false,
+        None,
+        json!({"action":"run","cmd":"sed -n '1,5p' README.md","command":"sed -n '1,5p' README.md"}),
+        json!({"output":"stale\n","exit_code":0}),
+        make_snapshot(),
+        None,
+        None,
+        None,
+        None,
+        false,
+    ));
+    // A non-slice command must survive (not a read record).
+    history.add_record(ToolExecutionRecord::success(
+        tools::EXEC_COMMAND.to_string(),
+        tools::EXEC_COMMAND.to_string(),
+        false,
+        None,
+        json!({"action":"run","cmd":"cargo build","command":"cargo build"}),
+        json!({"output":"built\n","exit_code":0}),
+        make_snapshot(),
+        None,
+        None,
+        None,
+        None,
+        false,
+    ));
+
+    history.invalidate_all_reads();
+
+    assert!(
+        history
+            .find_recent_successful_by_read_target(
+                tools::EXEC_COMMAND,
+                &json!({"cmd":"sed -n '1,5p' README.md"}),
+                Duration::from_secs(600),
+            )
+            .is_none(),
+        "pathless mutation must drop cached exec slices too"
+    );
+}

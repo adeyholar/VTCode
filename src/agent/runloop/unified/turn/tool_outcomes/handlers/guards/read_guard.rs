@@ -12,7 +12,6 @@
 
 use serde_json::{Value, json};
 use vtcode_core::config::constants::tools as tool_names;
-use vtcode_core::llm::provider as uni;
 
 use super::super::ValidationResult;
 use super::super::looping::low_signal_family_key;
@@ -144,16 +143,10 @@ pub(crate) fn check_read_family_cap(
 /// recorded — no-op needed) from the read-target path (record it now so a
 /// later identical call takes the cheaper exact-args lookup).
 ///
-/// Redundancy guard: when the served payload already sits verbatim in the
-/// working history (the model is re-attaching content it can already see),
-/// the response is replaced by a bounded reference stub. This is session-
-/// evidence-driven (20261015T232419: a same-turn cache-served duplicate
-/// re-attached the full 1.6 KiB output plus a 264 B loop banner — the model
-/// held the identical 1.6 KiB two messages earlier). The stub keeps the
-/// loop metadata and key outcome fields but drops the bulky content keys.
-/// Only the current *request* history is consulted; if compaction already
-/// pruned the earlier copy, the full payload is served again (correctness
-/// over savings).
+/// Content is served intact: issue #680 established that stripping the payload
+/// from a reused read leaves the model with no data and makes it hallucinate or
+/// spin, and the durable `tool_output` event shares this string, so events and
+/// persistence must keep the full result.
 fn reuse_read_only_result(
     ctx: &mut TurnProcessingContext<'_>,
     tool_call_id: &str,
@@ -165,82 +158,13 @@ fn reuse_read_only_result(
     if let Some(obj) = reused_value.as_object_mut() {
         super::super::apply_reused_read_only_loop_metadata(obj);
     }
-    let serialized = maybe_inline_spooled(canonical_tool_name, &reused_value);
-    let content_already_in_history = content_dupes_history(&serialized, ctx.working_history);
-    let final_content = if content_already_in_history {
-        crate::agent::runloop::unified::turn::tool_outcomes::response_content::build_reuse_reference_stub(&serialized)
-    } else {
-        serialized
-    };
-    ctx.push_reused_tool_response(tool_call_id, canonical_tool_name, effective_args, final_content);
+    let content = maybe_inline_spooled(canonical_tool_name, &reused_value);
+    ctx.push_reused_tool_response(tool_call_id, canonical_tool_name, effective_args, content);
     if register_signature {
         let signature = signature_key_for(canonical_tool_name, effective_args);
         ctx.harness_state.record_successful_readonly_signature(signature);
     }
     ctx.harness_state.record_reused_result();
-}
-
-/// Bounded-content check: does this serialized output appear as a tool
-/// response in the current working history? Compares the trimmed string rows
-/// of the parsed JSON trees (key-order- and numeric-metadata-insensitive), so
-/// only a provably-identical copy suppresses re-attachment. Non-JSON history
-/// entries and non-JSON serialized output never match (fail open).
-fn content_dupes_history(serialized: &str, history: &[uni::Message]) -> bool {
-    let Some(needle) = serde_json::from_str::<Value>(serialized).ok().map(|parsed| {
-        let mut rows = Vec::new();
-        flatten_string_values(&parsed, &mut rows);
-        rows
-    }) else {
-        return false;
-    };
-    if needle.is_empty() {
-        return false;
-    }
-    const MAX_HISTORY_SCAN: usize = 120;
-    let scan_start = history.len().saturating_sub(MAX_HISTORY_SCAN);
-    for message in &history[scan_start..] {
-        if !matches!(message.role, uni::MessageRole::Tool) {
-            continue;
-        }
-        let hay = message.content.as_text();
-        if hay.is_empty() {
-            continue;
-        }
-        // Structural confirmation only: the serialized form is JSON text, so
-        // raw character containment can never match (decoded newlines etc.
-        // live behind JSON escapes). Parse and compare trimmed string rows.
-        if let Ok(candidate) = serde_json::from_str::<Value>(hay.as_ref()) {
-            if candidate.as_object().is_none() {
-                continue;
-            }
-            let mut rows = Vec::new();
-            flatten_string_values(&candidate, &mut rows);
-            if rows == needle {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Depth-bounded collection of all string values in a JSON tree, so the
-/// content comparison ignores key order and volatile numeric metadata
-/// (timestamps, pids) while remaining sensitive to ordering of text rows.
-fn flatten_string_values(value: &Value, rows: &mut Vec<String>) {
-    match value {
-        Value::String(text) => rows.push(text.trim().to_string()),
-        Value::Array(items) => {
-            for item in items {
-                flatten_string_values(item, rows);
-            }
-        }
-        Value::Object(map) => {
-            for (_key, item) in map {
-                flatten_string_values(item, rows);
-            }
-        }
-        _ => {}
-    }
 }
 
 /// Get the family key for a read-file call.
@@ -610,71 +534,6 @@ mod tests {
     use vtcode_core::config::constants::tools as tool_names;
 
     use super::*;
-
-    #[test]
-    fn content_dupes_history_matches_identical_tool_response() {
-        let payload = r#"{"output":"alpha\nbeta","exit_code":0}"#;
-        let history = vec![uni::Message::tool_response("call-1".to_string(), payload.to_string())];
-        assert!(content_dupes_history(payload, &history));
-        // Key order and numeric formatting must not matter.
-        let reordered = r#"{"exit_code":0,"output":"alpha\nbeta"}"#;
-        assert!(content_dupes_history(reordered, &history));
-    }
-
-    #[test]
-    fn content_dupes_history_rejects_different_or_absent_content() {
-        let payload = r#"{"output":"alpha\nbeta","exit_code":0}"#;
-        // Different content must not match.
-        let different = vec![uni::Message::tool_response(
-            "call-1".to_string(),
-            r#"{"output":"gamma","exit_code":0}"#.to_string(),
-        )];
-        assert!(!content_dupes_history(payload, &different));
-        // Empty history must not match.
-        assert!(!content_dupes_history(payload, &[]));
-        // Prose (non-JSON) serialized output fails open.
-        assert!(!content_dupes_history("plain text result", &[]));
-        // History entry that is not JSON must not match a JSON needle.
-        let prose = vec![uni::Message::tool_response(
-            "call-1".to_string(),
-            "plain text".to_string(),
-        )];
-        assert!(!content_dupes_history(payload, &prose));
-        // Volatile numeric metadata alone must not create a match: different
-        // command output rows mean different content.
-        let volatile = vec![uni::Message::tool_response(
-            "call-1".to_string(),
-            r#"{"output":"alpha\nbeta","exit_code":0,"pid":99999}"#.to_string(),
-        )];
-        // pid differs only in metadata — string rows are equal, so this DOES match.
-        assert!(content_dupes_history(payload, &volatile));
-    }
-
-    #[test]
-    fn build_reuse_reference_stub_strips_content_and_keeps_metadata() {
-        let serialized = r#"{"tool":"exec_command","exit_code":0,"loop_detected":true,"output":"alpha\nbeta","reused_recent_result":true}"#;
-        let stub = crate::agent::runloop::unified::turn::tool_outcomes::response_content::build_reuse_reference_stub(
-            serialized,
-        );
-        let parsed: Value = serde_json::from_str(&stub).expect("stub is valid json");
-        assert!(parsed.get("output").is_none(), "content key stripped");
-        assert_eq!(parsed.get("exit_code"), Some(&serde_json::json!(0)));
-        assert_eq!(parsed.get("loop_detected"), Some(&serde_json::json!(true)));
-        assert!(
-            parsed
-                .get("reuse_reference")
-                .and_then(Value::as_str)
-                .is_some_and(|s| !s.is_empty())
-        );
-    }
-
-    #[test]
-    fn build_reuse_reference_stub_fails_open_on_prose() {
-        let stub = crate::agent::runloop::unified::turn::tool_outcomes::response_content::build_reuse_reference_stub(
-            "plain prose",
-        );
-        assert_eq!(stub, "plain prose");
-    }
 
     #[test]
     fn repeated_file_read_family_key_tracks_cat_via_unified_exec() {
