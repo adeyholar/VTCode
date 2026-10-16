@@ -42,6 +42,11 @@ jobs:
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cf7daf8c8c61b7fb3ec452e903208764aeca2f56 # cargo-llvm-cov
+        with:
+          # `tool` is a required input; without it the step installs nothing
+          # and the coverage commands below fail with "command not found".
+          tool: cargo-llvm-cov
+          fallback: none
 
       - name: Compile tests for coverage
         run: cargo llvm-cov --locked --workspace --no-run

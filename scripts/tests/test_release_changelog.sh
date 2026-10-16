@@ -475,6 +475,18 @@ if ! grep -q '^Usage: ./scripts/release.sh' "$fixture_dir/help.txt"; then
 	exit 1
 fi
 checks=$((checks + 1))
+# --ci-only is the supported CI mode; the dead --full-ci flag (it triggered
+# a nonexistent release.yml) must stay removed.
+if ! grep -q -- '--ci-only' "$fixture_dir/help.txt"; then
+	printf 'FAIL: release --help missing --ci-only\n' >&2
+	exit 1
+fi
+checks=$((checks + 1))
+if grep -q -- 'full-ci' "$fixture_dir/help.txt"; then
+	printf 'FAIL: release --help still advertises removed --full-ci\n' >&2
+	exit 1
+fi
+checks=$((checks + 1))
 assert_equal "$(command git rev-parse HEAD)" "$original_head" "formatter leaves HEAD unchanged"
 assert_equal "$(command git status --porcelain)" '' "formatter leaves worktree unchanged"
 assert_equal "$(command git tag -l)" '' "formatter creates no tags"

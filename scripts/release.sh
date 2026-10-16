@@ -86,8 +86,6 @@ Options:
                       and the CI trigger, but still run Steps 4-6 (collect
                       binaries, upload assets, Homebrew). Use with an explicit
                       version, e.g. `./scripts/release.sh 0.171.5 --skip-release`.
-  --full-ci           Use GitHub Actions for ALL platforms (including macOS)
-                      Default: builds macOS locally, CI for Linux/Windows
   --ci-only           Trigger CI for Linux/Windows only (skip local macOS build)
                       Useful when macOS binaries already built locally
   -h, --help          Show this help message
@@ -96,11 +94,6 @@ Cost Optimization:
   Default mode (recommended):
     • macOS binaries: built locally (no CI cost, faster)
     • Linux/Windows: built on GitHub Actions (free for public repos)
-
-  --full-ci mode (all CI, higher cost):
-    • All platforms built on GitHub Actions
-    • Uses 4 runners: 2x macOS, 1x Ubuntu, 1x Windows
-    • Estimated cost: ~20-30 minutes of runner time
 
   --ci-only mode (hybrid):
     • Skip local macOS build
@@ -369,8 +362,11 @@ trigger_docs_rs_rebuild() {
 		vtcode-core vtcode-acp vtcode
 	)
 	for crate in "${crates[@]}"; do
-		curl -s -o /dev/null "https://docs.rs/${crate}/${version}" || true
+		# Fire-and-forget rebuild pings; each is an independent HTTPS GET,
+		# so all 21 run concurrently instead of sequentially.
+		curl -s -o /dev/null "https://docs.rs/${crate}/${version}" || true &
 	done
+	wait 2>/dev/null || true
 }
 
 publish_homebrew_tap() {
@@ -507,7 +503,6 @@ main() {
 	local skip_binaries=false
 	local skip_docs=false
 	local skip_release=false
-	local full_ci=false
 	local ci_only=false
 
 	while [[ $# -gt 0 ]]; do
@@ -550,10 +545,6 @@ main() {
 			;;
 		--skip-release)
 			skip_release=true
-			shift
-			;;
-		--full-ci)
-			full_ci=true
 			shift
 			;;
 		--ci-only)
@@ -659,35 +650,6 @@ main() {
 		print_info "Releasing version: $next_version"
 	fi
 
-	# Check if using full CI mode
-	if [[ "$full_ci" == 'true' ]]; then
-		print_info "Full CI mode: Using GitHub Actions for ALL platforms (including macOS)"
-
-		if [[ "$dry_run" == 'true' ]]; then
-			print_info "Dry run - would trigger full CI workflow for $next_version"
-			print_info "Command: gh workflow run release.yml --field tag=$next_version"
-		else
-			# Trigger full CI release workflow
-			if gh workflow run release.yml --field tag="$next_version"; then
-				print_success "Full CI workflow triggered for $next_version"
-				print_info "Monitor progress: https://github.com/vinhnx/vtcode/actions/workflows/release.yml"
-				print_info ""
-				print_info "The CI will:"
-				print_info "  1. Build all platforms (macOS, Linux, Windows)"
-				print_info "  2. Create GitHub Release"
-				print_info "  3. Upload all binaries"
-				print_info ""
-				print_info "Note: cargo-release and changelog updates still run locally"
-			else
-				print_error "Failed to trigger full CI workflow"
-				exit 1
-			fi
-		fi
-
-		# In full CI mode, skip local binary builds but still do cargo-release
-		skip_binaries=true
-	fi
-
 	# Check if using CI-only mode (Linux/Windows only, skip macOS)
 	if [[ "$ci_only" == 'true' ]]; then
 		print_info "CI-only mode: Triggering CI for Linux/Windows only (skip macOS build)"
@@ -729,18 +691,23 @@ main() {
 		fi
 	fi
 
-	# 1. Local Build (both macOS architectures for Homebrew, or current platform on Linux)
+	# 1. Local sanity check (fast `cargo check`, no codegen/LTO).
 	# Skipped under --skip-release: the irreversible version bump already happened,
-	# so the pre-bump sanity build has no purpose and Step 4 rebuilds the real
+	# so the pre-bump sanity check has no purpose and Step 4 builds the real
 	# artifacts anyway.
+	# NOTE: this deliberately does NOT build binaries. Step 1 used to run the
+	# full `build-and-upload-binaries.sh --only-build-local` (two fat-LTO
+	# macOS release builds), then Step 4 rebuilt both architectures again after
+	# the version bump invalidated the cache — the Step 1 output was always
+	# thrown away. A release-profile `cargo check` validates the same
+	# workspace (features, targets, lockfile) in ~1-2 min without codegen.
 	if [[ "$skip_binaries" == 'false' && "$skip_release" == 'false' ]]; then
 		if [[ "$dry_run" == 'true' ]]; then
-			print_info "Step 1 (dry-run): Would build binaries for x86_64-apple-darwin and aarch64-apple-darwin"
+			print_info "Step 1 (dry-run): Would run cargo check for x86_64-apple-darwin and aarch64-apple-darwin"
 		else
-			print_info "Step 1: Local binary build (macOS: both architectures, Linux: current platform)..."
-
-			local build_args=(-v "$next_version" --only-build-local)
-			env CARGO_BUILD_RUSTC_WRAPPER= RUSTC_WRAPPER= ./scripts/build-and-upload-binaries.sh "${build_args[@]}"
+			print_info "Step 1: Local sanity check (macOS: both architectures)..."
+			env CARGO_BUILD_RUSTC_WRAPPER= RUSTC_WRAPPER= cargo check --locked --profile release \
+				--target x86_64-apple-darwin --target aarch64-apple-darwin --jobs 4
 		fi
 	fi
 
@@ -816,14 +783,16 @@ main() {
 			git push origin --tags --no-verify 2>/dev/null || true
 
 			# Trigger the build-linux-windows workflow
+			# Timestamp the dispatch: run selection below only accepts runs
+			# created after this point, so a delayed new run is never
+			# confused with the previous release's run.
+			local trigger_time
+			trigger_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 			if gh workflow run build-linux-windows.yml --field tag="$released_version"; then
 				print_success "CI workflow triggered for $released_version"
 
-				# Wait for CI to complete (with timeout)
-				print_info "Waiting for CI builds to complete (timeout: 60 minutes)..."
-				local wait_start
-				wait_start=$(date +%s)
-				local timeout=7800 # 130 minutes
+				# Wait for CI to complete.
+				print_info "Waiting for CI builds to complete..."
 				local run_id=""
 
 				# Get the workflow run ID - wait for it to appear
@@ -831,44 +800,26 @@ main() {
 				local max_find_attempts=24 # Wait up to 2 minutes for run to appear
 				while [[ -z "$run_id" && $find_run_attempts -lt $max_find_attempts ]]; do
 					sleep 5
-					# Look for the most recent run of this workflow
-					run_id=$(gh run list --workflow build-linux-windows.yml --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+					# Newest run of this workflow created after the dispatch
+					# above (ISO-8601 Zulu timestamps sort lexicographically).
+					run_id=$(gh run list --workflow build-linux-windows.yml --limit 5 --json databaseId,createdAt --jq --arg since "$trigger_time" '[.[] | select(.createdAt > $since)] | .[0].databaseId // empty' 2>/dev/null || true)
 					find_run_attempts=$((find_run_attempts + 1))
 				done
 
 				if [[ -z "$run_id" ]]; then
 					print_warning "Could not find CI workflow run - will use macOS binaries only"
+				# `gh run watch` blocks until the run completes and exits
+				# nonzero unless the conclusion is success. CI jobs carry
+				# 45m timeouts, so a stalled run is bounded server-side.
+				elif gh run watch "$run_id" --exit-status >/dev/null 2>&1; then
+					print_success "CI builds completed successfully"
+					# Store run_id for later download
+					CI_RUN_ID="$run_id"
 				else
-					# Wait for the run to complete
-					local status="in_progress"
-					local conclusion=""
-					while [[ "$status" == "in_progress" || "$status" == "queued" ]]; do
-						sleep 30
-						local run_info
-						run_info=$(gh run view "$run_id" --json status,conclusion 2>/dev/null || echo '{"status":"failed","conclusion":"failure"}')
-						status=$(echo "$run_info" | jq -r '.status')
-						conclusion=$(echo "$run_info" | jq -r '.conclusion')
-
-						# Check timeout
-						local now
-						now=$(date +%s)
-						local elapsed=$((now - wait_start))
-						if [[ $elapsed -gt $timeout ]]; then
-							print_warning "CI build timeout after $timeout seconds - will use macOS binaries only"
-							break
-						fi
-
-						print_info "CI status: $status (${elapsed}s elapsed)"
-					done
-
-					if [[ "$conclusion" == "success" ]]; then
-						print_success "CI builds completed successfully"
-						# Store run_id for later download
-						CI_RUN_ID="$run_id"
-					else
-						print_warning "CI build failed with conclusion: $conclusion - will use macOS binaries only"
-						gh run view "$run_id" --log || true
-					fi
+					local conclusion
+					conclusion=$(gh run view "$run_id" --json conclusion --jq '.conclusion' 2>/dev/null || echo "unknown")
+					print_warning "CI build failed with conclusion: $conclusion - will use macOS binaries only"
+					gh run view "$run_id" --log || true
 				fi
 			else
 				print_warning "Failed to trigger CI workflow - will use macOS binaries only"
@@ -940,13 +891,14 @@ main() {
 		fi
 
 		# Generate the full man page set (main + every subcommand) once and
-		# include it in every platform archive.
+		# include it in every platform archive. Runs in the background
+		# alongside the macOS builds: `cargo run -p xtask` compiles the dev
+		# profile (minutes) while the release builds run fat LTO — overlapping
+		# hides the man-page compile inside the longer release compile.
+		# `--jobs 2` leaves cores for the two `--jobs 4` release builds.
 		local man_stage="$binaries_dir/man/man1"
-		if cargo run --locked -p xtask -- gen-man --out-dir "$man_stage" >/dev/null 2>&1; then
-			print_info "Generated $(ls "$man_stage" | wc -l | tr -d ' ') man pages"
-		else
-			print_warning "Man page generation failed; archives will ship without man pages"
-		fi
+		cargo run --locked --jobs 2 -p xtask -- gen-man --out-dir "$man_stage" &>/dev/null &
+		local pid_man=$!
 
 		# Build macOS binaries in parallel
 		print_info "Building macOS binaries in parallel..."
@@ -967,6 +919,15 @@ main() {
 		env CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="-C link-arg=-Wl,-dead_strip" \
 			cargo build --locked --profile release --target aarch64-apple-darwin --jobs 4 &>/dev/null &
 		local pid_arm=$!
+
+		# Man pages must be ready before packaging (every archive embeds
+		# man/). This only blocks if gen-man outlasts the builds; the
+		# release compiles keep running concurrently.
+		if wait "$pid_man" 2>/dev/null; then
+			print_info "Generated $(ls "$man_stage" 2>/dev/null | wc -l | tr -d ' ') man pages"
+		else
+			print_warning "Man page generation failed; archives will ship without man pages"
+		fi
 
 		# Wait for x86_64
 		if wait "$pid_x86"; then
@@ -1132,8 +1093,15 @@ main() {
 		# asset is selected; its `.compat` final extension is treated as a plain
 		# uncompressed binary, sidestepping the missing `compression-tar-gz`
 		# feature. See scripts/release-assets.sh for the full rationale.
-		print_info "Generating legacy updater compatibility assets..."
+		print_info "Generating legacy updater compatibility assets (parallel)..."
 		local -a compat_assets=()
+		# Each asset derives from a distinct archive into a distinct output,
+		# so all six generate concurrently. Failures are collected via status
+		# files (background jobs cannot `exit 1` the parent) and abort below,
+		# preserving the previous fail-fast behavior.
+		local compat_status_dir
+		compat_status_dir=$(mktemp -d)
+		local -a compat_pids=()
 		for item in "${required_targets[@]}"; do
 			local ctarget="${item%%:*}"
 			local cext="${item##*:}"
@@ -1143,18 +1111,27 @@ main() {
 				print_error "Failed to derive compatibility asset path for $normal_archive"
 				exit 1
 			fi
-			if ! create_compatibility_asset "$normal_archive" "$compat_path"; then
-				print_error "Failed to generate compatibility asset from $normal_archive"
+			compat_assets+=("$compat_path")
+			(
+				create_compatibility_asset "$normal_archive" "$compat_path" &&
+					{ [[ "$ctarget" != *-apple-darwin ]] || verify_macos_release_binary "$compat_path"; } ||
+					touch "$compat_status_dir/$(basename "$compat_path").failed"
+			) &
+			compat_pids+=($!)
+		done
+		local compat_pid
+		for compat_pid in "${compat_pids[@]}"; do
+			wait "$compat_pid" 2>/dev/null || true
+		done
+		local compat_failed_file
+		for compat_failed_file in "$compat_status_dir"/*.failed; do
+			if [[ -e "$compat_failed_file" ]]; then
+				print_error "Failed to generate compatibility asset $(basename "$compat_failed_file" .failed)"
+				rm -rf "$compat_status_dir"
 				exit 1
 			fi
-			if [[ "$ctarget" == *-apple-darwin ]]; then
-				if ! verify_macos_release_binary "$compat_path"; then
-					print_error "macOS compatibility asset failed Gatekeeper verification: $compat_path"
-					exit 1
-				fi
-			fi
-			compat_assets+=("$compat_path")
 		done
+		rm -rf "$compat_status_dir"
 		print_success "Generated ${#compat_assets[@]} compatibility assets"
 
 		# Upload all binaries to GitHub Release
@@ -1189,22 +1166,19 @@ main() {
 		# prefix is what makes the legacy updater pick them). Uploading compat
 		# first is harmless defense-in-depth kept for clarity.
 		local upload_failed=0
+		# Single parallel upload queue: compatibility assets first, then normal
+		# archives, checksums, and install scripts. Upload order does NOT
+		# control legacy selection (GitHub re-sorts assets alphabetically by
+		# name; the `compat-` prefix is what makes the legacy updater pick
+		# them), so all files upload concurrently (4-way) to cut wall time
+		# from ~5-10m sequential to ~2-3m. Each asset is retried
+		# independently inside `upload_release_asset_with_retry` (transient
+		# HTTP 500 on large raw compat binaries), and failures are collected
+		# via status files since background jobs cannot set flags directly.
+		local -a upload_queue=()
 		if [[ ${#compat_assets[@]} -gt 0 ]]; then
-			print_info "Uploading compatibility assets (legacy bridge)..."
-			# Per-file upload with retry: uploads.github.com intermittently
-			# returns HTTP 500 on large (~40-80MB) raw compat binaries. A
-			# single batch upload would fail all remaining assets on one
-			# transient error, so each asset is retried independently.
-			local compat_file
-			for compat_file in "${compat_assets[@]}"; do
-				if ! upload_release_asset_with_retry "$released_version" "$compat_file"; then
-					print_error "Failed to upload compatibility asset $(basename "$compat_file") to GitHub Release"
-					upload_failed=1
-				fi
-			done
-			if [[ "$upload_failed" -ne 0 ]]; then
-				print_error "Failed to upload compatibility assets to GitHub Release"
-			fi
+			print_info "Queuing ${#compat_assets[@]} compatibility assets (legacy bridge)..."
+			upload_queue+=("${compat_assets[@]}")
 		fi
 
 		shopt -s nullglob
@@ -1232,14 +1206,39 @@ main() {
 			filtered_normal_files+=("$binaries_dir/checksums.txt")
 		fi
 		if [[ ${#filtered_normal_files[@]} -gt 0 ]]; then
-			print_info "Uploading normal archives, checksums, and install scripts..."
-			local normal_file
-			for normal_file in "${filtered_normal_files[@]}"; do
-				if ! upload_release_asset_with_retry "$released_version" "$normal_file"; then
-					print_error "Failed to upload $(basename "$normal_file") to GitHub Release"
+			print_info "Queuing ${#filtered_normal_files[@]} normal archives, checksums, and install scripts..."
+			upload_queue+=("${filtered_normal_files[@]}")
+		fi
+
+		if [[ ${#upload_queue[@]} -gt 0 ]]; then
+			print_info "Uploading ${#upload_queue[@]} assets (4 parallel)..."
+			local upload_status_dir
+			upload_status_dir=$(mktemp -d)
+			local -a upload_pids=()
+			local upload_file
+			for upload_file in "${upload_queue[@]}"; do
+				(
+					upload_release_asset_with_retry "$released_version" "$upload_file" ||
+						touch "$upload_status_dir/$(basename "$upload_file").failed"
+				) &
+				upload_pids+=($!)
+				while [[ ${#upload_pids[@]} -ge 4 ]]; do
+					wait "${upload_pids[0]}" 2>/dev/null || true
+					upload_pids=("${upload_pids[@]:1}")
+				done
+			done
+			local upload_pid
+			for upload_pid in "${upload_pids[@]}"; do
+				wait "$upload_pid" 2>/dev/null || true
+			done
+			local upload_failed_file
+			for upload_failed_file in "$upload_status_dir"/*.failed; do
+				if [[ -e "$upload_failed_file" ]]; then
+					print_error "Failed to upload $(basename "$upload_failed_file" .failed) to GitHub Release"
 					upload_failed=1
 				fi
 			done
+			rm -rf "$upload_status_dir"
 			if [[ "$upload_failed" -ne 0 ]]; then
 				print_error "Failed to upload binaries to GitHub Release"
 			fi
@@ -1294,7 +1293,7 @@ main() {
 	print_info "  • Linux/Windows binaries: built on GitHub Actions (free for public repo)"
 	print_info ""
 	# Fixed: previous line 1561 had truncated `nfo` (from `print_info`) -> `nfo: command not found`
-	print_info "Tip: Use --full-ci to build ALL platforms on GitHub Actions"
+	print_info "Tip: Use --ci-only to skip the local macOS build and use CI for Linux/Windows"
 }
 
 main "$@"

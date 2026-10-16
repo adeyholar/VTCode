@@ -29,7 +29,7 @@ The project uses several GitHub Actions workflows to ensure code quality and aut
 
 **Triggers:**
 
-- Push and PR to `main` on `.rs`, `.toml`, `.lock`, `scripts/`, `.github/workflows/`
+- Manual `workflow_dispatch` and weekly schedule (Monday 6 AM UTC)
 
 **Jobs:**
 
@@ -41,7 +41,7 @@ The project uses several GitHub Actions workflows to ensure code quality and aut
 **Triggers:**
 
 - Manual `workflow_dispatch` with release tag input
-- Called from `release.yml` on publish
+- Dispatched from `scripts/release.sh` Step 3.5 via `gh workflow run`
 
 **Jobs:**
 
@@ -143,22 +143,19 @@ python3 scripts/tests/test_homebrew_formula.py
 
 **Triggers:**
 
-- Push and PR to `main` on `.rs`, `Cargo.toml`, `Cargo.lock`, `coverage.yml`
+- Manual `workflow_dispatch` and weekly schedule (Monday 6 AM UTC)
 
 **Jobs:**
 
-- **Code Coverage**: `cargo tarpaulin` with XML output
+- **Code Coverage**: `cargo llvm-cov` with LCOV output
 - **Coverage Report**: Uploads to code coverage service
 
-### 5. Release (`release.yml`)
+### 5. Release (driven by `scripts/release.sh`, no dedicated workflow)
 
-**Triggers:**
+**Flow:**
 
-- Manual `workflow_dispatch` with version tag
-
-**Jobs:**
-
-- **Build Binaries**: Triggers `build-linux-windows.yml`
+- **Version & tag**: `cargo-release` bumps, tags, and pushes
+- **Build Binaries**: Dispatches `build-linux-windows.yml` for Linux/Windows; macOS built locally
 - **Create Release**: Drafts GitHub Release with changelog
 - **Publish**: Publishes to crates.io and Homebrew
 
