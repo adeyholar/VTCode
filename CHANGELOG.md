@@ -2,6 +2,47 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.177.1 - 2026-10-16
+
+### Highlights
+#### Bug Fixes
+
+- Repair three stale tests and isolate them from host credentials (9e97a9c6) 
+#### Documentation
+
+- Add hard-prompt timeout recommendations for Argon model (15a104df) 
+#### Features
+
+- Improve planning recovery and tool result compaction (4763e7cb) 
+### Other Changes
+#### Other
+
+- Merge remote-tracking branch 'origin/main' (df98ce2a) 
+- Add source inspection tests and documentation for VT Code internals (fede78d6) 
+- Implement completion verification tests and introduce mutation intent handling (f3680454) 
+- Refactor code structure for improved readability and maintainability (fd9ab197) 
+- Implement loop detection and metadata preservation in task tracker; normalize inline file inputs with MIME-prefixed data URLs. (ee3251e6) 
+- Implement tracker request handling and loop detection improvements (f92d406b) 
+- Add fast mode functionality with toggle command and documentation (78660e3c) 
+- Add ultrafast badge style and tests for header display (6d210194) 
+- Refactor input handling to queue messages during active turns and update documentation for clarity (f712d237) 
+- Implement streaming reasoning state and associated tests for UI interaction (995b6426) 
+- Enhance guidance and error handling for code search and execution processes (96a89aa9) 
+- Implement navigation recovery and synthesis handling; refine preflight failure logic and enhance tool outcome tests. (9719cbff) 
+- Record compaction boundary in prompt cache health and add tests for cache miss behavior (31174a0b) 
+- Enhance verification process and error handling for command execution (8732dfdf) 
+- Fix README installation command and update runtime guidance for clarity; enhance tests for path glob handling and verification logic (d208f189) 
+#### Refactors
+
+- Improve tool definition filtering and enhance prompt section management (171da117) 
+- Share cached stores, budgets, and metadata accessors (267e2a10) 
+- Remove unused dependencies (f7dbf173) 
+- Share last-user-message scan across turn modules (8a4505c8) 
+- Share metadata-line parsing in task_tracking (ce42be4f) 
+- Share profiling await boilerplate via local macro (88829390) 
+- Share cache eviction, reads, and mtime scans in resources (19084374) 
+- Share allOf schema blocks in task_tracking (fe9629f2) 
+- Unify record constructors, history reads, and output field list (836f3a03) 
 ## 0.177.0 - 2026-10-13
 
 ### Highlights
