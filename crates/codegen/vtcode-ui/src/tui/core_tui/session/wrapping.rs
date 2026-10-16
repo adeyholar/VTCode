@@ -92,6 +92,18 @@ pub(crate) fn wrap_line_preserving_urls(line: Line<'static>, max_width: usize) -
         return vec![Line::default()];
     }
 
+    // Hotpath: the regex below is ~10% of TUI reflow — fast-reject plain
+    // prose with the cheap link-candidate check first (no regex engine).
+    // Consistent with link-projection gating: no candidate => no links to
+    // preserve, so standard wrapping is safe.
+    if !line
+        .spans
+        .iter()
+        .any(|span| super::transcript_links::may_contain_link_candidate_text(span.content.as_ref()))
+    {
+        return super::text_utils::wrap_line(line, max_width);
+    }
+
     // Fast path: check spans without joining text (hotpath: the join was a
     // per-row String alloc on every reflow).
     if !line.spans.iter().any(|span| contains_preserved_token(span.content.as_ref())) {

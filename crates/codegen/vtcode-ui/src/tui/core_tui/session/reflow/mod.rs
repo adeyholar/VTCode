@@ -141,9 +141,13 @@ impl Session {
             return self.reflow_error_warning_lines(index, width);
         }
 
-        let spans = render::render_message_spans(self, index);
-        let base_line = Line::from(spans);
         if width == 0 {
+            // Hotpath: Agent messages rebuild spans inside
+            // `reflow_agent_message_lines` and never use `base_line` — keep the
+            // width==0 content path for all kinds, but avoid the redundant
+            // `render_message_spans` alloc on the Agent width!=0 path below.
+            let spans = render::render_message_spans(self, index);
+            let base_line = Line::from(spans);
             return vec![transcript_line_with_detected_links(
                 base_line,
                 self.workspace_root.as_deref(),
@@ -201,11 +205,13 @@ impl Session {
         let lines = if message.kind == InlineMessageKind::Agent {
             self.reflow_agent_message_lines(message, max_width, !is_new_turn)
         } else {
+            let spans = render::render_message_spans(self, index);
+            let base_line = Line::from(spans);
             let mut lines = self.wrap_line(base_line, max_width);
             if !lines.is_empty() {
                 // Links on this path are detected after justification (see
                 // `into_transcript_lines`), so no row carries links yet.
-                lines = self.justify_wrapped_lines(lines, max_width, message.kind, &[]);
+                self.justify_wrapped_lines_in_place(&mut lines, max_width, message.kind, &[]);
             }
             if lines.is_empty() {
                 lines.push(Line::default());
@@ -213,19 +219,27 @@ impl Session {
             into_transcript_lines(lines, self.workspace_root.as_deref())
         };
 
-        wrapped.extend(lines);
+        let mut wrapped_lines = if wrapped.is_empty() {
+            // Hotpath: consecutive Agent rows carry no divider — reuse the
+            // `lines` buffer directly instead of `extend` into a new Vec
+            // (saves one outer Vec alloc per message, ~2.0MB in tui_hotpath).
+            lines
+        } else {
+            wrapped.extend(lines);
+            wrapped
+        };
 
-        if wrapped.is_empty() {
-            wrapped.push(TranscriptLine::default());
+        if wrapped_lines.is_empty() {
+            wrapped_lines.push(TranscriptLine::default());
         }
 
         // Content may end with blank rows (e.g. agent text ending in `\n\n`
         // or markdown paragraph gaps). Trim them so the separator below
         // contributes exactly one gap instead of stacking.
-        trim_trailing_blank_transcript_lines(&mut wrapped);
-        if wrapped.is_empty() {
-            wrapped.push(TranscriptLine::default());
-            return wrapped;
+        trim_trailing_blank_transcript_lines(&mut wrapped_lines);
+        if wrapped_lines.is_empty() {
+            wrapped_lines.push(TranscriptLine::default());
+            return wrapped_lines;
         }
 
         // Add spacing after messages for visual grouping (respects message_block_spacing config)
@@ -243,7 +257,7 @@ impl Session {
                     } else {
                         spacing
                     };
-                    push_spacing_transcript_lines(&mut wrapped, spacing);
+                    push_spacing_transcript_lines(&mut wrapped_lines, spacing);
                 }
             }
             // No spacing if followed by Agent (reasoning -> content flow).
@@ -251,13 +265,13 @@ impl Session {
             InlineMessageKind::Policy
                 if next_kind != Some(InlineMessageKind::Agent) && !next_is_tool_block(next_line) =>
             {
-                push_spacing_transcript_lines(&mut wrapped, spacing);
+                push_spacing_transcript_lines(&mut wrapped_lines, spacing);
             }
             // A tool block owns its own top gap (min 1 guaranteed), so a User
             // message directly before one must not emit trailing spacing.
             InlineMessageKind::User if !next_is_tool_block(next_line) => {
                 // Blank lines after user message for clean separation
-                push_spacing_transcript_lines(&mut wrapped, spacing);
+                push_spacing_transcript_lines(&mut wrapped_lines, spacing);
             }
             InlineMessageKind::User => {}
             // End of an agent turn. Prose keeps one blank line before a
@@ -273,13 +287,13 @@ impl Session {
                     && !next_is_tool_block(next_line) =>
             {
                 let gap = spacing.max(1);
-                push_spacing_transcript_lines(&mut wrapped, gap);
+                push_spacing_transcript_lines(&mut wrapped_lines, gap);
             }
             InlineMessageKind::Agent => {}
             _ => {}
         }
 
-        wrapped
+        wrapped_lines
     }
 
     fn tool_block_spacing(&self) -> usize {
@@ -450,6 +464,10 @@ impl Session {
             } else {
                 self.wrap_line(content_line, content_width)
             };
+            // Hotpath: plain prose (no link candidates) needs no projected
+            // links — leave the outer Vec empty and emit per-line empty Vecs
+            // below, avoiding one outer alloc per Agent message (7401 in
+            // tui_hotpath) plus the row_has_links bool Vec.
             let explicit_links = if content_may_link {
                 transcript_links::project_detected_links_onto_wrapped_lines(
                     &wrapped,
@@ -457,7 +475,7 @@ impl Session {
                     self.workspace_root.as_deref(),
                 )
             } else {
-                vec![Vec::new(); wrapped.len()]
+                Vec::new()
             };
             (wrapped, explicit_links)
         };
@@ -466,13 +484,19 @@ impl Session {
             // Justification inserts interior spaces, so rows carrying
             // projected links keep their wrapped text: their link ranges were
             // computed against it and would otherwise drift out of alignment.
-            let row_has_links: Vec<bool> = explicit_links.iter().map(|links| !links.is_empty()).collect();
-            wrapped = self.justify_wrapped_lines(wrapped, content_width, message.kind, &row_has_links);
+            if content_may_link {
+                let row_has_links: Vec<bool> = explicit_links.iter().map(|links| !links.is_empty()).collect();
+                self.justify_wrapped_lines_in_place(&mut wrapped, content_width, message.kind, &row_has_links);
+            } else {
+                self.justify_wrapped_lines_in_place(&mut wrapped, content_width, message.kind, &[]);
+            }
         }
         if wrapped.is_empty() {
             wrapped.push(Line::default());
         }
-        explicit_links.resize_with(wrapped.len(), Vec::new);
+        if content_may_link {
+            explicit_links.resize_with(wrapped.len(), Vec::new);
+        }
 
         let suppress_prefix_bullet = suppress_prefix_bullet
             || wrapped.first().is_some_and(|line| {
@@ -495,6 +519,27 @@ impl Session {
             prefix_span.content = String::new().into();
         }
 
+        // Hotpath fast-path: default Agent prose has no bullet/label/padding,
+        // so both prefix Strings are empty and link offsets need no
+        // adjustment. Check before allocating the prefix String to skip one
+        // String alloc per message, the per-first-line empty span, and (for
+        // plain prose) any explicit-links outer Vec.
+        if prefix_spans.is_empty() && left_padding.is_empty() {
+            let mut lines = Vec::with_capacity(wrapped.len());
+            if content_may_link {
+                for (line, line_links) in wrapped.into_iter().zip(explicit_links) {
+                    lines.push(TranscriptLine { line, explicit_links: line_links });
+                }
+            } else {
+                for line in wrapped {
+                    lines.push(TranscriptLine { line, explicit_links: Vec::new() });
+                }
+            }
+            if lines.is_empty() {
+                lines.push(TranscriptLine::default());
+            }
+            return lines;
+        }
         let first_line_prefix_text = {
             let mut text: String = prefix_spans.iter().map(|span| span.content.as_ref()).collect();
             text.push_str(left_padding);
@@ -502,6 +547,10 @@ impl Session {
         };
         let first_line_prefix_width = UnicodeWidthStr::width(first_line_prefix_text.as_str());
         let continuation_prefix = " ".repeat(first_line_prefix_width);
+        // Slow path (label/prefix configured): ensure link Vecs align for zip.
+        if !content_may_link {
+            explicit_links.resize_with(wrapped.len(), Vec::new);
+        }
         let mut lines = Vec::with_capacity(wrapped.len());
         for (index, (mut line, mut line_links)) in wrapped.into_iter().zip(explicit_links).enumerate() {
             let mut spans = Vec::new();
@@ -515,7 +564,9 @@ impl Session {
             };
             if index == 0 {
                 spans.append(&mut prefix_spans);
-                spans.push(Span::raw(left_padding));
+                if !left_padding.is_empty() {
+                    spans.push(Span::raw(left_padding));
+                }
             } else if !continuation_prefix.is_empty() {
                 spans.push(Span::raw(continuation_prefix.clone()));
             }

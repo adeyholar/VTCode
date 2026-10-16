@@ -4,6 +4,7 @@ use super::*;
 
 /// Emits an InlineEvent through the event channel and callback
 #[inline]
+#[cfg_attr(feature = "profiling", hotpath::measure)]
 pub(crate) fn emit_inline_event(
     event: &InlineEvent,
     events: &UnboundedSender<InlineEvent>,

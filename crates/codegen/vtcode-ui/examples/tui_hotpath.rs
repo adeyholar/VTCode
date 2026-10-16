@@ -127,6 +127,41 @@ fn mutex_demo() {
     let _ = std::hint::black_box(total);
 }
 
+/// I/O throughput demo (profiling guide: byte throughput per call site).
+///
+/// Writes then reads a spool-shaped burst (1_000 transcript lines) through
+/// `io!`-wrapped in-memory cursors so the I/O report shape (bytes, rate)
+/// stays covered. Hermetic by design: `io!` returns a wrapper type under
+/// `profiling` (identity when off), so wrapping the production session
+/// event-log / PTY-spool writers would change their types under `profiling`
+/// only — those boundaries need a design first (see `performance.md`).
+/// The cursor stands in for the spool file: the demo covers report
+/// mechanics, not disk speed. `InstrumentedIo` has no `Seek` impl, so the
+/// read phase wraps a fresh cursor over the written bytes (`io_unwrap` is
+/// identity when off, so both modes stay type-clean).
+#[hotpath::measure]
+fn io_demo() {
+    use std::io::{Read, Write};
+    const LINE: &[u8] = b"line: the quick brown fox jumps over the lazy dog while streaming tool output\n";
+
+    let mut spool = hotpath::io!(std::io::Cursor::new(Vec::new()), label = "tui-hotpath-spool-write");
+    let mut written = 0usize;
+    for _ in 0..1_000 {
+        if spool.write_all(LINE).is_err() {
+            break;
+        }
+        written += LINE.len();
+    }
+    let bytes = hotpath::io_unwrap(spool).into_inner();
+
+    let mut reader = hotpath::io!(std::io::Cursor::new(bytes), label = "tui-hotpath-spool-read");
+    let mut read_back = Vec::new();
+    if reader.read_to_end(&mut read_back).is_err() {
+        read_back.clear();
+    }
+    let _ = std::hint::black_box((written, read_back.len()));
+}
+
 #[hotpath::measure]
 fn main_workload() {
     let mut session = AppSession::new(InlineTheme::default(), None, 30);
@@ -146,6 +181,7 @@ fn main_workload() {
     render_frames(&mut session, &mut terminal, 40);
     channel_demo();
     mutex_demo();
+    io_demo();
 }
 
 /// `functions_limit = 0` lifts the top-15 truncation so the full function list

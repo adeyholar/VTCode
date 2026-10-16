@@ -25,7 +25,8 @@ use ratatui::{
 use tokio::sync::mpsc;
 use vtcode_ui::tui::{
     app::{
-        InlineCommand as AppInlineCommand, InlineEvent, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme,
+        FullscreenInteractionSettings, InlineCommand as AppInlineCommand, InlineEvent, InlineMessageKind,
+        InlineSegment, InlineTextStyle, InlineTheme,
     },
     core_tui::{
         InlineCommand as CoreInlineCommand, app::AppSession, session::Session as CoreSession, widgets::TranscriptWidget,
@@ -283,6 +284,20 @@ fn transcript_interaction_benchmark(c: &mut Criterion) {
                 || {
                     let (tx, rx) = mpsc::unbounded_channel();
                     let mut session = build_app_session(MESSAGE_COUNT, false);
+                    // Bench hygiene: auto-copy spawns a real clipboard subprocess
+                    // per finished selection (`pbcopy` ≈ 15–19 ms on macOS, timed
+                    // locally), which would measure process spawn — and overwrite
+                    // the developer's clipboard every iteration — instead of
+                    // selection rendering. Disable via the product's own public
+                    // fullscreen-interaction command (same surface as the
+                    // `ui.fullscreen.copy_on_select` settings toggle); explicit
+                    // Ctrl+C copying is unaffected.
+                    session.handle_command(AppInlineCommand::SetFullscreenInteraction {
+                        interaction: FullscreenInteractionSettings {
+                            copy_on_select: false,
+                            ..FullscreenInteractionSettings::default()
+                        },
+                    });
                     let mut terminal = Terminal::new(TestBackend::new(APP_WIDTH, APP_HEIGHT)).expect("test backend");
                     draw_app_session(&mut session, &mut terminal);
                     let before = terminal.backend().buffer().clone();

@@ -114,6 +114,14 @@ static IMAGE_PATH_INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 pub(super) fn compact_image_placeholders(content: &str) -> Option<String> {
+    // Hotpath: this regex scans the full composer content on every keystroke
+    // (via `refresh_input_edit_state`). Every alternative requires a literal
+    // `.ext` suffix, so content without `.` can never match — skip the engine
+    // entirely for plain prose (same dot fast-reject lesson as link-candidate
+    // detection).
+    if !content.contains('.') {
+        return None;
+    }
     let mut matches = Vec::new();
     for capture in IMAGE_PATH_INLINE_REGEX.captures_iter(content) {
         let Some(path_match) = capture.get(1) else {
@@ -280,12 +288,23 @@ pub(super) fn compact_inline_segment(content: &str) -> String {
 pub(super) fn count_input_image_tokens(content: &str) -> usize {
     let placeholder_count = content.matches("[Image #").count();
     let inline_data_count = content.matches("data:image/").count();
-    let path_count = IMAGE_PATH_INLINE_REGEX.captures_iter(content).count();
+    // Hotpath: the path regex requires a literal `.ext` suffix, so content
+    // without `.` can never match — skip the engine for plain typing.
+    let path_count = if content.contains('.') {
+        IMAGE_PATH_INLINE_REGEX.captures_iter(content).count()
+    } else {
+        0
+    };
     placeholder_count.saturating_add(inline_data_count).saturating_add(path_count)
 }
 
 /// Number of `@file` reference tokens in composer text.
 pub(super) fn count_input_file_tokens(content: &str) -> usize {
+    // Hotpath: `FileReference` is only assigned to `@`-led tokens, so content
+    // without `@` needs no tokenization for this counter.
+    if !content.contains('@') {
+        return 0;
+    }
     tokenize_input(content)
         .iter()
         .filter(|token| token.kind == InputTokenKind::FileReference)
@@ -473,4 +492,37 @@ pub(super) fn display_width_for_char_range(content: &str, char_count: usize) -> 
         .take(char_count)
         .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0) as u16)
         .fold(0_u16, u16::saturating_add)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_count_skips_regex_without_dot_but_keeps_memchr_branches() {
+        // Arrange (asymmetric): plain typing has neither markers nor a dot;
+        // the data-URI branch has a marker but no dot; uppercase ext has both.
+        assert_eq!(count_input_image_tokens("just plain typing here"), 0);
+        assert_eq!(count_input_image_tokens("data:image/png;base64,AAA"), 1);
+        assert_eq!(count_input_image_tokens("see /tmp/photo.PNG here"), 1);
+        assert_eq!(count_input_image_tokens("see /tmp/photo.png here"), 1);
+    }
+
+    #[test]
+    fn file_count_skips_tokenize_without_at() {
+        // Arrange (asymmetric): dot without `@` cannot yield FileReference;
+        // `@` at a word boundary can; mid-word `@` cannot.
+        assert_eq!(count_input_file_tokens("plain words with dot here"), 0);
+        assert_eq!(count_input_file_tokens("open @src/main.rs now"), 1);
+        assert_eq!(count_input_file_tokens("mail foo@bar here"), 0);
+    }
+
+    #[test]
+    fn placeholders_skip_regex_without_dot_but_keep_real_paths() {
+        // Arrange: no dot means no `.ext` suffix is possible; a dotted
+        // non-image stays None through the post-gate regex path.
+        assert_eq!(compact_image_placeholders("just plain typing"), None);
+        assert_eq!(compact_image_placeholders("read notes.txt today"), None);
+        assert!(compact_image_placeholders("see /tmp/photo.png here").is_some());
+    }
 }

@@ -537,6 +537,12 @@ pub(super) fn may_contain_link_candidate_text(text: &str) -> bool {
     if text.contains("://") || text.contains('/') || text.contains('\\') {
         return true;
     }
+    // Hotpath: filename tokens require '.' — skip the whitespace split for
+    // plain prose without dot/slash/backslash (tui_hotpath Agent rows).
+    // "://" contains '/', so the slash check above already covers it.
+    if !text.contains('.') {
+        return false;
+    }
     // Bare workspace filenames (`Cargo.toml`) resolve without a path separator.
     // Only treat `name.ext` tokens as candidates — not sentence periods (`end.`).
     text.split_whitespace().any(looks_like_filename_token)

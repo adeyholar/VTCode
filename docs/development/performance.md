@@ -334,8 +334,11 @@ Layer status vs the profiling guide (what is wired, what is deferred and why):
 - HTTP (`http!` on the shared `reqwest 0.12` LLM client): deferred — the macro returns
   `ClientWithMiddleware`, not `reqwest::Client`, so every provider call site would change type under
   `profiling` only. Needs a wrapper-type or cfg-gated alias design before touching `HttpClientFactory`.
-- I/O (`io!` byte throughput): not yet wired. Candidates are indexer walker, session event log, PTY/spool
-  paths. Start in benches/examples like the channel demo, not on the agent hot path.
+- I/O (`io!` byte throughput): demo-wired (`io_demo` in `tui_hotpath` writes then reads a
+  1_000-line spool-shaped burst through `io!`-wrapped cursors so the bytes/rate report shape stays
+  covered; hermetic — cursors stand in for spool files). Production candidates (indexer walker,
+  session event log, PTY/spool paths) stay out — the macro returns a wrapper type under `profiling`
+  only, so those boundaries need a design first.
 - CPU sampling (`hotpath-cpu`): enabled on root `profiling`; see Profiling Build below for symbolized
   runs. Per-call `Regex::new` stays banned by the `no-per-call-regex-literal` ast-grep rule.
 

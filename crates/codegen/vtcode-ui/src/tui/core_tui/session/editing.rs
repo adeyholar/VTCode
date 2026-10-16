@@ -158,6 +158,7 @@ impl Session {
     }
 
     /// Insert a character at the current cursor position
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn insert_char(&mut self, ch: char) {
         if ch == '\u{7f}' {
             return;

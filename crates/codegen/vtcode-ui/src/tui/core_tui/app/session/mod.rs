@@ -250,6 +250,7 @@ impl AppSession {
         }
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn update_input_triggers(&mut self) {
         if !self.core.input_enabled() {
             return;

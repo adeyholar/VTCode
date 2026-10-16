@@ -71,6 +71,7 @@ pub(super) fn process_key_with_clipboard_text_reader(
     process_key_with_clipboard_readers(session, key, read_clipboard_image, text_reader)
 }
 
+#[cfg_attr(feature = "profiling", hotpath::measure)]
 fn process_key_with_clipboard_readers(
     session: &mut Session,
     key: KeyEvent,
