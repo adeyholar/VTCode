@@ -194,7 +194,7 @@ jobs:
       contents: read
     env:
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_CACHE_SIZE: "20G"
+      SCCACHE_CACHE_SIZE: "2G"
       RUSTC_WRAPPER: "sccache"
       CARGO_TERM_VERBOSE: false
       CARGO_TERM_COLOR: always
@@ -219,6 +219,7 @@ jobs:
   # See docs/guides/cargo-unmaintained.md for more information.
   unmaintained:
     name: Check Unmaintained Dependencies
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -239,6 +240,7 @@ jobs:
 
   dependency-audit:
     name: Check RustSec Advisories
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -310,7 +312,7 @@ jobs:
       contents: read
     env:
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_CACHE_SIZE: "20G"
+      SCCACHE_CACHE_SIZE: "2G"
       RUSTC_WRAPPER: "sccache"
       CARGO_TERM_VERBOSE: false
       CARGO_TERM_COLOR: always
@@ -334,6 +336,7 @@ jobs:
 
   check-windows:
     name: Check Windows (warm cache)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
@@ -389,7 +392,7 @@ jobs:
       contents: read
     env:
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_CACHE_SIZE: "20G"
+      SCCACHE_CACHE_SIZE: "2G"
       RUSTC_WRAPPER: "sccache"
       CARGO_TERM_VERBOSE: false
       CARGO_TERM_COLOR: always

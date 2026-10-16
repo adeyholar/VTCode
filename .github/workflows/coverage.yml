@@ -7,20 +7,8 @@ concurrency:
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '**.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '.github/workflows/coverage.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - '**.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '.github/workflows/coverage.yml'
+  schedule:
+    - cron: "0 6 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
@@ -49,6 +37,8 @@ jobs:
           components: llvm-tools-preview
 
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          cache-bin: false
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cf7daf8c8c61b7fb3ec452e903208764aeca2f56 # cargo-llvm-cov
