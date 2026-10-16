@@ -278,7 +278,12 @@ jobs:
           key: x86_64-pc-windows-msvc
 
       - name: Build (x86_64-pc-windows-msvc)
-        run: cargo build --frozen --profile release-fast-windows --target x86_64-pc-windows-msvc --jobs 4
+        # --locked (not --frozen): --frozen implies --offline, and a
+        # prefix-hit cache restore can lack index metadata for the current
+        # lockfile ("no matching package ... found" with no network to heal).
+        # --locked still pins the lockfile but permits downloads, matching
+        # the Linux jobs. See run 38934744656 / job 117087298931.
+        run: cargo build --locked --profile release-fast-windows --target x86_64-pc-windows-msvc --jobs 4
         shell: bash
 
       - name: Check Binary
