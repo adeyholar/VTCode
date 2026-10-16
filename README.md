@@ -56,19 +56,19 @@ Plan, build, and review with hosted or local models, sandboxed tools, and resuma
 
 ## Overview
 
-Explore a codebase, plan and review changes, and run tools in the interactive TUI or headlessly with `vtcode exec`.
-Choose the model and permission level; VT Code manages context, tool calls, and execution policy.
+Use the interactive TUI or `vtcode exec` to explore a codebase, plan and review changes, and run tools. Choose a
+model and permission level; VT Code manages context, tool calls, and execution policy.
 
 <!-- markdownlint-disable MD013 -->
 
-| At a glance      | What you get                                                                 |
-| ---------------- | ---------------------------------------------------------------------------- |
-| **Planning**     | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs. |
-| **Safety**       | [Auditable command policy](./docs/security/SECURITY_MODEL.md) and sandboxing. |
+| At a glance | What you get |
+| --- | --- |
+| **Planning** | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs. |
+| **Safety** | [Auditable command policy](./docs/security/SECURITY_MODEL.md) and sandboxing. |
 | **Self-correct** | [HOVER loop](./docs/development/hypothesis-revision-validation.md) on tool mismatch. |
-| **Long runs**    | [Headless exec](./docs/user-guide/exec-mode.md) with compaction and resumption. |
+| **Long runs** | [Headless exec](./docs/user-guide/exec-mode.md) with compaction and resumption. |
 | **Integrations** | [MCP](./docs/guides/mcp-integration.md), Skills, plugins, and editor bridges. |
-| **Models**       | [Hosted or local providers](./docs/README.md#provider-index) per task.       |
+| **Models** | [Hosted or local providers](./docs/README.md#provider-index) per task. |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -88,7 +88,8 @@ and verifier result, **E** compares them, and **R** applies an evidence-supporte
 with corrected arguments; a `match` exits to `Done`. Rereads alone are not revision. See the full
 [HOVER acceptance table](./docs/development/hypothesis-revision-validation.md).
 
-The rest of this page covers installation, configuration, a first task, and the deeper topics.
+Start with installation and configuration, then run your first task. The sections below cover interactive use,
+automation, integrations, and development.
 
 ## Quick start
 
@@ -127,7 +128,8 @@ irm https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.ps1 | i
 
 ### 2. Configure your project
 
-From your project directory, scaffold the configuration and agent instructions, then add credentials for your chosen provider. For example, to use OpenAI:
+In your project directory, scaffold the configuration and agent instructions, then add credentials for your provider.
+For example, to use OpenAI:
 
 ```bash
 cd path/to/your/project
@@ -157,9 +159,9 @@ provider-specific instructions.
 vtcode   # open the interactive TUI in your project
 ```
 
-Try a focused request, such as "Explain how this project handles authentication." Review proposed changes and test
-results before committing. See [Usage](#usage) for automation and session commands, or follow the
-[guided tour](./docs/user-guide/getting-started.md).
+Ask a focused question, such as "Explain how this project handles authentication," and review proposed changes and
+test results before committing. For automation and session commands, see [Usage](#usage); for a guided walkthrough,
+see the [getting started guide](./docs/user-guide/getting-started.md).
 
 ## Usage
 
@@ -231,7 +233,7 @@ Use `vtcode continue --session-id <id>` to fork an earlier session.
 
 Enable these only when you need them; none are required for the quick start.
 
-<!-- markdownlint-disable MD013 -->
+<!-- markdownlint-disable MD013 MD060 -->
 
 | Integration                                   | What it gives you                                                                                                                                                                                            |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -249,7 +251,7 @@ Enable these only when you need them; none are required for the quick start.
 Guides grouped by task. The full catalog lives in the [documentation index](./docs/INDEX.md), the
 [docs overview](./docs/README.md), and the [Wiki](https://github.com/vinhnx/VTCode/wiki):
 
-<!-- markdownlint-disable MD013 -->
+<!-- markdownlint-disable MD013 MD060 -->
 
 | Goal                 | Guides                                                                                                                                                                                                                                                                          |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
