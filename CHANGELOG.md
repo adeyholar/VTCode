@@ -2,6 +2,32 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.179.0 - 2026-10-16
+
+### Highlights
+#### Bug Fixes
+
+- Invalidate cached exec-slice reads on mutation; drop reuse-stub re-attachment (e133f122) 
+- Keep mid-turn prompt verbatim across model switch (5472fd76) 
+#### Documentation
+
+- Document exec-slice reuse and history-verbatim reference stubs (695eb2ee) 
+#### Features
+
+- Record bounded raw payload when structured JSON fails to parse (ca950fab) 
+- Update cloud model catalog (cec48a81) 
+- Reuse bounded shell slice reads across turns via shared exec read-target parser (088c0259) 
+- Serve bounded reference stub when reuse response duplicates history content (0f4c7419) 
+### Other Changes
+#### Other
+
+- Refactor LLM error handling and enhance Anthropic speed configuration (8e405558) 
+- Add eval plan (a5f63040) 
+- Add SWE bench eval plan (f6ce0bbb) 
+#### Refactors
+
+- Add Provider::name_matches as single canonical name matcher (54aa9e5c) 
+- Consolidate local_server base-URL resolution; lock z.ai legacy-env precedence (dda8281b) 
 ## 0.178.0 - 2026-10-16
 
 ### Highlights
