@@ -174,7 +174,7 @@ pub enum ShellPromptProfile {
     UnixLike,
     /// Use native PowerShell syntax in prompt examples.
     ///
-    /// The canonical wire value is `powershell` (matching [`Self::as_str`],
+    /// The canonical wire value is `powershell` (matching `Self::as_str`,
     /// [`Self::allowed_values`], and the docs); `snake_case` would otherwise
     /// render it as the drifting `power_shell`.
     #[serde(rename = "powershell")]
@@ -283,7 +283,7 @@ impl ShellProfilePlatform {
 #[serde(rename_all = "snake_case")]
 pub enum ResolvedShellPromptProfile {
     UnixLike,
-    /// Canonical wire value is `powershell` (matching [`Self::as_str`]); the
+    /// Canonical wire value is `powershell` (matching `Self::as_str`); the
     /// derived `snake_case` form would otherwise be the drifting `power_shell`.
     #[serde(rename = "powershell")]
     PowerShell,

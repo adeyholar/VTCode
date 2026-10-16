@@ -412,7 +412,7 @@ fn classify_git_subcommand(subcommand: &str, args: &[String]) -> Option<&'static
 
 /// Reason a command tripped [`command_might_be_dangerous`], used for
 /// actionable preflight messages. Mirrors the git arm of
-/// [`is_dangerous_to_call_with_exec`] including env/sudo prefix unwrapping;
+/// `is_dangerous_to_call_with_exec` including env/sudo prefix unwrapping;
 /// non-git patterns keep the generic rejection text.
 pub fn dangerous_command_reason(command: &[String]) -> Option<&'static str> {
     let command = unwrap_command_prefix(command)?;

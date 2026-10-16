@@ -6,7 +6,7 @@
 )]
 //! ACP (Agent Communication Protocol) support for VT Code.
 //!
-//! Canonical surface is the SACP stdio agent in [`zed`] (`StandardAcpAdapter`,
+//! Canonical surface is the SACP stdio agent in `zed` (`StandardAcpAdapter`,
 //! `ZedAcpAdapter`). The `capabilities`/`client`/`client_v2`/`session`/
 //! `messages`/`jsonrpc` modules are a legacy crate-internal HTTP stack and
 //! must not be extended for new protocol work.

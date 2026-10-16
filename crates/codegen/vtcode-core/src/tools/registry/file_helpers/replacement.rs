@@ -1,6 +1,6 @@
 //! Exact-first matching inspired by Codex's seek_sequence.rs at
 //! f87ba04ec3cd386a92e775405b252a310b40bb0d (Apache-2.0, copyright 2025 OpenAI).
-//! https://github.com/openai/codex/blob/f87ba04ec3cd386a92e775405b252a310b40bb0d/codex-rs/apply-patch/src/seek_sequence.rs
+//! <https://github.com/openai/codex/blob/f87ba04ec3cd386a92e775405b252a310b40bb0d/codex-rs/apply-patch/src/seek_sequence.rs>
 //! Independently implemented: unique matches only, with no punctuation normalization.
 
 use std::ops::Range;

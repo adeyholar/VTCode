@@ -656,7 +656,7 @@ pub struct AnthropicMemoryConfig {
     pub enabled: bool,
 }
 
-/// OpenRouter app attribution (https://openrouter.ai/docs/app-attribution).
+/// OpenRouter app attribution (<https://openrouter.ai/docs/app-attribution>).
 ///
 /// Opt-in only. When `enabled` is false no attribution headers are sent.
 /// When true, VT Code sends `HTTP-Referer`, `X-OpenRouter-Title`, and

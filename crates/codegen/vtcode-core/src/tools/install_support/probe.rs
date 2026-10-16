@@ -2,7 +2,7 @@
 //!
 //! Deadline/cleanup reference: OpenAI Codex, Apache-2.0, copyright 2025 OpenAI,
 //! `codex-rs/tui/src/tui/tmux.rs` at 5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0.
-//! https://github.com/openai/codex/blob/5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0/codex-rs/tui/src/tui/tmux.rs
+//! <https://github.com/openai/codex/blob/5fff6378d6ab9730bc7cfbd5eb58f1867a5f14c0/codex-rs/tui/src/tui/tmux.rs>
 //! Independently implemented with bounded pipes instead of temporary output files.
 
 use std::io;

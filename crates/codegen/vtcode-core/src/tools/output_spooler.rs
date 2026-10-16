@@ -891,7 +891,7 @@ impl ToolOutputSpooler {
 
     /// Age-based cleanup only, for startup paths.
     ///
-    /// The count budget relies on [`Self::pinned_files`], which is per-process:
+    /// The count budget relies on `pinned_files`, which is per-process:
     /// a second session starting in the same workspace cannot see a concurrent
     /// session's pinned or active spools, so enforcing the count budget at
     /// startup can delete young files the other session still reads from its

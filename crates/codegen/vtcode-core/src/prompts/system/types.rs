@@ -106,7 +106,7 @@ impl SystemPromptReport {
     /// Useful when a system prompt was assembled or overridden outside the
     /// normal section-based pipeline (e.g. downstream embedders calling
     /// `AgentRunner::set_system_prompt`, or appendix text appended after
-    /// [`compose_system_instruction_with_report`] already measured the
+    /// [`crate::prompts::system::compose_system_instruction_with_report`] already measured the
     /// sectioned prompt).
     #[must_use]
     pub fn measure(text: &str, max_tokens: u64) -> Self {

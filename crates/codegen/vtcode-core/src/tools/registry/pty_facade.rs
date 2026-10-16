@@ -51,7 +51,7 @@ impl ToolRegistry {
 
     /// Terminates every exec session, then retires verification bookkeeping
     /// for the sessions that are actually gone (see
-    /// [`Self::terminate_exec_sessions_and_observe_cleanup`]).
+    /// `Self::terminate_exec_sessions_and_observe_cleanup`).
     pub async fn terminate_all_exec_sessions_async(&self) -> Result<()> {
         self.terminate_exec_sessions_and_observe_cleanup(false, false).await
     }

@@ -2,7 +2,7 @@
 //!
 //! Inspired by OpenAI Codex's prompt-header and anchored-navigation pattern:
 //! codex-rs/tui/src/transcript_view.rs at 7219fd735bef2f9cfd0363fecdbbb212e3df5255.
-//! https://github.com/openai/codex (Apache-2.0, Copyright 2025 OpenAI).
+//! <https://github.com/openai/codex> (Apache-2.0, Copyright 2025 OpenAI).
 //! Original VT Code implementation using retained message indices and reflow rows.
 
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};

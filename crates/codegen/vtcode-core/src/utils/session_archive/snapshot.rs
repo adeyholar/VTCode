@@ -61,7 +61,7 @@ pub struct SessionListing {
 ///
 /// The inner value is crate-private so callers cannot mark an arbitrary
 /// runtime/session ID as resumable. Obtain one from
-/// [`SessionArchive::verify_persisted_resume_identifier`].
+/// [`super::SessionArchive::verify_persisted_resume_identifier`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedSessionArchiveIdentifier(pub(crate) String);
 

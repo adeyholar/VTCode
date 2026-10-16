@@ -699,7 +699,7 @@ fn rewrite_verifier_pipeline(args: &Value) -> Option<String> {
 
 /// Shell-call arguments as the execution kernel runs them.
 ///
-/// The kernel applies [`rewrite_verifier_pipeline`] to every
+/// The kernel applies `rewrite_verifier_pipeline` to every
 /// command-run call before execution, so the process that runs (and whose
 /// exit status the outcome reports) is the standalone verifier, not the typed
 /// pipeline. Static filtering pipelines instead enable pipefail. Gate
