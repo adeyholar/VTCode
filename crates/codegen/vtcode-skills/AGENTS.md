@@ -22,5 +22,5 @@
 
 ## Gotchas
 
-- `native_plugin.rs` loads process-level code through `dlopen`; callers must establish provenance and explicit approval, and must never trust repository plugin roots. Skill instructions are bounded untrusted resource content, not policy. Registry capability metadata remains authoritative, and out-of-workspace permissions require an explicit human approval token.
+- `native_plugin.rs` loads process-level code through `dlopen`; callers must establish provenance and explicit approval, and must never trust repository plugin roots. Skill instructions are bounded untrusted resource content, not policy. Registry capability metadata remains authoritative, and out-of-workspace permissions require an explicit human approval token. The type-position `unsafe extern "C" fn` ABI aliases carry a `///` contract doc (gate-enforced by `scripts/check_unsafe_docs.py`).
 - `trust.rs` `render_untrusted_skill_instructions_with_context` adds `Skill directory:` + capped `<skill_resources>`; use it for activation so relative refs resolve without bulk-loading. `prompt_integration.rs` `Full` adds `[compat:]`/`[tools:]`; `Lean` stays default catalog.

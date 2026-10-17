@@ -74,6 +74,21 @@ pub const PLUGIN_ABI_VERSION: u32 = 1;
 
 use std::os::raw::c_char;
 
+/// Plugin ABI v1 entry-point signatures.
+///
+/// `unsafe extern "C" fn` in type position marks that calling through these
+/// pointers is unsafe; neither `rustc`'s `unsafe_code` nor clippy's
+/// `undocumented_unsafe_blocks` fires here, so the contract is stated once,
+/// here. Each pointer is resolved only from a library that
+/// `PluginLoader::load_plugin` has canonicalized and verified as trusted, and is
+/// invoked exclusively through the wrappers in this module (`get_plugin_symbol`,
+/// `NativePlugin::new`, `NativePlugin::execute_ffi`), each of which carries its
+/// own call-site safety justification. Preconditions: the pointer was resolved
+/// from the matching symbol of the loaded library, the plugin's threading
+/// contract (`PluginMetadata::thread_safe`; otherwise serialized by
+/// `NativePlugin::execution_lock`) is honoured, the returned `*const c_char` is
+/// non-null and nul-terminated, and plugin-owned strings are released with the
+/// matching `free_string` symbol.
 type PluginVersionFn = unsafe extern "C" fn() -> u32;
 type PluginMetadataFn = unsafe extern "C" fn() -> *const c_char;
 type PluginExecuteFn = unsafe extern "C" fn(*const c_char) -> *const c_char;
