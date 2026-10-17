@@ -156,6 +156,13 @@ It preserves built-in file tools and existing approval controls; validation tool
 Use the [runnable TOML example](../examples/parallel-search-mcp.toml) to add the anonymous endpoint alongside your
 existing providers. It requires no Parallel API key or OAuth login; the free tier is rate limited.
 
+### Cohesivity backend services without an account
+
+[Cohesivity MCP](cohesivity-mcp.md) lets the agent provision Postgres, Redis, object storage, hosting, login and email
+for the app it is building, over Streamable HTTP. Use the [runnable TOML example](../examples/cohesivity-mcp.toml) to
+add the anonymous endpoint alongside your existing providers. It requires no account or API key; new projects expire
+after 72 hours unless claimed.
+
 ### Memcode long-term memory over OAuth
 
 [Memcode](https://memcode.in) exposes an optional hosted Streamable HTTP server for persistent personal memory. VT Code
