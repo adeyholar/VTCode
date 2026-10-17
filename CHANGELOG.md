@@ -2,6 +2,32 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.179.2 - 2026-10-17
+
+### Highlights
+#### Bug Fixes
+
+- Tolerate clock skew and slow CI run registration (d2080edf) (@vinhnx)
+- Use --locked instead of --frozen for Windows release build (2fea0c40) (@vinhnx)
+- Wait for active CI run in Step 4 fallback (2653c515) (@vinhnx)
+- Document and allow platform-gated unsafe FFI (f7b4e2b8) 
+#### Documentation
+
+- Record gh account switch for 403s, trim redundancies (177549a2) (@vinhnx)
+- State the plugin ABI contract for type-position unsafe (ace2bea8) 
+- Reference the verification-discipline skill (be5d24a3) 
+#### Features
+
+- Handle Oct 2026 OpenAI deprecations (8c42a0ce) 
+- Add unsafe-docs gate for platform-gated unsafe drift (d52a82f5) 
+- Require a contract doc for type-position unsafe (7427b97f) 
+### Other Changes
+#### Other
+
+- Improve native provider fast mode and model catalog (ecc4cf99) 
+#### Refactors
+
+- Encode hunk-count and overflow invariants as contracts (802b2fdf) 
 ## 0.179.1 - 2026-10-16
 
 ### Highlights
