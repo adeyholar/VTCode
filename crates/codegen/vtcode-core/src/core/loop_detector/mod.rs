@@ -744,7 +744,12 @@ impl LoopDetector {
             let suffix_names: Vec<&str> = suffix.iter().map(|(n, _)| *n).collect();
             let prev_names: Vec<&str> = prev.iter().map(|(n, _)| *n).collect();
 
-            if suffix_names == prev_names && !suffix_names.iter().any(|name| is_command_tool_name(base_tool_name(name)))
+            let has_distinct_tools = suffix_names
+                .first()
+                .is_some_and(|first| suffix_names.iter().any(|name| name != first));
+            if suffix_names == prev_names
+                && has_distinct_tools
+                && !suffix_names.iter().any(|name| is_command_tool_name(base_tool_name(name)))
             {
                 return Some(format!(
                     "Oscillating tool pattern detected: [{}]\n\
@@ -1301,6 +1306,45 @@ mod tests {
 
         // Subsequent read calls should start from 0; single call should be fine
         assert!(detector.record_call(LEGACY_LIST_FILES, &list_args).is_none());
+    }
+
+    #[test]
+    fn repeated_code_search_tool_with_different_queries_is_not_an_oscillation() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+        let queries = ["Companion", "smoke test", "evaluator", "VT Code"];
+
+        for query in queries {
+            let warning = detector.record_call(tools::CODE_SEARCH, &json!({"query": query}));
+            assert!(
+                !warning
+                    .as_deref()
+                    .is_some_and(|message| message.contains("Oscillating tool pattern detected")),
+                "one search tool cannot form a tool-name oscillation: {warning:?}"
+            );
+        }
+        assert!(detector.detect_patterns().is_none());
+    }
+
+    #[test]
+    fn alternating_distinct_read_tools_still_detect_an_oscillation() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+        let sequence = [
+            (LEGACY_GREP_FILE, json!({"pattern": "Companion", "path": "docs/"})),
+            (tools::READ_FILE, json!({"path": "docs/development/vtcode-companion.md"})),
+            (LEGACY_GREP_FILE, json!({"pattern": "smoke", "path": "docs/"})),
+            (tools::READ_FILE, json!({"path": "docs/development/vtcode-companion-submission.md"})),
+        ];
+
+        for (tool, args) in &sequence {
+            let _ = detector.record_call(tool, args);
+        }
+        let warning = detector.detect_patterns();
+        assert!(
+            warning
+                .as_deref()
+                .is_some_and(|message| message.contains("Oscillating tool pattern detected")),
+            "alternating distinct tools with changing arguments remains detectable: {warning:?}"
+        );
     }
 
     #[test]

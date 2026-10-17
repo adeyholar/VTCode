@@ -843,6 +843,11 @@ async fn evaluator_request_includes_verification_results() {
 
     let requests = recorded.recorded_requests();
     let evaluator_request = requests.last().expect("evaluator request");
+    assert_eq!(
+        evaluator_request.output_format,
+        Some(json!({ "type": "json_object" })),
+        "evaluator requests must enable provider JSON mode"
+    );
     let evaluator_prompt = evaluator_request
         .messages
         .first()
