@@ -84,15 +84,15 @@ Then add the repository marketplace:
 
 ```sh
 codex plugin marketplace add https://github.com/vinhnx/VTCode.git \
-  --ref main \
+  --ref 0.179.2 \
   --sparse .agents/plugins \
   --sparse plugins/vtcode-companion
 codex plugin add vtcode-companion@vtcode-companion
 ```
 
-Use `--ref main` only for development testing. After a release, use its published
-tag or release ref so recipients install source matching the compatible VT Code
-binary.
+The `0.179.2` tag includes the Companion source and CLI setup command. Keep the
+marketplace pinned to a release tag that matches the installed VT Code binary;
+use `main` only for development testing.
 
 The package does not contain machine-specific paths. Its launcher reads the
 binary and workspace selected by `vtcode companion setup`; the host's working

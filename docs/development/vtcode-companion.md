@@ -51,8 +51,9 @@ existing VT Code config directory and is written using its private atomic-file
 helper. Direct GitHub installation steps are in the
 [user guide](../user-guide/vtcode-companion.md). Host-side GitHub installation
 and plugin process startup still require fresh Codex and ChatGPT Desktop checks.
-Use the moving `main` ref only during development; after release, direct users
-to the matching published tag.
+The `0.179.2` release tag includes the Companion source and CLI setup command.
+Use a matching published tag for released installations and the moving `main`
+ref only during development.
 
 The `--marketplace` and `--output` packaging modes remain useful for hosts that
 do not preserve their selected working directory. These generated artifacts
