@@ -413,6 +413,20 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about VT Code Command Security Model?", "How does Additional permission
     normalization work?", "How does Overview work?"
 
+- **File**: `docs/development/vtcode-companion.md`
+  - **Content**: VT Code Companion private pilot
+  - **Topics**: Local distribution milestone (2026-10-17), Local connection, ChatGPT Desktop: tool attachment and
+    partial planning evidence, Optional remote transport (deferred), Task contract
+  - **User Questions**: "What can you tell me about VT Code Companion private pilot?", "How does Local distribution
+    milestone (2026-10-17) work?", "How does Local connection work?"
+
+- **File**: `docs/development/vtcode-companion-submission.md`
+  - **Content**: VT Code Companion submission preparation
+  - **Topics**: Can this be submitted now?, Practical GitHub and GitHub Pages preparation, Observed validation on
+    2026-10-17, Listing draft, Draft review cases
+  - **User Questions**: "What can you tell me about VT Code Companion submission preparation?", "How does Can this be
+    submitted now? work?", "How does Practical GitHub and GitHub Pages preparation work?"
+
 - **File**: `docs/development/EXECUTION_POLICY.md`
   - **Content**: VT Code Execution Policy
   - **Topics**: Summary, Auto-Allowed Commands, Tool Policies, Key Safety Features, Dangerous Operations (Blocked)
@@ -540,6 +554,13 @@ below based on the topic area.
   - **Topics**: Overview, Model + Harness, Core Architecture, Tool Implementations, Design Principles
   - **User Questions**: "What can you tell me about VT Code Architecture Guide?", "How does Overview work?", "How does
     Model + Harness work?"
+
+- **File**: `docs/user-guide/vtcode-companion.md`
+  - **Content**: VT Code Companion (experimental)
+  - **Topics**: Current support, Install VT Code and prepare Companion, Prepare your local plugin, Install in Codex,
+    First read-only workflow
+  - **User Questions**: "What can you tell me about VT Code Companion (experimental)?", "How does Current support
+    work?", "How does Install VT Code and prepare Companion work?"
 
 - **File**: `docs/COMPATIBILITY.md`
   - **Content**: VT Code Platform Compatibility Matrix
