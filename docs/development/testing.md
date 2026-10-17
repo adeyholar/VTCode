@@ -129,6 +129,22 @@ is never suppressed — a failing check still prints its rustfmt diff, clippy di
 ./scripts/check-dev.sh --quiet --test
 ```
 
+### Platform-gated `unsafe` Gate
+
+`cargo clippy` (even with `-D warnings`) only lints code that compiles on the checking host, so `unsafe` behind
+`#[cfg(target_os = "...")]` for another platform is never checked locally. `./scripts/check.sh unsafe-docs` closes that
+gap: it deterministically scans every tracked `.rs` file (independent of `cfg`) and enforces the same two obligations
+as `rust.unsafe_code` and `clippy::undocumented_unsafe_blocks` — every file that uses `unsafe` must carry an
+`unsafe_code` allow/expect, and every `unsafe { … }` / `unsafe impl` / `unsafe trait` must be preceded by a `SAFETY:`
+marker. It is deliberately more permissive than clippy, so clippy-clean host code never trips it; deliberate
+exceptions go in `scripts/unsafe_allowlist.txt`.
+
+```bash
+./scripts/check.sh unsafe-docs
+# Or run the checker directly:
+python3 scripts/check_unsafe_docs.py --mode enforce
+```
+
 ### Structural Rule Checks
 
 VT Code bundles a generic `ast-grep` project scaffold and materializes it into the current workspace when you run

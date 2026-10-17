@@ -125,6 +125,7 @@ Session-independent knowledge lives in `.vtcode/memory/` (gitignored, repo-local
 | + lints                   | `./scripts/check-dev.sh --lints`                     |
 | Harness PTY/TUI           | `./scripts/check.sh harness`                         |
 | Release/PR                | `./scripts/check.sh`                                 |
+| Unsafe-docs gate          | `./scripts/check.sh unsafe-docs`                     |
 | Ast-grep rules            | `vtcode check ast-grep`                              |
 | Hawk dead-code/visibility | `./scripts/hawk.sh`                                  |
 | Hawk (deny warnings)      | `./scripts/hawk.sh --deny`                           |

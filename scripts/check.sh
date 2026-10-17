@@ -243,6 +243,20 @@ run_zen_governance() {
     fi
 }
 
+# Catch platform-gated `unsafe` drift that host-only clippy cannot see: every
+# `unsafe` needs a `SAFETY:` marker and an `unsafe_code` allowance, even in code
+# that only compiles for another `#[cfg(target_os)]`.
+run_unsafe_docs_gate() {
+    print_status "Running unsafe-docs gate (enforce)..."
+    if python3 scripts/check_unsafe_docs.py --mode enforce --allowlist scripts/unsafe_allowlist.txt; then
+        print_success "unsafe-docs gate passed."
+        return 0
+    else
+        print_error "unsafe-docs gate failed (see findings above)."
+        return 1
+    fi
+}
+
 run_agent_legibility_checks() {
     print_status "Running agent legibility checks (warn mode)..."
     if python3 scripts/check_agent_legibility.py --mode warn; then
@@ -348,6 +362,7 @@ main() {
     run_workflow_security_lint || ((failed_checks++))
     run_structured_logging_lint || ((failed_checks++))
     run_zen_governance || ((failed_checks++))
+    run_unsafe_docs_gate || ((failed_checks++))
     run_agent_legibility_checks || ((failed_checks++))
     run_ast_grep_scan || ((failed_checks++))
     run_clippy || ((failed_checks++))
@@ -417,6 +432,7 @@ case "${1:-}" in
         echo "  legibility - Run agent legibility hotspot checks"
         echo "  workflow-security - Validate GitHub workflow trigger/action security policy"
         echo "  zen     - Run Zen governance checks (warn mode)"
+        echo "  unsafe-docs - Gate platform-gated unsafe missing SAFETY/unsafe_code docs"
         echo "  miri    - Run Miri (Tree Borrows) to detect Undefined Behavior (slow; scoped to pure-Rust unsafe)"
         echo "  help    - Show this help message"
         echo ""
@@ -424,6 +440,9 @@ case "${1:-}" in
         ;;
     "zen")
         run_zen_governance
+        ;;
+    "unsafe-docs")
+        run_unsafe_docs_gate
         ;;
     "legibility")
         run_agent_legibility_checks
