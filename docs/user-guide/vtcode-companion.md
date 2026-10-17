@@ -71,9 +71,10 @@ change host settings, set credentials, grant trust, or start a service.
 
 ### Install from the GitHub marketplace
 
-Once the marketplace catalog and plugin source are available on the chosen GitHub
-ref, install or build a compatible VT Code binary and bind it to the repository
-you want Companion to use:
+The GitHub repository marketplace is the portable package to share. For a
+private test of the latest merged changes, use `main`; install or build a
+compatible VT Code binary and bind it to the repository you want Companion to
+use:
 
 ```sh
 vtcode --workspace /absolute/path/to/repository companion setup \
@@ -84,15 +85,38 @@ Then add the repository marketplace:
 
 ```sh
 codex plugin marketplace add https://github.com/vinhnx/VTCode.git \
-  --ref 0.179.2 \
+  --ref main \
   --sparse .agents/plugins \
   --sparse plugins/vtcode-companion
 codex plugin add vtcode-companion@vtcode-companion
 ```
 
-The `0.179.2` tag includes the Companion source and CLI setup command. Keep the
-marketplace pinned to a release tag that matches the installed VT Code binary;
-use `main` only for development testing.
+#### Replace an existing marketplace source
+
+Marketplace names must be unique in your Codex configuration. Before adding this
+GitHub source, check `codex plugin marketplace list`. If `vtcode-companion` is
+already registered from a different source or ref, do not continue to
+`codex plugin add` after the add command fails: that can install the plugin from
+the old source. Remove the old installed plugin and marketplace entry, then
+repeat the add commands above:
+
+```sh
+codex plugin remove vtcode-companion@vtcode-companion
+codex plugin marketplace remove vtcode-companion
+```
+
+Run the plugin removal only if `codex plugin list` shows it installed from that
+marketplace. Removing the marketplace unregisters that source; it does not
+remove plugins installed from other marketplaces. Then add the GitHub source
+and plugin again. If the marketplace already points to the intended GitHub ref,
+run `codex plugin marketplace upgrade vtcode-companion` to refresh its snapshot.
+To refresh an already installed plugin from that snapshot, remove that plugin
+with `codex plugin remove vtcode-companion@vtcode-companion`, then add it again.
+
+The `0.179.2` release includes the Companion source and setup command, but it
+predates the later merged task-failure fix. After a release containing that fix
+is published, replace `main` above with that release tag for a stable install.
+Keep the marketplace source and VT Code binary on compatible revisions.
 
 The package does not contain machine-specific paths. Its launcher reads the
 binary and workspace selected by `vtcode companion setup`; the host's working
@@ -101,9 +125,10 @@ either path. Python 3 is required for the launcher. Until a compatible release
 is available, build VT Code from source and point setup at that binary.
 
 Do not commit or publish the machine-specific marketplace directory or ZIP
-generated with `--marketplace` / `--output`. Those packages contain absolute
-binary and workspace paths. Share the repository marketplace as source; use the
-generated package as a per-user fallback.
+generated with `--local --marketplace` / `--local --output`. Those packages
+contain the creator's absolute binary and workspace paths and are only suitable
+for that machine. Share the repository marketplace from GitHub; each recipient
+selects their own binary and workspace with `vtcode companion setup`.
 
 The launcher uses the saved binary and workspace as separate process arguments.
 No shell is used. Keep the binary at its configured path and restart the MCP
