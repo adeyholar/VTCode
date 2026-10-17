@@ -30,6 +30,25 @@ source "$SCRIPT_DIR/macos-release-signing.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/release-changelog.sh"
 
+# Stop `gh` from probing the terminal for its background color.
+#
+# With stdout on a TTY, `gh` detects the color scheme by asking the terminal for
+# its background color (muesli/termenv `HasDarkBackground` -> `termStatusReport`:
+# an OSC 11 query plus an `ESC[6n` cursor-position report) and reading the reply
+# back from /dev/tty. The asset upload runs four `gh` processes concurrently;
+# they race for the same /dev/tty reply, the losers time out, and the unread
+# replies are later echoed to the screen as garbage escape sequences -- e.g.
+# `ESC]11;rgb:0000/0000/0000ESC\` followed by `ESC[52;1R`. `NO_COLOR` makes `gh`
+# skip the probe entirely, and `GH_SPINNER_DISABLED` replaces the motion spinner
+# with textual progress so the parallel upload lines stay readable.
+# Verified against gh 2.102.0: on a TTY it emits `ESC]11;?` + `ESC[6n`, and with
+# NO_COLOR set it emits neither. Both are `${VAR:-default}`, so they can be
+# overridden, but note that gh treats *any* set NO_COLOR as "no color" -- the
+# only way to get gh's colors (and the probe, and the leak) back is to keep
+# NO_COLOR unset entirely.
+export NO_COLOR=${NO_COLOR:-1}
+export GH_SPINNER_DISABLED=${GH_SPINNER_DISABLED:-1}
+
 # Temporary file to store release notes
 RELEASE_NOTES_FILE=$(mktemp)
 trap 'rm -f "$RELEASE_NOTES_FILE"' EXIT
