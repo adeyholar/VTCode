@@ -392,10 +392,11 @@ impl LoopDetector {
     }
 
     fn check_for_loops(&mut self, tool_name: &str) -> Option<String> {
-        // A shell tool multiplexes unrelated reads and checks. Count repeated
-        // normalized actions, not all uses of the executable tool name. Explicit
-        // operator limits retain their aggregate meaning.
-        let count = if is_command_tool_name(base_tool_name(tool_name))
+        // Shell and tracker tools multiplex distinct actions. Count normalized
+        // repetitions so updates to different tracker items/states are progress.
+        // Explicit operator limits retain their aggregate meaning.
+        let count = if (is_command_tool_name(base_tool_name(tool_name))
+            || base_tool_name(tool_name) == tools::TASK_TRACKER)
             && !self.custom_limits.contains_key(tool_name)
             && !self.custom_limits.contains_key(base_tool_name(tool_name))
         {
@@ -772,6 +773,48 @@ impl Default for LoopDetector {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distinct_tracker_items_and_states_do_not_exhaust_the_default_tool_limit() {
+        let mut detector = LoopDetector::new();
+        assert!(
+            detector
+                .record_call(tools::TASK_TRACKER, &serde_json::json!({"action":"list"}))
+                .is_none()
+        );
+        for index in 1..=8 {
+            for status in ["in_progress", "completed"] {
+                let warning = detector.record_call(
+                    tools::TASK_TRACKER,
+                    &serde_json::json!({"action":"update","index":index,"status":status}),
+                );
+                assert!(warning.is_none(), "item {index} {status}: {warning:?}");
+                assert!(!detector.is_hard_limit_exceeded(tools::TASK_TRACKER));
+            }
+        }
+        assert_ne!(
+            hash_normalized_args(tools::TASK_TRACKER, &serde_json::json!({"action":"list"})),
+            hash_normalized_args(tools::TASK_TRACKER, &serde_json::json!({"action":"create"})),
+        );
+    }
+
+    #[test]
+    fn repeated_tracker_calls_still_stop_and_explicit_limits_remain_aggregate() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+        for count in 1..=6 {
+            detector.record_call(tools::TASK_TRACKER, &serde_json::json!({"action":"list"}));
+            assert_eq!(detector.is_hard_limit_exceeded(tools::TASK_TRACKER), count == 6);
+        }
+        let mut detector = LoopDetector::new();
+        detector.set_tool_limit(tools::TASK_TRACKER, 2);
+        for index in 1..=4 {
+            detector.record_call(
+                tools::TASK_TRACKER,
+                &serde_json::json!({"action":"update","index":index,"status":"completed"}),
+            );
+            assert_eq!(detector.is_hard_limit_exceeded(tools::TASK_TRACKER), index == 4);
+        }
+    }
+
     #[test]
     fn distinct_shell_reads_do_not_become_repetitions_of_the_tool_name() {
         let mut detector = LoopDetector::new();

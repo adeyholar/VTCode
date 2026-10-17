@@ -519,7 +519,9 @@ impl AgentRunner {
         let mut should_write_blocked_handoff = false;
         let mut planning_synthesis_required = false;
 
-        let result: Result<_> = {
+        // Keep fallible execution inside its own return boundary so every error
+        // reaches terminal event recording and canonical persistence cleanup.
+        let result: Result<_> = async {
             for turn in 0..self.max_turns {
                 if matches!(runtime.poll_turn_control().await, RuntimeControl::StopRequested) {
                     self.runner_println(format_args!(
@@ -1814,7 +1816,8 @@ impl AgentRunner {
             );
 
             Ok((state.into_results(summary, thread_events, total_duration_ms), steering_receiver))
-        };
+        }
+        .await;
 
         let result = match result {
             Ok((task_results, steering_receiver)) => {
@@ -1824,7 +1827,7 @@ impl AgentRunner {
             Err(err) => {
                 event_recorder.thread_failed(
                     &self.session_id,
-                    &err.to_string(),
+                    &format!("{err:#}"),
                     runtime.state.stats.turns_executed.max(1),
                 );
                 *self.steering_receiver.lock() = runtime.take_steering_receiver();
@@ -1842,8 +1845,13 @@ impl AgentRunner {
         };
 
         self.tool_registry.set_harness_task(None);
-        persistence_result?;
-        result
+        match (result, persistence_result) {
+            (Err(error), Err(persistence_error)) => Err(error
+                .context(format!("failed to finalize canonical session after execution error: {persistence_error:#}"))),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(_), Err(error)) => Err(error),
+            (Ok(results), Ok(())) => Ok(results),
+        }
     }
 }
 

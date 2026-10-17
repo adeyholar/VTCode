@@ -214,7 +214,16 @@ state.
   restart the MCP process, and scope the task to a smaller module. Preserve the
   failed task ID and coverage limitations in the review report.
 - **Implementation evaluation failure:** treat the task as failed and inspect any
-  attributed changes and evidence before continuing. Do not claim verified success.
+  attributed changes and evidence before continuing. The task's `progress` retains
+  a sanitized canonical failure reason and reports process, event-stream, or
+  cleanup failures when available. Preserve this reason along with the task and
+  session IDs. A successful intermediate command does not establish task success.
+
+For a file-content smoke test, use a byte-equality assertion such as `cmp` against
+the expected text. Printing a hash or byte dump with exit zero only establishes
+that the inspection ran; it does not assert that the contents match. After
+removing a temporary smoke-test file, confirm its absence separately. Shell-based
+create/delete operations may leave no attributed file-change event or final diff.
 
 Report problems through [GitHub Issues](https://github.com/vinhnx/VTCode/issues)
 with host/binary versions, task IDs, sanitized errors, and discovery results.

@@ -303,7 +303,7 @@ impl CompanionTasks for CompanionService {
                 let state = if !cleanup_ok || !reap_ok {
                     TaskState::Failed
                 } else {
-                    match outcome {
+                    match &outcome {
                         None => TaskState::Cancelled,
                         Some(Ok(status))
                             if status.success()
@@ -320,11 +320,14 @@ impl CompanionTasks for CompanionService {
                 };
                 task.snapshot.state = state;
                 task.snapshot.progress = match state {
-                    TaskState::Completed => "exec and canonical thread completed",
-                    TaskState::Cancelled => "task cancelled; child reaped",
-                    _ => "exec, event collection, or cleanup failed; inspect the local canonical session",
-                }
-                .into();
+                    TaskState::Completed => "exec and canonical thread completed".into(),
+                    TaskState::Cancelled => "task cancelled; child reaped".into(),
+                    _ => public_text(
+                        &projection.failure_progress(&outcome, cleanup_ok, reap_ok),
+                        2048,
+                        &mut task.snapshot.evidence_truncated,
+                    ),
+                };
                 if state != TaskState::Completed {
                     task.snapshot.mark_incomplete();
                 }
@@ -383,9 +386,48 @@ impl Drop for ProcessGroup {
 struct EventProjection {
     completion: Option<ThreadCompletionSubtype>,
     failed: bool,
+    failure_reason: Option<String>,
 }
 
 impl EventProjection {
+    fn record_failure(&mut self, snapshot: &mut TaskSnapshot, message: &str) {
+        self.failed = true;
+        if self.failure_reason.is_none() && !message.trim().is_empty() {
+            self.failure_reason = Some(public_text(message, 1024, &mut snapshot.evidence_truncated));
+        }
+    }
+
+    fn failure_progress(
+        &self,
+        outcome: &Option<std::io::Result<std::process::ExitStatus>>,
+        cleanup_ok: bool,
+        reap_ok: bool,
+    ) -> String {
+        let mut reasons = Vec::new();
+        if let Some(reason) = &self.failure_reason {
+            reasons.push(format!("runtime failure: {reason}"));
+        }
+        match outcome {
+            Some(Err(error)) => reasons.push(format!("exec supervision failed: {error}")),
+            Some(Ok(status)) if !status.success() => reasons.push(format!("exec exited with {status}")),
+            _ => {}
+        }
+        if self.completion.is_none() {
+            reasons.push("missing canonical thread completion".into());
+        } else if self.completion != Some(ThreadCompletionSubtype::Success) && reasons.is_empty() {
+            reasons.push("canonical thread did not complete successfully".into());
+        } else if self.failed && reasons.is_empty() {
+            reasons.push("runtime reported a failure".into());
+        }
+        if !cleanup_ok {
+            reasons.push("process group cleanup failed".into());
+        }
+        if !reap_ok {
+            reasons.push("child reap could not be confirmed".into());
+        }
+        reasons.join("; ")
+    }
+
     fn observe(&mut self, snapshot: &mut TaskSnapshot, event: ThreadEvent) {
         snapshot.progress = match &event {
             ThreadEvent::ThreadStarted(_) => "runtime session started",
@@ -405,13 +447,18 @@ impl EventProjection {
             }
             ThreadEvent::ThreadCompleted(event) => {
                 self.completion = Some(event.subtype);
+                if event.subtype != ThreadCompletionSubtype::Success {
+                    self.record_failure(snapshot, event.stop_reason.as_deref().unwrap_or(&event.outcome_code));
+                }
                 snapshot.session_id = Some(public_text(&event.session_id, 256, &mut snapshot.evidence_truncated));
                 if let Some(result) = event.result {
                     snapshot.final_response =
                         Some(public_text(&result, MAX_TEXT_BYTES, &mut snapshot.evidence_truncated));
                 }
             }
-            ThreadEvent::Error(_) | ThreadEvent::TurnFailed(_) | ThreadEvent::TurnBlocked(_) => self.failed = true,
+            ThreadEvent::Error(event) => self.record_failure(snapshot, &event.message),
+            ThreadEvent::TurnFailed(event) => self.record_failure(snapshot, &event.message),
+            ThreadEvent::TurnBlocked(event) => self.record_failure(snapshot, &event.message),
             ThreadEvent::ItemStarted(event) => {
                 if matches!(
                     event.item.details,
@@ -489,6 +536,9 @@ impl EventProjection {
             },
             _ => {}
         }
+        if let Some(reason) = &self.failure_reason {
+            snapshot.progress = format!("runtime failure: {reason}");
+        }
     }
 }
 
@@ -510,7 +560,9 @@ async fn collect_events(
     projection: &mut EventProjection,
 ) -> std::io::Result<()> {
     while let Some(line) = read_event_line(&mut reader).await? {
-        let event = serde_json::from_slice::<ThreadEvent>(&line).map_err(std::io::Error::other)?;
+        let event = serde_json::from_slice::<ThreadEvent>(&line).map_err(|error| {
+            std::io::Error::other(format!("invalid exec event JSON at line {} column {}", error.line(), error.column()))
+        })?;
         let mut records = records.lock().await;
         if let Some(task) = records.get_mut(task_id) {
             projection.observe(&mut task.snapshot, event);

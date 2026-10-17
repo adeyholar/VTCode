@@ -339,14 +339,75 @@ async fn companion_rejects_overlap_cancels_and_recovers_after_invalid_calls() {
 #[cfg(unix)]
 #[tokio::test]
 async fn companion_exit_zero_without_canonical_completion_and_nonzero_with_completion_fail() {
-    for script in ["exit 0", "cat fixture.jsonl\nexit 7", "printf 'not json\\n'"] {
+    for (script, expected_reason) in [
+        ("exit 0", "missing canonical thread completion"),
+        ("cat fixture.jsonl\nexit 7", "exec exited with exit status: 7"),
+        ("printf 'not json private payload\\n'", "invalid exec event JSON"),
+    ] {
         let (_root, service) = fixture(script);
         let started = service.start(input("plan")).await.unwrap();
         let task = terminal(&service, &started.task_id).await;
         assert_eq!(task.state, TaskState::Failed, "{script}");
         assert_eq!(task.verification, TaskVerification::Unverified);
         assert!(task.evidence_truncated);
+        assert!(task.progress.contains(expected_reason), "{}", task.progress);
+        assert!(!task.progress.contains("private payload"));
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn companion_preserves_the_first_canonical_failure_or_terminal_stop_reason() {
+    for has_failure_event in [true, false] {
+        let (root, service) = fixture("printf 'private stderr marker' >&2\ncat fixture.jsonl\nexit 7");
+        let mut completion = completed();
+        completion["subtype"] = json!("error_during_execution");
+        completion["stop_reason"] = json!("terminal evaluator failure password=1234567890123456");
+        let mut events = Vec::new();
+        if has_failure_event {
+            events.push(json!({"type":"turn.failed", "message":"parse evaluator response: decode json payload"}));
+        }
+        events.push(completion);
+        std::fs::write(
+            root.path().join("fixture.jsonl"),
+            events.iter().map(|event| format!("{event}\n")).collect::<String>(),
+        )
+        .unwrap();
+        let started = service.start(input("plan")).await.unwrap();
+        let result = terminal(&service, &started.task_id).await;
+        let expected = if has_failure_event {
+            "parse evaluator response: decode json payload"
+        } else {
+            "terminal evaluator failure"
+        };
+        assert_eq!(result.state, TaskState::Failed);
+        assert!(result.progress.contains(expected), "{}", result.progress);
+        assert!(result.progress.contains("exit status: 7"), "{}", result.progress);
+        assert!(!result.progress.contains("missing canonical thread completion"));
+        assert!(!serde_json::to_string(&result).unwrap().contains("private stderr marker"));
+        assert!(!result.progress.contains("1234567890123456"));
+        assert!(result.progress.len() <= 2048);
+        assert_eq!(result.verification, TaskVerification::Unverified);
+        assert!(result.evidence_truncated);
+    }
+}
+
+#[test]
+fn companion_bounds_canonical_failure_details_and_distinguishes_supervisor_failures() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    projection.observe(&mut task, event(json!({"type":"error", "message":"é".repeat(2048)})));
+    assert!(task.progress.len() <= 1050);
+    assert!(task.evidence_truncated);
+    let outcome = Some(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "task deadline exceeded")));
+    let deadline = projection.failure_progress(&outcome, true, true);
+    assert!(deadline.contains("task deadline exceeded"));
+    let cleanup = EventProjection::default().failure_progress(&None, false, false);
+    assert!(cleanup.contains("process group cleanup failed"));
+    assert!(cleanup.contains("child reap could not be confirmed"));
+    let mut completed_projection = EventProjection::default();
+    completed_projection.observe(&mut snapshot(), event(completed()));
+    assert_eq!(completed_projection.failure_progress(&None, false, true), "process group cleanup failed");
 }
 
 #[cfg(unix)]

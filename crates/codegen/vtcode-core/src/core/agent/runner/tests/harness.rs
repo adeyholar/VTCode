@@ -812,6 +812,78 @@ async fn evaluator_failure_forces_revision_before_success() {
 }
 
 #[tokio::test]
+async fn evaluator_errors_finalize_the_canonical_session_and_restore_runner_state() {
+    for malformed_response in [true, false] {
+        let temp = TempDir::new().unwrap();
+        let session_id = "thread-evaluator-error";
+        let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), session_id)).await;
+        runner.enable_full_auto(&[tools::TASK_TRACKER.to_string()]).await;
+        let (steering_sender, steering_receiver) = tokio::sync::mpsc::unbounded_channel();
+        *runner.steering_receiver.lock() = Some(steering_receiver);
+        let observed_events = Arc::new(Mutex::new(Vec::new()));
+        let observer = Arc::clone(&observed_events);
+        runner.set_event_handler(move |event| observer.lock().push(event.clone()));
+        let mut responses = vec![
+            json_response(planner_response_json("pwd")),
+            tool_call_response(tools::TASK_TRACKER, json!({"action":"update", "index":1, "status":"completed"})),
+            text_response("The task is complete."),
+        ];
+        if malformed_response {
+            responses.push(text_response("This is not an evaluator JSON response."));
+        }
+        runner.provider_client = Box::new(QueuedProvider::new(responses));
+
+        let error = Box::pin(runner.execute_task(&task("Evaluator error", "exec-task"), &[]))
+            .await
+            .unwrap_err();
+        let expected = if malformed_response {
+            "parse evaluator response"
+        } else {
+            "evaluator request failed"
+        };
+        assert!(format!("{error:#}").contains(expected), "{error:#}");
+        assert!(runner.steering_receiver.lock().is_some());
+        assert!(!steering_sender.is_closed());
+        assert!(runner.tool_registry.harness_context_snapshot().task_id.is_none());
+        let events = observed_events.lock();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ThreadEvent::TurnFailed(_)))
+                .count(),
+            1
+        );
+        let completions: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                ThreadEvent::ThreadCompleted(event) => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].subtype, vtcode_exec_events::ThreadCompletionSubtype::ErrorDuringExecution);
+        assert!(completions[0].stop_reason.as_deref().unwrap().contains(expected));
+        drop(events);
+        let session = workspace_root(&temp).join(".vtcode/sessions").join(session_id);
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(session.join("manifest.json")).unwrap()).unwrap();
+        assert_ne!(manifest["status"], "active");
+        assert_eq!(manifest["in_turn"], false);
+        let persisted = fs::read_to_string(session.join("events.jsonl")).unwrap();
+        let events: Vec<serde_json::Value> =
+            persisted.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(events.iter().filter(|entry| entry["event"]["type"] == "turn.failed").count(), 1);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|entry| entry["event"]["type"] == "thread.completed")
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
 async fn evaluator_request_includes_verification_results() {
     let temp = TempDir::new().expect("tempdir");
 
@@ -857,10 +929,15 @@ async fn evaluator_request_includes_verification_results() {
     assert!(evaluator_prompt.contains("Verification results:"));
     assert!(evaluator_prompt.contains("[PASS] pwd (exit 0)"));
     assert!(evaluator_prompt.contains("contract_fidelity"));
+    assert!(evaluator_prompt.contains("Execution evidence (recent bounded tool records)"));
+    assert!(evaluator_prompt.contains("Tool call: task_tracker"));
     assert!(evaluator_request.system_prompt.as_deref().is_some_and(|prompt| {
         prompt.contains("smallest claim the evidence supports")
             && prompt.contains("falsifier")
             && prompt.contains("generalization_notes")
+            && prompt
+                .contains("high_severity_findings must be a non-negative integer count (0 when none), never an array")
+            && prompt.contains("integer values from 1 through 5")
             && !prompt.contains("arXiv")
     }));
 
@@ -870,12 +947,66 @@ async fn evaluator_request_includes_verification_results() {
         .expect("planner request");
     let planner_system = planner_request.system_prompt.as_deref().expect("planner system prompt");
     assert_eq!(planner_system.matches("JSON only").count(), 1);
+    assert!(
+        planner_system.contains("All mandatory checks must be satisfiable together after implementation and cleanup")
+    );
     let planner_prompt = planner_request
         .messages
         .first()
         .map(|message| message.content.as_text().into_owned())
         .expect("planner prompt");
     assert!(!planner_prompt.contains("JSON only"));
+}
+
+#[tokio::test]
+async fn evaluator_length_recovery_retries_only_the_tool_free_response_once() {
+    for truncate_retry in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "evaluator-length")).await;
+        runner.enable_full_auto(&[tools::TASK_TRACKER.into()]).await;
+        let mut truncated = text_response("{\"verdict\":\"pass\",\"summary\":\"unfinished");
+        truncated.finish_reason = FinishReason::Length;
+        let mut provider = RoleQueuedProvider::new();
+        provider
+            .planner(json_response(planner_response_json("pwd")))
+            .build(tool_call_response(tools::TASK_TRACKER, json!({"action":"update","index":1,"status":"completed"})))
+            .build(text_response("The task is complete."))
+            .evaluator(truncated.clone())
+            .evaluator(if truncate_retry {
+                truncated
+            } else {
+                json_response(evaluator_response_json("pass", "Checked", 0))
+            });
+        let observed = provider.clone();
+        runner.provider_client = Box::new(provider);
+        let result = Box::pin(runner.execute_task(&task("Evaluator length recovery", "exec-task"), &[])).await;
+        if truncate_retry {
+            assert!(format!("{:#}", result.unwrap_err()).contains("truncated after one retry"));
+        } else {
+            assert_eq!(result.unwrap().outcome, TaskOutcome::Success);
+        }
+        let requests = observed.recorded_requests();
+        let evaluator_requests: Vec<_> = requests
+            .iter()
+            .filter(|r| harness_role_of(r) == HarnessRole::Evaluator)
+            .collect();
+        assert_eq!(evaluator_requests.len(), 2);
+        assert_eq!(requests.iter().filter(|r| harness_role_of(r) == HarnessRole::Build).count(), 2);
+        for request in &evaluator_requests {
+            assert_eq!(request.max_tokens, Some(4096));
+            assert!(request.tools.as_ref().is_some_and(|tools| tools.is_empty()));
+            assert_eq!(request.output_format, Some(json!({"type":"json_object"})));
+        }
+        assert!(
+            evaluator_requests[1]
+                .messages
+                .last()
+                .unwrap()
+                .content
+                .as_text()
+                .contains("concise, complete JSON")
+        );
+    }
 }
 
 #[tokio::test]

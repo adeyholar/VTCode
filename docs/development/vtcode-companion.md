@@ -308,10 +308,71 @@ therefore lack attribution. Diffs without safe relative public paths are withhel
 Public text uses the shared secret sanitizer; raw stderr and private reasoning
 are excluded. Sanitization is best effort, so only connect a trusted private client.
 
+Post-setup execution errors must reach the runner's terminal failure recorder and
+canonical session close. The execution body uses an awaited async block so `?`
+cannot bypass that finalizer. Companion retains the first sanitized canonical
+failure reason, falling back to the terminal stop reason, and includes process
+exit or supervisor failure details in `progress`. Malformed event diagnostics
+report the parse location without echoing the event payload. Cleanup and child
+reap failures remain distinct; none of these diagnostics grant verification credit.
+
+A live replay exposed an evaluator count/type mismatch: an array in
+`high_severity_findings` failed deserialization into the integer count. The shared
+single-evaluator/skeptic prompt now states the count and array field types
+explicitly. Parsing remains strict: arrays are not coerced into counts, and a
+nonzero high-severity count still rejects a pass verdict.
+
+Tracker updates to different indices or states use normalized action identities
+in the generic headless loop guard. They do not consume one aggregate default
+tracker repetition allowance. Identical polling and updates remain bounded, and
+explicit operator-configured tool limits retain their aggregate meaning.
+
+Evaluator requests include up to 12 recent retained tool results, paired only
+with preceding matching function calls. The sanitized excerpt is bounded to
+16 KiB and excludes assistant reasoning, invocation-only claims, and records
+before the retained current-task input. If that boundary is missing, the
+evaluator receives an explicit evidence gap. Missing or
+cleared records are not proof of nonexecution; these excerpts do not replace
+required final verification. Planner and replanner guidance requires executable
+final-state tracker assertions that remain satisfiable after cleanup, rather
+than implementation writes/deletes or prose falsifiers in `verify` fields.
+
+Evaluator responses have a 4096-token allowance. JSON-only sub-role requests
+permit one tool-free concise rewrite when the provider reports output-length
+truncation; a second truncated response fails explicitly. Other parse errors
+retain finish-reason and output-budget context. The implementation is not
+replayed by this response repair, and malformed verdicts remain rejected.
+
+The failure-reason comparison used OpenAI Codex's
+[`codex-rs/exec/src/event_processor_with_jsonl_output.rs`](https://github.com/openai/codex/blob/ce0323f2f2d3b25e82806cd555237da3db4e1897/codex-rs/exec/src/event_processor_with_jsonl_output.rs#L539)
+at commit `ce0323f2f2d3b25e82806cd555237da3db4e1897`
+(Apache-2.0, copyright 2025 OpenAI). VT Code reuses its own `ThreadEvent` contract
+and finalizer; no upstream implementation was copied.
+
 Cancellation requests a process-group interrupt, allows a short cleanup window,
 then terminates remaining owned processes and reaps the child. Cancellation is
 not rollback. Listener shutdown cancels and joins task supervisors before return.
 The transport crate owns only task interfaces; launch/supervision belongs to the binary.
+
+### Local validation (2026-10-17)
+
+The installed local plugin's stdio launcher completed MCP initialization, tool
+discovery, search/fetch, planning, and approved implementation using the rebuilt
+debug binary. Plan `f748cd96-bd39-4ae2-89c0-e7263e875fcd` and implementation
+`74cee6f9-3782-41da-b6de-0e7a47ef7856` completed with
+`evidence_truncated: false`. Canonical tool events recorded exit zero for exact
+`cmp` against the literal smoke-test text, removal, and the final file/symlink
+absence assertion. The snapshot's separate mandatory verifier was
+`cargo check --locked`, exit zero. The canonical manifest closed with
+`in_turn: false`; service shutdown exited zero and the tracked diff was unchanged.
+An earlier failed replay generated `memories/progress.md`; that extra artifact
+was removed after validation.
+
+The focused runner, evaluator, loop-detector, Companion, prompt, stdio, and inline
+event suites passed 456 tests. The development gate, locked binary build, scoped
+Markdown lint, and diff whitespace check passed. This validates the installed
+launcher directly; an already-running Codex connection must restart to load the
+rebuilt executable.
 
 ## Authentication and connection
 
