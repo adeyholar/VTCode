@@ -14,6 +14,15 @@ source "$SCRIPT_DIR/homebrew-formula.sh"
 # Shared macOS Developer ID signing and notarization helpers.
 source "$SCRIPT_DIR/macos-release-signing.sh"
 
+# Stop `gh` from probing the terminal for its background color (OSC 11 +
+# `ESC[6n` cursor-position report) whenever stdout is a TTY: the probe reply is
+# read from /dev/tty and leaks to the screen as garbage escapes such as
+# `ESC]11;rgb:0000/0000/0000ESC\` / `ESC[52;1R`. See scripts/release.sh for the
+# full rationale (verified against gh 2.102.0). `GH_SPINNER_DISABLED` keeps the
+# motion spinner from interleaving across the parallel asset upload.
+export NO_COLOR=${NO_COLOR:-1}
+export GH_SPINNER_DISABLED=${GH_SPINNER_DISABLED:-1}
+
 BUILD_TOOL="cargo"
 TARGET_ENV_ASSIGNMENTS=()
 DRY_RUN=false
