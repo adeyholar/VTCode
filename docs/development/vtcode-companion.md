@@ -43,7 +43,9 @@ was reported successful; full review coverage and implementation remain unverifi
 ## GitHub sharing and installation paths
 
 The repository includes a GitHub marketplace catalog and portable MCP
-configuration. Run `vtcode --workspace <path> companion setup --binary <path>`
+configuration. This repository source is the shareable package; recipients
+install it from GitHub and configure their own VT Code binary and workspace.
+Run `vtcode --workspace <path> companion setup --binary <path>`
 to persist the exact executable and one canonical workspace in VT Code's
 per-user config. The launcher reads those fixed paths; MCP arguments and host
 working directory cannot override them. The config follows the platform's
@@ -51,14 +53,22 @@ existing VT Code config directory and is written using its private atomic-file
 helper. Direct GitHub installation steps are in the
 [user guide](../user-guide/vtcode-companion.md). Host-side GitHub installation
 and plugin process startup still require fresh Codex and ChatGPT Desktop checks.
-The `0.179.2` release tag includes the Companion source and CLI setup command.
-Use a matching published tag for released installations and the moving `main`
-ref only during development.
+Codex marketplace names are unique; if a same-named marketplace points at an
+older source or ref, remove that entry before adding the GitHub source. Do not
+run the plugin-add command after a failed marketplace-add command, since Codex
+may install from the already-registered source instead.
+The `0.179.2` release tag includes the Companion source and CLI setup command,
+but it predates the later merged task-failure fix. Use the repository's `main`
+ref to test that fix privately. After publishing a VT Code release that contains
+the fix, update installation instructions to pin that release tag. Keep the
+plugin source and VT Code binary on compatible revisions.
 
-The `--marketplace` and `--output` packaging modes remain useful for hosts that
-do not preserve their selected working directory. These generated artifacts
-contain the creator's absolute executable and workspace paths; do not commit or
-publish them. Each recipient must build or install a compatible VT Code binary.
+Do not create a ZIP to share this local-only integration. The packager's local
+`--local --marketplace` and `--local --output` modes generate per-user packages
+containing the creator's absolute executable and workspace paths. Keep those
+generated artifacts local and untracked. Share the GitHub repository
+marketplace instead; each recipient must build or install a compatible VT Code
+binary, then run `companion setup` for their own binary and workspace.
 
 The repository's `scripts/install.sh` installs the latest published VT Code
 release; it does not install the Companion plugin. Until a release includes
