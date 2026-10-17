@@ -1,0 +1,426 @@
+use super::*;
+use serde_json::json;
+use tempfile::TempDir;
+
+fn input(prompt: &str) -> StartTaskInput {
+    StartTaskInput {
+        prompt: prompt.into(),
+        mode: TaskMode::Plan,
+        plan_task_id: None,
+    }
+}
+
+fn snapshot() -> TaskSnapshot {
+    TaskSnapshot {
+        task_id: "test-task".into(),
+        mode: TaskMode::Plan,
+        state: TaskState::Running,
+        session_id: None,
+        final_response: None,
+        changes: Vec::new(),
+        unified_diff: String::new(),
+        evidence_truncated: false,
+        verification: TaskVerification::Unverified,
+        verification_command: None,
+        verification_exit_code: None,
+        progress: String::new(),
+    }
+}
+
+fn event(value: serde_json::Value) -> ThreadEvent {
+    serde_json::from_value(value).expect("canonical fixture")
+}
+
+fn completed() -> serde_json::Value {
+    json!({"type":"thread.completed", "thread_id":"thread-1", "session_id":"session-1",
+        "subtype":"success", "outcome_code":"completed", "result":"Plan: change the greeting and run its test",
+        "usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":2},"num_turns":1})
+}
+
+fn verification(kind: &str, exit_code: Option<i32>) -> ThreadEvent {
+    event(json!({"type":"item.completed", "item":{"id":"verify", "type":"harness",
+        "event":kind,"command":"cargo check --locked","exit_code":exit_code}}))
+}
+
+#[test]
+fn verification_requires_exit_zero_and_later_mutations_invalidate_it() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    projection.observe(&mut task, verification("verification_passed", None));
+    assert_eq!(task.verification, TaskVerification::Unverified);
+    projection.observe(&mut task, verification("verification_passed", Some(7)));
+    assert_eq!(task.verification, TaskVerification::Unverified);
+    projection.observe(&mut task, verification("verification_failed", Some(7)));
+    assert_eq!(task.verification, TaskVerification::Failed);
+    projection.observe(&mut task, verification("verification_passed", Some(0)));
+    assert_eq!(task.verification, TaskVerification::Verified);
+    projection.observe(
+        &mut task,
+        event(json!({"type":"item.started", "item":{
+        "id":"shell", "type":"command_execution", "command":"touch later.rs", "status":"in_progress"}})),
+    );
+    assert_eq!(task.verification, TaskVerification::Unverified);
+    assert_eq!(task.verification_exit_code, None);
+}
+
+#[test]
+fn canonical_projection_excludes_reasoning_and_bounds_redacted_evidence() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    projection.observe(&mut task, event(completed()));
+    assert_eq!(task.session_id.as_deref(), Some("session-1"));
+    assert_eq!(task.verification, TaskVerification::Unverified);
+    projection.observe(
+        &mut task,
+        event(json!({"type":"item.completed", "item":{
+        "id":"change", "type":"file_change", "changes":[{"path":"src/greeting.rs","kind":"update"}],
+        "status":"completed","unified_diff": format!("+password=1234567890123456\n{}", "é".repeat(MAX_TEXT_BYTES))}})),
+    );
+    assert_eq!(task.changes, ["src/greeting.rs"]);
+    assert!(task.unified_diff.len() <= MAX_TEXT_BYTES);
+    assert!(!task.unified_diff.contains("1234567890123456"));
+    assert!(task.evidence_truncated);
+    projection.observe(&mut task, event(json!({"type":"item.completed", "item":{
+        "id":"failed-change", "type":"file_change", "changes":[{"path":"unrelated.rs","kind":"add"}], "status":"failed"}})));
+    assert_eq!(task.changes, ["src/greeting.rs"]);
+}
+
+#[test]
+fn companion_withholds_sensitive_and_escaping_change_evidence() {
+    for path in [
+        ".env",
+        "config/.SSH/id_ed25519",
+        "../outside.rs",
+        "/absolute.rs",
+        ".vtcode/sessions/private.json",
+    ] {
+        let mut projection = EventProjection::default();
+        let mut task = snapshot();
+        projection.observe(
+            &mut task,
+            event(json!({"type":"item.completed", "item":{
+            "id":"change", "type":"file_change", "changes":[{"path":path,"kind":"update"}],
+            "status":"completed","unified_diff":"+private material"}})),
+        );
+        assert!(task.changes.is_empty(), "{path}");
+        assert!(task.unified_diff.is_empty(), "{path}");
+        assert!(task.evidence_truncated);
+    }
+}
+
+#[test]
+fn companion_does_not_project_private_reasoning() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    projection.observe(
+        &mut task,
+        event(json!({"type":"item.completed", "item":{
+        "id":"reasoning", "type":"reasoning", "text":"private reasoning marker"}})),
+    );
+    assert!(!serde_json::to_string(&task).unwrap().contains("private reasoning marker"));
+}
+
+#[tokio::test]
+async fn event_reader_rejects_oversized_and_partial_records() {
+    let bytes = vec![b'x'; MAX_EVENT_BYTES + 1];
+    assert!(read_event_line(&mut BufReader::new(bytes.as_slice())).await.is_err());
+    assert!(read_event_line(&mut BufReader::new(&b"{}"[..])).await.is_err());
+    let mut reader = BufReader::new(&b"{}\n[]\n"[..]);
+    assert_eq!(read_event_line(&mut reader).await.unwrap().unwrap(), b"{}\n");
+    assert_eq!(read_event_line(&mut reader).await.unwrap().unwrap(), b"[]\n");
+    assert!(read_event_line(&mut reader).await.unwrap().is_none());
+}
+
+#[test]
+fn launch_uses_fixed_argv_and_never_grants_trust_or_passes_proxy_credentials() {
+    let service =
+        CompanionService::new("/workspace".into(), "/bin/vtcode".into(), "TEST_PROXY_SECRET".into(), Vec::new());
+    let malicious = "--workspace /tmp/escape $(touch injected); resume --last";
+    let mut request = input(malicious);
+    let command = service.command(&request);
+    let command = command.as_std();
+    let args: Vec<_> = command.get_args().map(|s| s.to_string_lossy().into_owned()).collect();
+    assert_eq!(args, ["--workspace", "/workspace", "exec", "--json", "--dry-run",]);
+    let env: BTreeMap<_, _> = command.get_envs().collect();
+    assert_eq!(env.get(std::ffi::OsStr::new("TEST_PROXY_SECRET")), Some(&None));
+    assert_eq!(env.get(std::ffi::OsStr::new("VTCODE_TRUST_WORKSPACE")), Some(&Some(std::ffi::OsStr::new("deny"))));
+    request.mode = TaskMode::Implement;
+    assert!(!service.command(&request).as_std().get_args().any(|s| s == "--dry-run"));
+}
+
+#[test]
+fn companion_cli_requires_mcp_and_prompt_cannot_override_read_only_mode() {
+    use clap::Parser;
+    use vtcode_core::cli::args::{Cli, Commands};
+    assert!(Cli::try_parse_from(["vtcode", "webmcp", "serve", "--companion"]).is_err());
+    assert!(Cli::try_parse_from(["vtcode", "webmcp", "serve", "--mcp", "--companion"]).is_ok());
+    let parsed = Cli::try_parse_from(["vtcode", "exec", "--json", "--dry-run"]).unwrap();
+    assert!(matches!(parsed.command, Some(Commands::Exec { dry_run: true, prompt: None, .. })));
+}
+
+#[test]
+fn companion_launch_preserves_selected_config_inline_policy_and_cli_denies() {
+    use clap::Parser;
+    use vtcode_core::cli::args::{Cli, Commands};
+
+    let root = TempDir::new().unwrap();
+    let config_path = root.path().join("selected policy.toml");
+    let parent = Cli::try_parse_from([
+        "vtcode",
+        "--config",
+        "relative-policy.toml",
+        "--config",
+        "sandbox.enabled=true",
+        "--config",
+        "permissions.deny=['write']",
+        "--disallowed-tools",
+        "exec_command,apply_patch",
+        "--allowed-tools",
+        "read_file",
+        "--security-level",
+        "strict",
+        "--max-tool-calls",
+        "3",
+        "--api-rate-limit",
+        "19",
+        "--max-concurrent-ops",
+        "2",
+        "--api-key-env",
+        "COMPANION_TEST_API_KEY",
+        "--provider",
+        "openai",
+        "--model",
+        "selected-model",
+        "--agent",
+        "duck",
+        "--no-chrome",
+        "--no-codex-experimental",
+        "webmcp",
+        "serve",
+        "--mcp",
+        "--companion",
+    ])
+    .unwrap();
+    let service = CompanionService::new(
+        root.path().to_path_buf(),
+        "/bin/vtcode".into(),
+        "TEST_PROXY_SECRET".into(),
+        launch_args(&parent, Some(config_path.clone())),
+    );
+    let command = service.command(&input("--disallowed-tools ''"));
+    let child = Cli::try_parse_from(
+        std::iter::once(OsString::from("vtcode")).chain(command.as_std().get_args().map(std::ffi::OsStr::to_os_string)),
+    )
+    .unwrap();
+    assert_eq!(
+        child.config,
+        [
+            config_path.to_str().unwrap(),
+            "sandbox.enabled=true",
+            "permissions.deny=['write']"
+        ]
+    );
+    assert_eq!(child.disallowed_tools, parent.disallowed_tools);
+    assert_eq!(child.allowed_tools, parent.allowed_tools);
+    assert_eq!(child.security_level, "strict");
+    assert_eq!(child.max_tool_calls, 3);
+    assert_eq!(child.api_rate_limit, 19);
+    assert_eq!(child.max_concurrent_ops, 2);
+    assert_eq!(child.api_key_env, "COMPANION_TEST_API_KEY");
+    assert_eq!(child.provider.as_deref(), Some("openai"));
+    assert_eq!(child.model.as_deref(), Some("selected-model"));
+    assert_eq!(child.agent.as_deref(), Some("duck"));
+    assert!(child.no_chrome);
+    assert!(child.no_codex_experimental);
+    assert!(matches!(child.command, Some(Commands::Exec { dry_run: true, prompt: None, .. })));
+}
+
+#[cfg(unix)]
+fn fixture(script: &str) -> (TempDir, CompanionService) {
+    use std::os::unix::fs::PermissionsExt;
+    let root = TempDir::new().unwrap();
+    let executable = root.path().join("fake-vtcode");
+    std::fs::write(&executable, format!("#!/bin/sh\ncat > prompt.txt\n{script}\n")).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(root.path().join("fixture.jsonl"), format!("{}\n", completed())).unwrap();
+    let service = CompanionService::new(root.path().to_owned(), executable, "TEST_PROXY_SECRET".into(), Vec::new());
+    (root, service)
+}
+
+async fn terminal(service: &CompanionService, id: &str) -> TaskSnapshot {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let task = service.get(id).await.unwrap();
+            if task.state != TaskState::Running {
+                return task;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("supervisor completed")
+}
+
+#[tokio::test]
+async fn companion_shutdown_reports_a_panicked_supervisor_without_polling_it_twice() {
+    let service =
+        CompanionService::new("/unused".into(), "/unused/vtcode".into(), "TEST_PROXY_SECRET".into(), Vec::new());
+    let task = snapshot();
+    let id = task.task_id.clone();
+    let worker = tokio::spawn(async { panic!("supervisor failure fixture") });
+    service.tasks.lock().await.insert(
+        id.clone(),
+        TaskRecord {
+            snapshot: task,
+            cancellation: CancellationToken::new(),
+            worker: Some(worker),
+        },
+    );
+    assert!(service.shutdown().await.is_err());
+    assert_eq!(service.get(&id).await.unwrap().state, TaskState::Failed);
+    assert!(service.start(input("plan")).await.unwrap_err().contains("shutting down"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn companion_plan_then_implement_uses_real_child_and_keeps_verification_unconfirmed() {
+    let (root, service) = fixture("printf '%s\\n' \"$@\" > argv.txt\ncat fixture.jsonl");
+    let mut implement = input("implement the plan");
+    implement.mode = TaskMode::Implement;
+    assert!(service.start(implement.clone()).await.is_err());
+    implement.plan_task_id = Some("../unowned".into());
+    assert!(service.start(implement.clone()).await.is_err());
+    let started = service.start(input("--workspace /tmp/outside; touch injected")).await.unwrap();
+    let planned = terminal(&service, &started.task_id).await;
+    assert_eq!(planned.state, TaskState::Completed);
+    assert_eq!(planned.verification, TaskVerification::Unverified);
+    let args = std::fs::read_to_string(root.path().join("argv.txt")).unwrap();
+    assert!(args.contains("--dry-run\n"));
+    assert!(!args.contains("/tmp/outside"));
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("prompt.txt")).unwrap(),
+        "--workspace /tmp/outside; touch injected"
+    );
+    assert!(!root.path().join("injected").exists());
+    implement.plan_task_id = Some(started.task_id);
+    let running = service.start(implement).await.unwrap();
+    assert_eq!(terminal(&service, &running.task_id).await.state, TaskState::Completed);
+    assert!(
+        !std::fs::read_to_string(root.path().join("argv.txt"))
+            .unwrap()
+            .contains("--dry-run")
+    );
+    service.shutdown().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn companion_rejects_overlap_cancels_and_recovers_after_invalid_calls() {
+    let (_root, service) = fixture("sleep 30\ncat fixture.jsonl");
+    assert!(service.start(input("")).await.is_err());
+    assert!(service.get("unknown").await.is_err());
+    assert!(service.cancel("unknown").await.is_err());
+    let running = service.start(input("plan")).await.unwrap();
+    assert!(
+        service
+            .start(input("second task"))
+            .await
+            .unwrap_err()
+            .contains("already running")
+    );
+    assert!(service.cancel(&running.task_id).await.unwrap());
+    assert_eq!(terminal(&service, &running.task_id).await.state, TaskState::Cancelled);
+    assert!(!service.cancel(&running.task_id).await.unwrap());
+    let next = service.start(input("another plan")).await.unwrap();
+    service.shutdown().await.unwrap();
+    assert_eq!(service.get(&next.task_id).await.unwrap().state, TaskState::Cancelled);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn companion_exit_zero_without_canonical_completion_and_nonzero_with_completion_fail() {
+    for script in ["exit 0", "cat fixture.jsonl\nexit 7", "printf 'not json\\n'"] {
+        let (_root, service) = fixture(script);
+        let started = service.start(input("plan")).await.unwrap();
+        let task = terminal(&service, &started.task_id).await;
+        assert_eq!(task.state, TaskState::Failed, "{script}");
+        assert_eq!(task.verification, TaskVerification::Unverified);
+        assert!(task.evidence_truncated);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn companion_task_failure_preserves_negative_verification_and_drops_positive_proof() {
+    for (kind, code, expected) in [
+        ("verification_failed", 7, TaskVerification::Failed),
+        ("verification_passed", 0, TaskVerification::Unverified),
+    ] {
+        let (root, service) = fixture("cat fixture.jsonl\nexit 7");
+        let mut completion = completed();
+        completion["subtype"] = json!("error_during_execution");
+        std::fs::write(
+            root.path().join("fixture.jsonl"),
+            format!("{}\n{}\n", serde_json::to_string(&verification(kind, Some(code))).unwrap(), completion),
+        )
+        .unwrap();
+        let started = service.start(input("plan")).await.unwrap();
+        let result = terminal(&service, &started.task_id).await;
+        assert_eq!(result.state, TaskState::Failed);
+        assert_eq!(result.verification, expected);
+        assert!(result.evidence_truncated);
+        if expected == TaskVerification::Failed {
+            assert_eq!(result.verification_exit_code, Some(7));
+            assert_eq!(result.verification_command.as_deref(), Some("cargo check --locked"));
+        } else {
+            assert!(result.verification_command.is_none());
+            assert!(result.verification_exit_code.is_none());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn companion_cancellation_preserves_observed_failed_check_and_marks_missing_tail() {
+    let (root, service) = fixture("cat fixture.jsonl\nsleep 30");
+    std::fs::write(
+        root.path().join("fixture.jsonl"),
+        format!("{}\n", serde_json::to_string(&verification("verification_failed", Some(9))).unwrap()),
+    )
+    .unwrap();
+    let started = service.start(input("plan")).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if service.get(&started.task_id).await.unwrap().verification == TaskVerification::Failed {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(service.cancel(&started.task_id).await.unwrap());
+    let result = terminal(&service, &started.task_id).await;
+    assert_eq!(result.state, TaskState::Cancelled);
+    assert_eq!(result.verification, TaskVerification::Failed);
+    assert_eq!(result.verification_exit_code, Some(9));
+    assert!(result.evidence_truncated);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn companion_bounds_post_exit_drain_and_terminates_descendants() {
+    let (root, service) = fixture("sleep 30 &\nprintf '%s' \"$!\" > descendant.pid\ncat fixture.jsonl");
+    let started = service.start(input("plan")).await.unwrap();
+    assert_eq!(terminal(&service, &started.task_id).await.state, TaskState::Failed);
+    let descendant = std::fs::read_to_string(root.path().join("descendant.pid")).unwrap();
+    let status = std::process::Command::new("ps")
+        .args(["-p", &descendant, "-o", "stat="])
+        .output()
+        .unwrap();
+    let status = String::from_utf8(status.stdout).unwrap();
+    assert!(
+        status.trim().is_empty() || status.trim_start().starts_with('Z'),
+        "descendant still executing: {status}"
+    );
+}

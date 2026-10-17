@@ -1,10 +1,11 @@
-//! Read-only OpenAI-compatible MCP transport for the WebMCP listener.
+//! Shared MCP tools and local stdio/authenticated HTTP transports, read-only by default.
 //!
 //! The remote surface deliberately shares the [`RuntimeAdapter`] read boundary
 //! with the browser bridge, but it has an independent authentication and Origin
 //! policy. A TLS-terminating reverse proxy is expected to validate the external
 //! OAuth bearer token and inject the configured internal bearer token.
 
+use crate::companion::{CompanionTasks, StartTaskInput, TaskInput, TaskSnapshot};
 use crate::error::{Result as WebmcpResult, WebmcpError};
 use crate::runtime::RuntimeAdapter;
 use axum::Router;
@@ -82,6 +83,8 @@ pub struct RemoteMcpServerConfig {
     pub max_request_body_bytes: usize,
     /// Legacy SSE session inactivity lifetime.
     pub session_ttl: Duration,
+    /// Optional binary-owned execution service. Absent keeps the server read-only.
+    pub companion: Option<Arc<dyn CompanionTasks>>,
 }
 
 impl std::fmt::Debug for RemoteMcpServerConfig {
@@ -126,6 +129,7 @@ impl RemoteMcpServerConfig {
             max_scan_bytes: DEFAULT_MAX_SCAN_BYTES,
             max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
             session_ttl: DEFAULT_SESSION_TTL,
+            companion: None,
         };
         config.validate()?;
         Ok(config)
@@ -226,20 +230,6 @@ impl RemoteMcpServerConfig {
         metadata_url.set_fragment(None);
         metadata_url
     }
-
-    fn citation_url(&self, path: &str) -> String {
-        let Some(prefix) = self.citation_url_prefix.as_ref() else {
-            return String::new();
-        };
-        let mut citation_url = prefix.clone();
-        if let Ok(mut segments) = citation_url.path_segments_mut() {
-            let _ = segments.pop_if_empty();
-            for segment in path.split('/') {
-                let _ = segments.push(segment);
-            }
-        }
-        citation_url.to_string()
-    }
 }
 
 fn is_valid_https_url(url: &Url) -> bool {
@@ -308,11 +298,15 @@ pub struct FetchOutput {
     pub metadata: Option<BTreeMap<String, Value>>,
 }
 
-/// Read-only MCP handler backed by a WebMCP runtime adapter.
+/// MCP handler backed by workspace reads and an optional binary-owned task service.
 #[derive(Clone)]
 pub struct RemoteMcpHandler {
     adapter: Arc<dyn RuntimeAdapter>,
-    config: Arc<RemoteMcpServerConfig>,
+    max_results: usize,
+    max_scan_files: usize,
+    max_scan_bytes: usize,
+    citation_url_prefix: Option<Url>,
+    companion: Option<Arc<dyn CompanionTasks>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -320,7 +314,8 @@ impl std::fmt::Debug for RemoteMcpHandler {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RemoteMcpHandler")
-            .field("config", &self.config)
+            .field("max_results", &self.max_results)
+            .field("companion_enabled", &self.companion.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -329,7 +324,48 @@ impl std::fmt::Debug for RemoteMcpHandler {
 impl RemoteMcpHandler {
     /// Create a handler around the shared read-only runtime boundary.
     pub fn new(adapter: Arc<dyn RuntimeAdapter>, config: Arc<RemoteMcpServerConfig>) -> Self {
-        Self { adapter, config, tool_router: Self::tool_router() }
+        let mut handler = Self::local(adapter, config.companion.clone());
+        handler.max_results = config.max_results;
+        handler.max_scan_files = config.max_scan_files;
+        handler.max_scan_bytes = config.max_scan_bytes;
+        handler.citation_url_prefix = config.citation_url_prefix.clone();
+        handler
+    }
+
+    /// Create a local handler with default read bounds and no HTTP authentication state.
+    /// Access is controlled by the owning process and the workspace execution policy.
+    pub fn local(adapter: Arc<dyn RuntimeAdapter>, companion: Option<Arc<dyn CompanionTasks>>) -> Self {
+        let mut tool_router = Self::tool_router();
+        if companion.is_none() {
+            for name in ["start_task", "get_task", "cancel_task"] {
+                tool_router.remove_route(name);
+            }
+        }
+        Self {
+            adapter,
+            max_results: DEFAULT_MAX_RESULTS,
+            max_scan_files: DEFAULT_MAX_SCAN_FILES,
+            max_scan_bytes: DEFAULT_MAX_SCAN_BYTES,
+            citation_url_prefix: None,
+            companion,
+            tool_router,
+        }
+    }
+
+    /// Serve local MCP messages until EOF or cancellation. Stdout is protocol-only.
+    pub async fn serve_stdio(self, cancellation: CancellationToken) -> WebmcpResult<()> {
+        let service = self
+            .serve_with_ct(rmcp::transport::stdio(), cancellation)
+            .await
+            .map_err(|error| WebmcpError::Adapter(format!("local MCP initialization failed: {error}")))?;
+        let reason = service
+            .waiting()
+            .await
+            .map_err(|error| WebmcpError::Adapter(format!("local MCP service stopped: {error}")))?;
+        if let rmcp::service::QuitReason::JoinError(error) = reason {
+            return Err(WebmcpError::Adapter(format!("local MCP worker failed: {error}")));
+        }
+        Ok(())
     }
 
     /// Return the exact tool definitions advertised by this handler.
@@ -365,14 +401,14 @@ impl RemoteMcpHandler {
             .map_err(|_error| "workspace search is unavailable".to_string())?;
         files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
 
-        let mut results = Vec::with_capacity(self.config.max_results.min(DEFAULT_MAX_RESULTS));
+        let mut results = Vec::with_capacity(self.max_results.min(DEFAULT_MAX_RESULTS));
         let mut scanned_bytes = 0usize;
-        for file in files.into_iter().take(self.config.max_scan_files) {
+        for file in files.into_iter().take(self.max_scan_files) {
             let path_lower = file.path.to_lowercase();
             let path_matches = path_lower.contains(&query);
             if path_matches {
                 results.push(self.search_result(&file.path));
-                if results.len() >= self.config.max_results {
+                if results.len() >= self.max_results {
                     break;
                 }
                 continue;
@@ -382,7 +418,7 @@ impl RemoteMcpHandler {
                 Ok(size) => size,
                 Err(_) => continue,
             };
-            let remaining_bytes = self.config.max_scan_bytes.saturating_sub(scanned_bytes);
+            let remaining_bytes = self.max_scan_bytes.saturating_sub(scanned_bytes);
             if declared_size > remaining_bytes {
                 continue;
             }
@@ -396,7 +432,7 @@ impl RemoteMcpHandler {
             scanned_bytes = scanned_bytes.saturating_add(snapshot.content.len());
             if snapshot.content.to_lowercase().contains(&query) {
                 results.push(self.search_result(&file.path));
-                if results.len() >= self.config.max_results {
+                if results.len() >= self.max_results {
                     break;
                 }
             }
@@ -445,17 +481,85 @@ impl RemoteMcpHandler {
             id: canonical_id.clone(),
             title: canonical_id.clone(),
             text: snapshot.content,
-            url: self.config.citation_url(&canonical_id),
+            url: self.citation_url(&canonical_id),
             metadata: None,
         }))
+    }
+
+    /// Start a plan or explicitly requested implementation within the configured workspace.
+    #[tool(
+        name = "start_task",
+        description = "Start a VT Code task. Defaults to read-only planning. Implementation requires a completed plan_task_id and an explicit user request.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    pub async fn start_task(
+        &self,
+        Parameters(input): Parameters<StartTaskInput>,
+    ) -> Result<Json<TaskSnapshot>, String> {
+        self.companion()?.start(input).await.map(Json)
+    }
+
+    /// Return bounded, public task evidence.
+    #[tool(
+        name = "get_task",
+        description = "Inspect VT Code task state, attributed changes and recorded verification. Missing proof remains unverified.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    pub async fn get_task(&self, Parameters(input): Parameters<TaskInput>) -> Result<Json<TaskSnapshot>, String> {
+        self.companion()?.get(&input.task_id).await.map(Json)
+    }
+
+    /// Cancel only a task owned by this service instance.
+    #[tool(
+        name = "cancel_task",
+        description = "Request cancellation of an owned VT Code task. Poll get_task until terminal cleanup completes.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    pub async fn cancel_task(&self, Parameters(input): Parameters<TaskInput>) -> Result<Json<bool>, String> {
+        self.companion()?.cancel(&input.task_id).await.map(Json)
+    }
+
+    fn companion(&self) -> Result<&dyn CompanionTasks, String> {
+        self.companion
+            .as_deref()
+            .ok_or_else(|| "companion execution is disabled".into())
     }
 
     fn search_result(&self, path: &str) -> SearchResult {
         SearchResult {
             id: path.to_string(),
             title: path.to_string(),
-            url: self.config.citation_url(path),
+            url: self.citation_url(path),
         }
+    }
+
+    fn citation_url(&self, path: &str) -> String {
+        let Some(prefix) = self.citation_url_prefix.as_ref() else {
+            return String::new();
+        };
+        let mut url = prefix.clone();
+        if let Ok(mut segments) = url.path_segments_mut() {
+            let _ = segments.pop_if_empty();
+            for segment in path.split('/') {
+                let _ = segments.push(segment);
+            }
+        }
+        url.to_string()
     }
 }
 
@@ -465,7 +569,11 @@ impl ServerHandler for RemoteMcpHandler {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("vtcode-webmcp", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "This server exposes only read-only search and fetch tools over the configured workspace.",
+                if self.companion.is_some() {
+                    "This server exposes workspace search/fetch and opt-in VT Code tasks. Plan first; implement only on explicit user request. Poll task results and report verification evidence accurately."
+                } else {
+                    "This server exposes only read-only search and fetch tools over the configured workspace."
+                },
             )
     }
 }
@@ -519,7 +627,7 @@ impl RemoteMcpEndpoint {
         &self.config
     }
 
-    /// Return the advertised read-only tool definitions.
+    /// Return the advertised tools (read-only unless companion is explicitly configured).
     pub fn tool_definitions(&self) -> Vec<Tool> {
         self.handler.tool_definitions()
     }
@@ -1012,6 +1120,149 @@ mod tests {
         )
     }
 
+    struct RejectTasks;
+
+    #[tokio::test]
+    async fn local_mcp_needs_no_http_configuration_and_keeps_backend_policy() {
+        let readonly = RemoteMcpHandler::local(adapter(), None);
+        assert_eq!(readonly.tool_definitions().len(), 2);
+        let fetched = readonly
+            .fetch(Parameters(FetchInput { id: "README.md".into() }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(fetched.text, "overview");
+        assert_eq!(fetched.url, "");
+        let enabled = RemoteMcpHandler::local(adapter(), Some(Arc::new(RejectTasks)));
+        assert_eq!(enabled.tool_definitions().len(), 5);
+        let result = enabled
+            .start_task(Parameters(StartTaskInput {
+                prompt: "inspect".into(),
+                mode: crate::companion::TaskMode::Plan,
+                plan_task_id: None,
+            }))
+            .await;
+        assert_eq!(result.err().expect("backend must reject task"), "fixture policy denied execution");
+    }
+
+    #[async_trait]
+    impl CompanionTasks for RejectTasks {
+        async fn start(&self, _input: StartTaskInput) -> Result<TaskSnapshot, String> {
+            Err("fixture policy denied execution".into())
+        }
+
+        async fn get(&self, _task_id: &str) -> Result<TaskSnapshot, String> {
+            Err("unknown companion task".into())
+        }
+
+        async fn cancel(&self, _task_id: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn companion_tools_require_opt_in_and_preserve_action_annotations() {
+        let disabled = RemoteMcpHandler::new(adapter(), config());
+        assert_eq!(disabled.tool_definitions().len(), 2);
+        assert!(
+            disabled
+                .start_task(Parameters(StartTaskInput {
+                    prompt: "plan".into(),
+                    mode: crate::companion::TaskMode::Plan,
+                    plan_task_id: None,
+                }))
+                .await
+                .is_err()
+        );
+
+        let mut enabled = (*config()).clone();
+        enabled.companion = Some(Arc::new(RejectTasks));
+        let handler = RemoteMcpHandler::new(adapter(), Arc::new(enabled));
+        let tools = handler.tool_definitions();
+        assert_eq!(tools.len(), 5);
+        for name in ["start_task", "cancel_task"] {
+            let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+            let annotations = tool.annotations.as_ref().unwrap();
+            assert_eq!(annotations.read_only_hint, Some(false));
+            assert_eq!(annotations.destructive_hint, Some(true));
+        }
+        let error = handler
+            .start_task(Parameters(StartTaskInput {
+                prompt: "plan".into(),
+                mode: crate::companion::TaskMode::Plan,
+                plan_task_id: None,
+            }))
+            .await
+            .err()
+            .expect("backend policy rejects task");
+        assert_eq!(error, "fixture policy denied execution");
+        assert!(
+            !handler
+                .cancel_task(Parameters(TaskInput { task_id: "completed".into() }))
+                .await
+                .unwrap()
+                .0
+        );
+        assert!(serde_json::from_value::<StartTaskInput>(json!({"prompt":"task","workspace":"/escape"})).is_err());
+        assert!(serde_json::from_value::<StartTaskInput>(json!({"prompt":"task","command":"sh"})).is_err());
+        assert_eq!(
+            serde_json::from_value::<StartTaskInput>(json!({"prompt":"task"})).unwrap().mode,
+            crate::companion::TaskMode::Plan
+        );
+    }
+
+    #[tokio::test]
+    async fn companion_http_calls_require_authentication_and_dispatch_to_owned_backend() {
+        let mut config = (*config()).clone();
+        config.companion = Some(Arc::new(RejectTasks));
+        let (client, base_url, server) = spawn_http_server(config).await;
+        let url = format!("{base_url}/mcp");
+        let call = json!({"jsonrpc":"2.0","id":1,"method":"tools/call", "params":{
+            "name":"start_task","arguments":{"prompt":"plan"}}});
+        let rejected = client
+            .post(&url)
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json, text/event-stream")
+            .json(&call)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+        let response = client
+            .post(&url)
+            .bearer_auth("internal-token")
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json, text/event-stream")
+            .json(&call)
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        assert!(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("fixture policy denied execution")
+        );
+        let response = client
+            .post(&url)
+            .bearer_auth("internal-token")
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap();
+        assert_eq!(response["result"]["tools"].as_array().unwrap().len(), 5);
+        server.abort();
+    }
+
     async fn spawn_http_server(config: RemoteMcpServerConfig) -> (reqwest::Client, String, JoinHandle<()>) {
         let server =
             WebmcpServer::new(adapter(), WebmcpServerConfig { remote_mcp: Some(config), ..Default::default() })
@@ -1070,7 +1321,8 @@ mod tests {
                 .expect("valid config")
                 .with_citation_url_prefix(Some(Url::parse("https://files.example.test/cite/").expect("prefix")))
                 .expect("prefix config");
-        assert_eq!(encoded.citation_url("docs/Guide One.md"), "https://files.example.test/cite/docs/Guide%20One.md");
+        let handler = RemoteMcpHandler::new(adapter(), Arc::new(encoded));
+        assert_eq!(handler.citation_url("docs/Guide One.md"), "https://files.example.test/cite/docs/Guide%20One.md");
     }
 
     #[tokio::test]

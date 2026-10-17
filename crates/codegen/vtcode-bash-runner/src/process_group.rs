@@ -201,13 +201,12 @@ pub fn kill_process_group(process_group_id: u32) -> io::Result<()> {
 /// Kill a specific process group ID with a specific signal.
 #[cfg(unix)]
 pub fn kill_process_group_with_signal(process_group_id: u32, signal: KillSignal) -> io::Result<()> {
-    use std::io::ErrorKind;
-
     let pgid = Pid::from_raw(process_group_id as libc::pid_t);
     if let Err(err) = signal::killpg(pgid, signal.as_nix_signal()) {
-        let io_err = nix_err_to_io(err);
-        if io_err.kind() != ErrorKind::NotFound {
-            return Err(io_err);
+        // ESRCH means cleanup has already completed. Rust does not classify
+        // it as ErrorKind::NotFound on every host (including macOS).
+        if err != Errno::ESRCH {
+            return Err(nix_err_to_io(err));
         }
     }
 
@@ -443,6 +442,21 @@ pub async fn graceful_kill_process_group_default_async(pid: u32) -> GracefulTerm
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn process_group_cleanup_is_idempotent_after_child_exit() {
+        use std::os::unix::process::CommandExt;
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .process_group(0)
+            .spawn()
+            .expect("spawn isolated group");
+        let pid = child.id();
+        assert!(child.wait().expect("reap child").success());
+        assert!(kill_process_group(pid).is_ok());
+        assert!(kill_process_group_with_signal(pid, KillSignal::Int).is_ok());
+    }
 
     #[test]
     fn test_set_parent_death_signal_no_panic() {

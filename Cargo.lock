@@ -8386,6 +8386,7 @@ dependencies = [
  "vtcode-acp",
  "vtcode-agent-plugins",
  "vtcode-auth",
+ "vtcode-bash-runner",
  "vtcode-commons",
  "vtcode-config",
  "vtcode-core",

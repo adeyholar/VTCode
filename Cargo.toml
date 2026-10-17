@@ -288,6 +288,7 @@ allow_attributes_without_reason = "warn"
 
 
 [dependencies]
+vtcode-bash-runner = { workspace = true }
 vtcode-diff = { path = "crates/common/vtcode-diff", version = "0.179.1", features = ["serde"] }
 vtcode-acp = { path = "crates/codegen/vtcode-acp", version = "0.179.1" }
 vtcode-commons = { path = "crates/common/vtcode-commons", version = "0.179.1" }

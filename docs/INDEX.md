@@ -28,6 +28,8 @@ Last reviewed: 2026-08-28
 - [Scheduled Tasks](user-guide/scheduled-tasks.md) - Reminder and durable scheduler flows.
 - [WebMCP Browser Bridge User Guide](user-guide/webmcp.md) - Connect a browser editor to an active VT Code session or a
   bounded standalone workspace bridge.
+- [VT Code Companion](user-guide/vtcode-companion.md) - Install the local MCP plugin, generate a machine-specific
+  marketplace, and share its source through GitHub.
 - [Planning Workflow](guides/planning-workflow.md) - `/plan`, review gate, plan handoff to build/auto agents.
 - [Permissions Guide](guides/permissions.md) - Granular agent permissions and rule grammar.
 - [Decisions Probe Guide](guides/decisions-probe.md) - Experimental OpenAI Decisions tool-output probe usage.

@@ -27,7 +27,7 @@ The table below maps the primary subcommands to their purpose; detailed sections
 | `vtcode mcp`                                                           | Manage Model Context Protocol servers                               |
 | `vtcode a2a`                                                           | Agent2Agent protocol client and server                              |
 | `vtcode acp`                                                           | Start the Agent Client Protocol bridge for editors                  |
-| `vtcode webmcp`                                                        | Authenticated browser editor bridge                                 |
+| `vtcode webmcp`                                                        | Authenticated browser editor bridge and local MCP stdio service     |
 | `vtcode skills`                                                        | Manage Agent Skills (list, create, load, validate)                  |
 | `vtcode plugins`                                                       | Manage Agent Plugins (add, list, validate, remove)                  |
 | `vtcode dependencies` (`deps`)                                         | Install or check optional tools (ripgrep, ast-grep)                 |
@@ -39,6 +39,11 @@ The table below maps the primary subcommands to their purpose; detailed sections
 | `vtcode cleanup-snapshots`                                             | Prune old snapshots with a retention limit                          |
 | `vtcode update`                                                        | Check for and install binary updates from GitHub Releases           |
 | `vtcode man`                                                           | Generate or display man pages                                       |
+
+For a local MCP connection that exposes Companion coding tasks, use
+`vtcode webmcp stdio --companion` with an explicitly selected workspace. The
+[VT Code Companion guide](./vtcode-companion.md) covers package setup and host
+marketplaces. The CLI command does not install the plugin or configure a host.
 
 ## Fast mode
 
@@ -358,6 +363,15 @@ editor. Exact origins are required; remote access must use `--allow-remote --pub
 TLS-terminating reverse proxy, and direct non-loopback binding is rejected. Browser confirmation cannot authorize a real
 write: terminal permission or the existing explicit full-auto allowlist remains authoritative. See
 [WebMCP bridge development](../development/webmcp.md).
+
+For a local coding companion, `vtcode webmcp stdio --companion` serves the same tools over stdin/stdout without a network
+listener or OAuth setup. The host must launch it with a fixed `--workspace`; workspace trust and permissions still apply.
+The optional `vtcode webmcp serve --mcp --companion` adds `start_task`, `get_task`, and
+`cancel_task` to the remote MCP surface. It requires preconfigured full-auto workspace trust and retains exec
+policy. Plan first, explicitly request implementation, then inspect recorded verification. See [companion setup and
+limits](../development/vtcode-companion.md).
+Read-only planning returns the final plan when inspection is sufficient; distinct shell inspections do not count as
+repetitions merely because they use `exec_command`. Task completion still does not imply verified implementation.
 
 For the browser walkthrough, including the WebMCP app, local pairing, connected drafts, and troubleshooting, see the
 [WebMCP browser bridge user guide](./webmcp.md).

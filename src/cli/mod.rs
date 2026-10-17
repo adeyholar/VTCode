@@ -13,6 +13,8 @@ mod auto;
 mod background_subagent;
 mod check;
 mod checkpoints;
+mod companion;
+mod companion_config;
 mod config;
 mod create_project;
 mod dispatch;

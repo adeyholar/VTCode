@@ -10,6 +10,7 @@ mod ask;
 mod background;
 mod bench;
 mod check;
+mod companion;
 mod config;
 mod dependencies;
 mod exec;
@@ -29,6 +30,7 @@ pub use ask::{AskCommandOptions, AskOutputFormat};
 pub use background::BackgroundSubagentArgs;
 pub use bench::BenchAllocatorArgs;
 pub use check::CheckSubcommand;
+pub use companion::{CompanionCommand, CompanionSetupArgs};
 pub use config::{
     ConfigCommand, ConfigFile, ConfigResetArgs, ContextConfig, LoggingConfig, PerformanceConfig, SecurityConfig,
     ToolConfig,
@@ -278,6 +280,13 @@ Full-auto does not override explicit denies or grant tools outside `[automation.
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
+    /// Configure the local VT Code Companion plugin.
+    #[command(name = "companion")]
+    Companion {
+        #[command(subcommand)]
+        command: CompanionCommand,
+    },
+
     /// Start Agent Client Protocol bridge for IDE integrations
     #[command(name = "acp")]
     AgentClientProtocol {

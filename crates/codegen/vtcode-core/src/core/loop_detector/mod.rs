@@ -80,6 +80,7 @@ pub struct ToolCallRecord {
 pub struct LoopDetector {
     recent_calls: VecDeque<ToolCallRecord>,
     tool_counts: HashMap<String, usize>,
+    hard_stopped_tools: HashSet<String>,
     last_warning: Option<Instant>,
     max_identical_call_limit: Option<usize>,
     custom_limits: HashMap<String, usize>,
@@ -117,6 +118,7 @@ impl LoopDetector {
         Self {
             recent_calls: VecDeque::with_capacity(DETECTION_WINDOW),
             tool_counts: HashMap::new(),
+            hard_stopped_tools: HashSet::new(),
             last_warning: None,
             max_identical_call_limit: normalized_limit,
             custom_limits: HashMap::new(),
@@ -161,6 +163,14 @@ impl LoopDetector {
 
     /// Record a tool call and return a warning or hard-stop message if a loop is detected.
     pub fn record_call(&mut self, tool_name: &str, args: &serde_json::Value) -> Option<String> {
+        let warning = self.record_call_inner(tool_name, args);
+        if warning.as_deref().is_some_and(|message| message.starts_with(HARD_STOP_PREFIX)) {
+            self.hard_stopped_tools.insert(tool_name.to_owned());
+        }
+        warning
+    }
+
+    fn record_call_inner(&mut self, tool_name: &str, args: &serde_json::Value) -> Option<String> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -323,6 +333,13 @@ impl LoopDetector {
             }
         }
 
+        let count_warning = self.check_for_loops(tool_name);
+        if count_warning
+            .as_deref()
+            .is_some_and(|message| message.starts_with(HARD_STOP_PREFIX))
+        {
+            return count_warning;
+        }
         if let Some(pattern_warning) = self.detect_patterns() {
             return Some(pattern_warning);
         }
@@ -371,11 +388,26 @@ impl LoopDetector {
             }
         }
 
-        self.check_for_loops(tool_name)
+        count_warning
     }
 
     fn check_for_loops(&mut self, tool_name: &str) -> Option<String> {
-        let count = self.tool_counts.get(tool_name).copied().unwrap_or(0);
+        // A shell tool multiplexes unrelated reads and checks. Count repeated
+        // normalized actions, not all uses of the executable tool name. Explicit
+        // operator limits retain their aggregate meaning.
+        let count = if is_command_tool_name(base_tool_name(tool_name))
+            && !self.custom_limits.contains_key(tool_name)
+            && !self.custom_limits.contains_key(base_tool_name(tool_name))
+        {
+            self.recent_calls.back().map_or(0, |latest| {
+                self.recent_calls
+                    .iter()
+                    .filter(|call| call.tool_name == tool_name && call.args_hash == latest.args_hash)
+                    .count()
+            })
+        } else {
+            self.tool_counts.get(tool_name).copied().unwrap_or(0)
+        };
 
         // Determine tool-specific limits
         let max_calls = self.get_limit_for_tool(tool_name);
@@ -484,9 +516,7 @@ impl LoopDetector {
 
     /// Check if hard limit is exceeded (should halt execution)
     pub fn is_hard_limit_exceeded(&self, tool_name: &str) -> bool {
-        let count = self.tool_counts.get(tool_name).copied().unwrap_or(0);
-        let max_calls = self.get_limit_for_tool(tool_name);
-        count >= max_calls * HARD_LIMIT_MULTIPLIER
+        self.hard_stopped_tools.contains(tool_name)
     }
 
     /// Get current call count for a tool
@@ -502,6 +532,7 @@ impl LoopDetector {
     /// Reset tracking for specific tool (use after successful progress)
     pub fn reset_tool(&mut self, tool_name: &str) {
         self.tool_counts.remove(tool_name);
+        self.hard_stopped_tools.remove(tool_name);
         self.recent_calls.retain(|r| r.tool_name != tool_name);
     }
 
@@ -561,6 +592,7 @@ impl LoopDetector {
     pub fn reset(&mut self) {
         self.recent_calls.clear();
         self.tool_counts.clear();
+        self.hard_stopped_tools.clear();
         self.last_warning = None;
         self.norm_cache.clear();
         self.norm_cache_order.clear();
@@ -712,7 +744,8 @@ impl LoopDetector {
             let suffix_names: Vec<&str> = suffix.iter().map(|(n, _)| *n).collect();
             let prev_names: Vec<&str> = prev.iter().map(|(n, _)| *n).collect();
 
-            if suffix_names == prev_names && k >= 2 {
+            if suffix_names == prev_names && !suffix_names.iter().any(|name| is_command_tool_name(base_tool_name(name)))
+            {
                 return Some(format!(
                     "Oscillating tool pattern detected: [{}]\n\
                      The agent is repeating the same sequence of tools. \
@@ -734,6 +767,57 @@ impl Default for LoopDetector {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distinct_shell_reads_do_not_become_repetitions_of_the_tool_name() {
+        let mut detector = LoopDetector::new();
+        for offset in 1..=24 {
+            let warning = detector.record_call(
+                tools::EXEC_COMMAND,
+                &serde_json::json!({
+                    "cmd":format!("sed -n '{offset}p' src/cli/companion.rs")
+                }),
+            );
+            assert!(warning.is_none(), "distinct read {offset}: {warning:?}");
+            assert!(!detector.is_hard_limit_exceeded(tools::EXEC_COMMAND));
+        }
+    }
+
+    #[test]
+    fn shell_repeat_hard_stop_tracks_the_action_and_resets_explicitly() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+        for offset in 1..=18 {
+            detector
+                .record_call(tools::EXEC_COMMAND, &serde_json::json!({"cmd":format!("sed -n '{offset}p' fixture")}));
+        }
+        for count in 1..16 {
+            detector.record_call(tools::EXEC_COMMAND, &serde_json::json!({"cmd":"cargo check --locked"}));
+            assert!(!detector.is_hard_limit_exceeded(tools::EXEC_COMMAND), "repeat {count}");
+        }
+        let warning = detector.record_call(tools::EXEC_COMMAND, &serde_json::json!({"cmd":"cargo check --locked"}));
+        assert!(warning.unwrap().starts_with(HARD_STOP_PREFIX));
+        assert!(detector.is_hard_limit_exceeded(tools::EXEC_COMMAND));
+        detector.reset_tool(tools::EXEC_COMMAND);
+        assert!(!detector.is_hard_limit_exceeded(tools::EXEC_COMMAND));
+        assert!(
+            detector
+                .record_call(tools::EXEC_COMMAND, &serde_json::json!({"cmd":"cargo check --locked"}))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn explicit_shell_limits_still_bound_distinct_actions() {
+        let mut detector = LoopDetector::new();
+        detector.set_tool_limit(tools::EXEC_COMMAND, 2);
+        for offset in 1..=4 {
+            detector
+                .record_call(tools::EXEC_COMMAND, &serde_json::json!({"cmd":format!("sed -n '{offset}p' fixture")}));
+            assert_eq!(detector.is_hard_limit_exceeded(tools::EXEC_COMMAND), offset == 4);
+        }
+        detector.reset();
+        assert!(!detector.is_hard_limit_exceeded(tools::EXEC_COMMAND));
+    }
+
     #[test]
     fn matrix_actions_are_distinct_but_repeated_status_still_hits_the_limit() {
         let mut detector = LoopDetector::with_max_repeated_calls(2);

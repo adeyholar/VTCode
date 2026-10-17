@@ -22,3 +22,4 @@
 - `policy` containment delegates to `vtcode_commons::paths::ensure_path_within_workspace` — `..`-traversal paths are rejected (intentionally stricter than the old `starts_with`).
 - Pipe spooling opts into `SpawnedProcess::reliable_output_rx`, a bounded lossless stream; legacy broadcast subscribers must remain independent of that backpressure path.
 - Pipe session termination kills the complete process group before final draining; `wait_with_output` still bounds post-exit draining even when a descendant inherits the pipe, and must never become an unbounded wait.
+- Process-group cleanup treats `ESRCH` as already exited directly; do not rely on its `io::ErrorKind` mapping being `NotFound` on every host.

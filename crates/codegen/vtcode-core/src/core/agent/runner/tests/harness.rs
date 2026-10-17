@@ -6,6 +6,178 @@
 use super::*;
 
 #[tokio::test]
+async fn headless_planning_returns_the_actual_plan_after_distinct_shell_inspections() {
+    let temp = TempDir::new().unwrap();
+    let original = (1..=18).map(|n| format!("line {n}\n")).collect::<String>();
+    fs::write(workspace_root(&temp).join("fixture.txt"), &original).unwrap();
+    let mut cfg = VTCodeConfig::default();
+    cfg.automation.full_auto.max_turns = 24;
+    cfg.agent.harness.inspection.mode = vtcode_config::core::agent::InspectionMode::Off;
+    let mut runner = Box::pin(make_runner(&temp, cfg, "planning-distinct-reads")).await;
+    runner.enable_full_auto(&[tools::EXEC_COMMAND.into()]).await;
+    runner.enable_planning();
+    let plan = "<proposed_plan>\n1. Update the fixture greeting.\n2. Verify the changed line.\n</proposed_plan>";
+    let mut responses: Vec<_> = (1..=18)
+        .map(|n| tool_call_response(tools::EXEC_COMMAND, json!({"cmd":format!("sed -n '{n}p' fixture.txt")})))
+        .collect();
+    responses.push(text_response(plan));
+    let provider = QueuedProvider::new(responses);
+    let remaining = provider.responses.clone();
+    runner.provider_client = Box::new(provider);
+    let result =
+        Box::pin(runner.execute_task(&task("Inspect fixture and return a plan", "planning-distinct-reads"), &[]))
+            .await
+            .unwrap();
+    assert_eq!(result.outcome, TaskOutcome::Success);
+    assert_eq!(result.turns_executed, 19);
+    assert!(remaining.lock().is_empty());
+    assert!(result.modified_files.is_empty());
+    assert_eq!(fs::read_to_string(workspace_root(&temp).join("fixture.txt")).unwrap(), original);
+    let terminal = result
+        .thread_events
+        .iter()
+        .find_map(|event| {
+            if let ThreadEvent::ThreadCompleted(event) = event {
+                Some(event)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(terminal.result.as_deref(), Some(plan));
+    let last_message = result.thread_events.iter().rev().find_map(|event| {
+        if let ThreadEvent::ItemCompleted(event) = event
+            && let ThreadItemDetails::AgentMessage(message) = &event.item.details
+        {
+            Some(message.text.as_str())
+        } else {
+            None
+        }
+    });
+    assert_eq!(last_message, Some(plan));
+}
+
+#[tokio::test]
+async fn headless_planning_reserves_the_last_turn_for_synthesis_and_rejects_more_tools() {
+    for (case, (final_response, succeeds)) in [
+        (text_response("Plan: inspect the greeting, then update its regression."), true),
+        (text_response(" \n\t "), false),
+        (tool_call_response(tools::EXEC_COMMAND, json!({"cmd":"cat missing-native"})), false),
+        (text_response("```command_session\n{\"cmd\":\"cat missing-text\"}\n```"), false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let temp = TempDir::new().unwrap();
+        fs::write(workspace_root(&temp).join("fixture.txt"), "original\n").unwrap();
+        let mut cfg = VTCodeConfig::default();
+        cfg.automation.full_auto.max_turns = 2;
+        cfg.agent.harness.inspection.mode = vtcode_config::core::agent::InspectionMode::Off;
+        let mut runner = Box::pin(make_runner(&temp, cfg, "planning-budget")).await;
+        runner.enable_full_auto(&[tools::EXEC_COMMAND.into()]).await;
+        runner.enable_planning();
+        let provider = RecordingQueuedProvider::with_name(
+            "queued-test-provider",
+            vec![
+                tool_call_response(tools::EXEC_COMMAND, json!({"cmd":"cat fixture.txt"})),
+                final_response,
+            ],
+        );
+        let observer = provider.clone();
+        runner.provider_client = Box::new(provider);
+        let result = Box::pin(runner.execute_task(&task("Return a plan", "planning-budget"), &[]))
+            .await
+            .unwrap();
+        let requests = observer.recorded_requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].tools.as_ref().is_some_and(|tools| !tools.is_empty()));
+        assert!(requests[1].tools.as_ref().is_none_or(|tools| tools.is_empty()));
+        assert!(requests[1].tool_choice.is_none());
+        assert!(
+            requests[1]
+                .messages
+                .last()
+                .unwrap()
+                .content
+                .as_text()
+                .contains("final planning turn")
+        );
+        assert_eq!(result.turns_executed, 2);
+        assert_eq!(result.outcome == TaskOutcome::Success, succeeds, "case {case}: {:?}", result.outcome);
+        if !succeeds {
+            assert_eq!(result.outcome.code(), "turn_limit_reached");
+        }
+        let dispatched = result.thread_events.iter().filter(|event| matches!(
+            event,
+            ThreadEvent::ItemCompleted(event)
+                if matches!(&event.item.details, ThreadItemDetails::ToolInvocation(item) if item.tool_name == tools::EXEC_COMMAND)
+        )).count();
+        assert_eq!(dispatched, 1, "synthesis cannot execute additional tools");
+        assert_eq!(fs::read_to_string(workspace_root(&temp).join("fixture.txt")).unwrap(), "original\n");
+    }
+}
+
+#[tokio::test]
+async fn headless_planning_rewrites_a_truncated_plan_once_without_more_tools() {
+    for truncate_rewrite in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let mut cfg = VTCodeConfig::default();
+        cfg.automation.full_auto.max_turns = 4;
+        let mut runner = Box::pin(make_runner(&temp, cfg, "planning-length")).await;
+        runner.enable_full_auto(&[tools::EXEC_COMMAND.into()]).await;
+        runner.enable_planning();
+        let mut truncated = text_response("Task complete. Partial plan: inspect the source, then");
+        truncated.finish_reason = FinishReason::Length;
+        let plan = "Plan: inspect the permission boundary; add its regression; run focused checks.";
+        let final_response = if truncate_rewrite {
+            truncated.clone()
+        } else {
+            text_response(plan)
+        };
+        let provider = RecordingQueuedProvider::with_name("queued-test-provider", vec![truncated, final_response]);
+        let observer = provider.clone();
+        runner.provider_client = Box::new(provider);
+        let result = Box::pin(runner.execute_task(&task("Return a plan", "planning-length"), &[]))
+            .await
+            .unwrap();
+        let requests = observer.recorded_requests();
+        assert_eq!(requests.len(), 2, "only one rewrite is allowed");
+        assert_eq!(requests[0].max_tokens, Some(4096), "planning needs the existing synthesis output allowance");
+        assert!(requests[0].tools.as_ref().is_some_and(|tools| !tools.is_empty()));
+        assert!(requests[1].tools.as_ref().is_none_or(|tools| tools.is_empty()));
+        assert_eq!(requests[1].max_tokens, requests[0].max_tokens);
+        assert!(
+            requests[1]
+                .messages
+                .last()
+                .unwrap()
+                .content
+                .as_text()
+                .contains("shorten detail")
+        );
+        assert_eq!(result.outcome == TaskOutcome::Success, !truncate_rewrite);
+        assert_eq!(result.turns_executed, 2);
+        let terminal = result
+            .thread_events
+            .iter()
+            .find_map(|event| {
+                if let ThreadEvent::ThreadCompleted(event) = event {
+                    Some(event)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        if truncate_rewrite {
+            assert!(terminal.result.is_none());
+            assert!(result.summary.contains("output token limit"));
+        } else {
+            assert_eq!(terminal.result.as_deref(), Some(plan));
+        }
+    }
+}
+
+#[tokio::test]
 async fn headless_loop_stop_preserves_failure_and_workspace_context() {
     let temp = TempDir::new().unwrap();
     let mut cfg = VTCodeConfig::default();

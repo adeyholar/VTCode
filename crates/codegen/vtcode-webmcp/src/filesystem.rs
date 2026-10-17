@@ -613,6 +613,17 @@ fn reject_sensitive_relative_path(relative: &Path, original: &str) -> Result<()>
     Ok(())
 }
 
+/// Classify recorded paths before exposing change evidence. This lexical filter
+/// does not authorize filesystem access; reads still require bound directory handles.
+pub fn is_public_evidence_path(path: &str) -> bool {
+    validate_relative_path(path).is_ok_and(|relative| {
+        !is_sensitive_relative_path(&relative)
+            && !relative.components().any(|component| {
+                matches!(component, Component::Normal(name) if name.to_str().is_none_or(|name| IGNORED_DIRECTORY_NAMES.iter().any(|ignored| name.eq_ignore_ascii_case(ignored))))
+            })
+    })
+}
+
 fn is_sensitive_relative_path(relative: &Path) -> bool {
     relative.components().any(|component| {
         let Component::Normal(name) = component else {

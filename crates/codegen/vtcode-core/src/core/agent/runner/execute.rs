@@ -517,6 +517,7 @@ impl AgentRunner {
         let max_revision_rounds = setup.max_revision_rounds;
         let mut revision_rounds_used = 0usize;
         let mut should_write_blocked_handoff = false;
+        let mut planning_synthesis_required = false;
 
         let result: Result<_> = {
             for turn in 0..self.max_turns {
@@ -607,7 +608,13 @@ impl AgentRunner {
                 };
                 let max_tokens = sampling_overrides
                     .max_tokens
-                    .or(if is_simple_task { Some(800) } else { Some(2000) });
+                    .or(Some(if self.tool_registry.is_planning_active() {
+                        4096
+                    } else if is_simple_task {
+                        800
+                    } else {
+                        2000
+                    }));
 
                 let provider_kind = turn_model
                     .parse::<ModelId>()
@@ -645,6 +652,13 @@ impl AgentRunner {
                     runtime.state.last_processed_message_idx = runtime.state.conversation.len();
                 }
 
+                let planning_synthesis_turn = self.tool_registry.is_planning_active()
+                    && (planning_synthesis_required || turn + 1 == self.max_turns);
+                if planning_synthesis_turn {
+                    runtime.state.add_user_message(
+                        "This is the final planning turn within the configured budget. Return a concise, complete plan now using only evidence already collected. Fit the entire plan within the response token limit; shorten detail rather than repeating a truncated draft. Make no tool calls. State missing evidence explicitly; do not claim implementation or verification.".to_string(),
+                    );
+                }
                 let context_budget = crate::compaction::effective_context_budget(
                     Some(self.config()),
                     self.provider_client.as_ref(),
@@ -841,7 +855,7 @@ impl AgentRunner {
                 let request = build_harness_request_plan(HarnessRequestPlanInput {
                     messages: request_messages,
                     system_prompt: prompt_bundle.request_envelope.system_prompt(),
-                    tools: (!prompt_bundle.request_envelope.ordered_tools().is_empty())
+                    tools: (!planning_synthesis_turn && !prompt_bundle.request_envelope.ordered_tools().is_empty())
                         .then(|| prompt_bundle.request_envelope.ordered_tools()),
                     model: turn_model.clone(),
                     max_tokens,
@@ -859,7 +873,8 @@ impl AgentRunner {
                         sampling_overrides.frequency_penalty
                     },
                     stream: self.provider_client.supports_streaming(),
-                    tool_choice: (provider_name.eq_ignore_ascii_case("openai")
+                    tool_choice: (!planning_synthesis_turn
+                        && provider_name.eq_ignore_ascii_case("openai")
                         && !prompt_bundle.tool_snapshot.active_tool_names.is_empty())
                     .then(|| {
                         ToolChoice::allowed_tools_auto(prompt_bundle.tool_snapshot.active_tool_names.as_ref().clone())
@@ -1079,6 +1094,31 @@ impl AgentRunner {
                     )]);
                 }
 
+                // A provider may ignore an empty tool catalog or emit textual
+                // tool markup. The reserved synthesis turn cannot dispatch it.
+                if planning_synthesis_turn && effective_tool_calls.as_ref().is_some_and(|calls| !calls.is_empty()) {
+                    runtime.state.outcome = TaskOutcome::turn_limit_reached(self.max_turns, turn + 1);
+                    break;
+                }
+                if self.tool_registry.is_planning_active()
+                    && matches!(response.finish_reason, crate::llm::provider::FinishReason::Length)
+                    && effective_tool_calls.as_ref().is_none_or(|calls| calls.is_empty())
+                {
+                    if planning_synthesis_turn {
+                        runtime.state.outcome = TaskOutcome::failed(
+                            "Planning response exceeded the output token limit during final synthesis".to_string(),
+                            vec![],
+                            None,
+                            None,
+                        );
+                        break;
+                    }
+                    // Rewrite once within the existing turn/output budgets.
+                    // Never accept completion keywords from a truncated plan.
+                    planning_synthesis_required = true;
+                    continue;
+                }
+
                 let is_gemini = matches!(provider_kind, ModelProvider::Gemini);
 
                 // --- Confidence-based escalation gate + chain ---
@@ -1263,7 +1303,7 @@ impl AgentRunner {
                 if !forced_continuation
                     && !runtime.state.is_completed
                     && effective_tool_calls.as_ref().is_none_or(|tool_calls| tool_calls.is_empty())
-                    && !response.content_text().is_empty()
+                    && !response.content_text().trim().is_empty()
                 {
                     if check_for_response_loop(response.content_text(), &mut runtime.state) {
                         self.runner_println(format_args!(
@@ -1277,7 +1317,9 @@ impl AgentRunner {
                         break;
                     }
 
-                    if check_completion_candidate(response.content_text())
+                    if (self.tool_registry.is_planning_active()
+                        && matches!(response.finish_reason, crate::llm::provider::FinishReason::Stop))
+                        || check_completion_candidate(response.content_text())
                         || self.tool_registry.completion_verification_pending()
                     {
                         self.runner_println(format_args!(
@@ -1675,9 +1717,26 @@ impl AgentRunner {
                 &runtime.state.stats.total_usage,
             );
 
+            // A completed read-only task must return the actual plan, rather
+            // than replacing it with operational task-summary bookkeeping.
+            let planning_response =
+                if self.tool_registry.is_planning_active() && matches!(runtime.state.outcome, TaskOutcome::Success) {
+                    runtime
+                        .state
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|message| {
+                            message.role == crate::llm::provider::MessageRole::Assistant
+                                && !message.content.as_text().trim().is_empty()
+                        })
+                        .map(|message| message.content.as_text().into_owned())
+                } else {
+                    None
+                };
             if !summary.trim().is_empty() {
-                // Record summary as agent message for event stream
-                event_recorder.agent_message(&summary);
+                // Preserve the user-facing result in the event stream.
+                event_recorder.agent_message(planning_response.as_deref().unwrap_or(&summary));
                 // Also display summary prominently for immediate visibility in TUI transcript
                 self.runner_println(format_args!(
                     "\n{} Agent Task Summary\n{}",
@@ -1735,7 +1794,11 @@ impl AgentRunner {
                 &self.session_id,
                 runtime.state.outcome.thread_completion_subtype(),
                 runtime.state.outcome.code(),
-                runtime.state.outcome.is_success().then_some(summary.as_str()),
+                runtime
+                    .state
+                    .outcome
+                    .is_success()
+                    .then_some(planning_response.as_deref().unwrap_or(&summary)),
                 runtime.state.stop_reason.as_deref(),
                 total_usage,
                 session_costs

@@ -26,6 +26,8 @@ Entry point for VT Code contributor workflows.
 - [Execution Policy](./EXECUTION_POLICY.md) - Command policy model.
 - [Command Security Model](./COMMAND_SECURITY_MODEL.md) - Command validation and threat model.
 - [WebMCP bridge](./webmcp.md) - Authenticated browser editing, pairing, runtime adapters, and security boundaries.
+- [VT Code Companion](./vtcode-companion.md) - Local plugin packaging, marketplace generation, install-script and CLI
+  behavior, and GitHub sharing boundaries.
 - [Source inspection](./source-inspection.md) - Retained source coverage, targeted refresh, shell writes, and verification.
 - [Execution explanations](./execution-explanations.md) - Canonical projection, decisions, evidence, and reports.
 - [Matrix orchestration](./matrix-orchestration.md) - Coordinator tasks, resource leases, final verification, and recovery.

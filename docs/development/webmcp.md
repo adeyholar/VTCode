@@ -154,12 +154,20 @@ itself remains loopback-only. The transport follows the
 [MCP transport specification](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports) and the OpenAI
 [remote MCP contract](https://developers.openai.com/api/docs/mcp).
 
-Only these tools are advertised:
+By default, only these tools are advertised:
 
 ```text
 search({ query }) → { results: [{ id, title, url }] }
 fetch({ id }) → { id, title, text, url, metadata? }
 ```
+
+An additional `--mcp --companion` startup opt-in exposes coding tasks through a binary-owned exec backend. It
+preserves these read tools and their authentication policy; see [VT Code Companion](vtcode-companion.md) for the
+task contract and setup.
+
+Local plugins use `vtcode --workspace /absolute/path --quiet webmcp stdio --companion`.
+This reuses the MCP handler over stdin/stdout without an HTTP listener or OAuth configuration.
+The binary checks the same workspace trust and task policy, and cancels owned tasks on EOF.
 
 Both tools are annotated `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, and `openWorldHint=false`.
 Results are bounded by 20 files returned, 256 files scanned, and 16 MiB of UTF-8 content scanned by default. Search

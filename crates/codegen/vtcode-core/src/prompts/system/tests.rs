@@ -73,18 +73,19 @@ async fn planning_prompt_size_fixed_fixture() {
     // Action-specific tracker examples measure 9997 bytes/2146 tokens for Default
     // and 10269 bytes/2216 tokens for Minimal; keep tight caps and presence checks.
     // Cancelled planning resumes on fresh input; retain a 50-byte allowance for this policy.
+    // Terminal planning guidance adds 128 bytes and about 30 estimated tokens.
     for case in [
         PlanningPromptSizeCase {
             density: "Default",
             prompt_budget_tokens: 100_000,
-            max_prompt_bytes: 11_000,
-            max_estimated_tokens: 2_360,
+            max_prompt_bytes: 11_128,
+            max_estimated_tokens: 2_390,
         },
         PlanningPromptSizeCase {
             density: "Minimal",
             prompt_budget_tokens: 1,
-            max_prompt_bytes: 11_300,
-            max_estimated_tokens: 2_430,
+            max_prompt_bytes: 11_428,
+            max_estimated_tokens: 2_460,
         },
     ] {
         let mut config = VTCodeConfig::default();
@@ -738,6 +739,7 @@ async fn test_composed_prompts_render_explicit_shell_profiles() {
 fn test_planning_notice_omits_removed_model_facing_tool_names() {
     assert_no_removed_model_facing_tool_names(PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE);
     assert!(PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE.contains("exec_command"));
+    assert!(PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE.contains("return the final plan without more tool calls"));
     assert!(PLANNING_WORKFLOW_READ_ONLY_NOTICE_LINE.contains("apply_patch"));
 }
 

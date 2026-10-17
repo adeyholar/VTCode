@@ -31,6 +31,9 @@ pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, comma
     vtcode_core::llm::factory::register_custom_providers(&cfg.custom_providers);
 
     match command {
+        Commands::Companion { command } => {
+            crate::cli::companion_config::handle_companion_command(startup, command)?;
+        }
         Commands::AgentClientProtocol { target } => {
             handle_acp_command(core_cfg, cfg, target).await?;
         }
@@ -44,7 +47,7 @@ pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, comma
             vtcode_core::cli::a2a::execute_a2a_command(command).await?;
         }
         Commands::Webmcp { command } => {
-            webmcp::handle_webmcp_command(startup, command).await?;
+            webmcp::handle_webmcp_command(startup, args, command).await?;
         }
         Commands::AppServer { listen } => {
             handle_app_server_command(core_cfg, cfg, &listen).await?;
