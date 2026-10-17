@@ -55,8 +55,8 @@ enabled = true
 [agent.persistent_memory.memories]
 generate_memories = true
 use_memories = true
-# extract_model = "gpt-4.1-mini"
-# consolidation_model = "gpt-4.1-mini"
+# extract_model = "gpt-6-luna"
+# consolidation_model = "gpt-6-luna"
 
 [telemetry]
 atif_enabled = true

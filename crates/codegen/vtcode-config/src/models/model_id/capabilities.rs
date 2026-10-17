@@ -508,6 +508,7 @@ impl ModelId {
             ModelId::VercelAnthropicClaudeOpus55 => "5.5",
             ModelId::VercelAnthropicClaudeHaiku45 => "4.5",
             ModelId::VercelOpenAiGpt56Sol | ModelId::VercelOpenAiGpt56Luna => "5.6",
+            ModelId::VercelOpenAiGpt6Sol | ModelId::VercelOpenAiGpt6Luna => "6",
             ModelId::VercelOpenAiGpt6Astra => "6",
             ModelId::VercelGoogleGemini38Flash => "3.8",
             ModelId::VercelDeepseekFlash => "4.1",

@@ -341,6 +341,10 @@ pub enum ModelId {
     VercelOpenAiGpt6Astra,
     /// GPT-5.6 Luna served through the Vercel AI Gateway
     VercelOpenAiGpt56Luna,
+    /// GPT-6 Sol served through the Vercel AI Gateway
+    VercelOpenAiGpt6Sol,
+    /// GPT-6 Luna served through the Vercel AI Gateway
+    VercelOpenAiGpt6Luna,
     /// GPT-5.3 Codex served through the Vercel AI Gateway
     /// Gemini 3.1 Pro Preview served through the Vercel AI Gateway
     /// Gemini 3.8 Flash served through the Vercel AI Gateway

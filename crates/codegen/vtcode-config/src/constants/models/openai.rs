@@ -9,7 +9,6 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     "gpt-5.6-sol",   // GPT-5.6 Sol flagship model
     "gpt-5.6-terra", // GPT-5.6 Terra balanced model
     "gpt-5.6-luna",  // GPT-5.6 Luna efficient model
-    "gpt-5.1",       // GPT-5.3 Codex optimized for agentic coding with xhigh reasoning support
     "gpt-5.1-mini",
     "gpt-oss-20b",
     "gpt-oss-120b",
@@ -26,7 +25,6 @@ pub const RESPONSES_API_MODELS: &[&str] = &[
     GPT_5_6_SOL,
     GPT_5_6_TERRA,
     GPT_5_6_LUNA,
-    GPT_5_1,
     GPT_5_6_SOL,
     GPT_5_1_MINI,
 ];
@@ -42,7 +40,6 @@ pub const REASONING_MODELS: &[&str] = &[
     GPT_5_6_SOL,
     GPT_5_6_TERRA,
     GPT_5_6_LUNA,
-    GPT_5_1,
     GPT_5_6_SOL,
 ];
 
@@ -88,6 +85,14 @@ const CODEX_MINI_LATEST: &str = "codex-mini-latest";
 pub const O3: &str = "o3";
 pub const O4_MINI: &str = "o4-mini";
 
+// Oct 2026 deprecation batch (announced 2026-10-01 / 2026-10-14).
+pub(crate) const GPT_5_3_CODEX: &str = "gpt-5.3-codex";
+pub(crate) const GPT_5_4_NANO: &str = "gpt-5.4-nano";
+pub(crate) const GPT_4O: &str = "gpt-4o";
+pub(crate) const GPT_4O_MINI: &str = "gpt-4o-mini";
+pub(crate) const GPT_4_1: &str = "gpt-4.1";
+pub(crate) const GPT_4_1_MINI: &str = "gpt-4.1-mini";
+
 /// Mapping of deprecated OpenAI model IDs to their recommended replacements.
 ///
 /// Mappings follow the official OpenAI deprecation table:
@@ -121,6 +126,130 @@ pub const DEPRECATED_MODEL_REPLACEMENTS: &[(&str, &str, &str)] = &[
         CODEX_MINI_LATEST,
         GPT_5_6_SOL,
         "codex-mini-latest is deprecated; use GPT-5.3 Codex for cost-effective coding",
+    ),
+    // Oct 1, 2026 batch — shut down Apr 1, 2027.
+    (GPT_5_1, "gpt-6-sol", "GPT-5.1 is deprecated and shuts down Apr 1, 2027; use GPT-6 Sol"),
+    (
+        GPT_5_3_CODEX,
+        "gpt-6-sol",
+        "GPT-5.3 Codex is deprecated and shuts down Apr 1, 2027; use GPT-6 Sol for agentic coding",
+    ),
+    (GPT_5_4_NANO, "gpt-6-luna", "GPT-5.4 Nano is deprecated and shuts down Apr 1, 2027; use GPT-6 Luna"),
+    // Oct 14, 2026 GPT-4 series batch — shut down Jan 14, 2027.
+    (GPT_4O, "gpt-6-luna", "GPT-4o is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna"),
+    (
+        "gpt-4o-2024-08-06",
+        "gpt-6-luna",
+        "GPT-4o (2024-08-06) is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna",
+    ),
+    (
+        "gpt-4o-2024-11-20",
+        "gpt-6-luna",
+        "GPT-4o (2024-11-20) is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna",
+    ),
+    (GPT_4O_MINI, "gpt-6-luna", "GPT-4o mini is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna"),
+    (
+        "gpt-4o-mini-2024-07-18",
+        "gpt-6-luna",
+        "GPT-4o mini (2024-07-18) is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna",
+    ),
+    (GPT_4_1, "gpt-6-luna", "GPT-4.1 is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna"),
+    (
+        "gpt-4.1-2025-04-14",
+        "gpt-6-luna",
+        "GPT-4.1 (2025-04-14) is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna",
+    ),
+    (GPT_4_1_MINI, "gpt-6-luna", "GPT-4.1 mini is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna"),
+    (
+        "gpt-4.1-mini-2025-04-14",
+        "gpt-6-luna",
+        "GPT-4.1 mini (2025-04-14) is deprecated and shuts down Jan 14, 2027; use GPT-6 Luna",
+    ),
+    // Jun 11, 2026 GPT-5/o3 snapshots — shut down Dec 11, 2026.
+    (
+        "gpt-5-2025-08-07",
+        "gpt-5.6-sol",
+        "GPT-5 snapshot 2025-08-07 is deprecated and shuts down Dec 11, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "gpt-5-mini-2025-08-07",
+        "gpt-5.6-terra",
+        "GPT-5 Mini snapshot 2025-08-07 is deprecated and shuts down Dec 11, 2026; use GPT-5.6 Terra",
+    ),
+    (
+        "gpt-5-nano-2025-08-07",
+        "gpt-5.6-luna",
+        "GPT-5 Nano snapshot 2025-08-07 is deprecated and shuts down Dec 11, 2026; use GPT-5.6 Luna",
+    ),
+    (
+        "gpt-5-pro-2025-10-06",
+        "gpt-5.6-sol",
+        "GPT-5 Pro snapshot 2025-10-06 is deprecated and shuts down Dec 11, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "o3-2025-04-16",
+        "gpt-5.6-sol",
+        "o3 snapshot 2025-04-16 is deprecated and shuts down Dec 11, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "o3-pro-2025-06-10",
+        "gpt-5.6-sol",
+        "o3 Pro snapshot 2025-06-10 is deprecated and shuts down Dec 11, 2026; use GPT-5.6 Sol",
+    ),
+    // Apr 22, 2026 legacy snapshots — shut down Oct 23, 2026.
+    (
+        "gpt-3.5-turbo-0125",
+        "gpt-5.6-terra",
+        "GPT-3.5 Turbo snapshot 0125 is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Terra",
+    ),
+    (
+        "gpt-4-0613",
+        "gpt-5.6-sol",
+        "GPT-4 snapshot 0613 is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "gpt-4-turbo-2024-04-09",
+        "gpt-5.6-sol",
+        "GPT-4 Turbo snapshot 2024-04-09 is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "gpt-4.1-nano-2025-04-14",
+        "gpt-5.6-luna",
+        "GPT-4.1 Nano is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Luna",
+    ),
+    (
+        "gpt-4o-2024-05-13",
+        "gpt-5.6-sol",
+        "GPT-4o snapshot 2024-05-13 is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Sol",
+    ),
+    ("o1-2024-12-17", "gpt-5.6-sol", "o1 is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Sol"),
+    (
+        "o1-pro-2025-03-19",
+        "gpt-5.6-sol",
+        "o1 Pro is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "o3-mini-2025-01-31",
+        "gpt-5.6-sol",
+        "o3 Mini is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "o4-mini-2025-04-16",
+        "gpt-5.6-terra",
+        "o4 Mini snapshot 2025-04-16 is deprecated and shuts down Oct 23, 2026; use GPT-5.6 Terra",
+    ),
+    // Chat / specialized variants already shut down.
+    ("gpt-5-chat-latest", "gpt-5.6-sol", "GPT-5 Chat is deprecated; use GPT-5.6 Sol"),
+    ("gpt-5.1-chat-latest", "gpt-5.6-sol", "GPT-5.1 Chat is deprecated; use GPT-5.6 Sol"),
+    (
+        "gpt-5.2-chat-latest",
+        "gpt-5.6-sol",
+        "GPT-5.2 Chat is deprecated and shut down Aug 10, 2026; use GPT-5.6 Sol",
+    ),
+    (
+        "gpt-5.3-chat-latest",
+        "gpt-5.6-sol",
+        "GPT-5.3 Chat is deprecated and shut down Aug 10, 2026; use GPT-5.6 Sol",
     ),
 ];
 

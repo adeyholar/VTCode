@@ -878,6 +878,20 @@ model_id_table! {
         display: "GPT-5.6 Luna (Vercel AI Gateway)",
         description: "OpenAI GPT-5.6 Luna cost-efficient reasoning model served through the Vercel AI Gateway",
     },
+    VercelOpenAiGpt6Sol {
+        provider: Vercel,
+        id: models::vercel::OPENAI_GPT_6_SOL,
+        parse: [models::vercel::OPENAI_GPT_6_SOL],
+        display: "GPT-6 Sol (Vercel AI Gateway)",
+        description: "OpenAI GPT-6 Sol cost-efficient high-end reasoning model served through the Vercel AI Gateway",
+    },
+    VercelOpenAiGpt6Luna {
+        provider: Vercel,
+        id: models::vercel::OPENAI_GPT_6_LUNA,
+        parse: [models::vercel::OPENAI_GPT_6_LUNA],
+        display: "GPT-6 Luna (Vercel AI Gateway)",
+        description: "OpenAI GPT-6 Luna fast cost-efficient reasoning model served through the Vercel AI Gateway",
+    },
     VercelGoogleGemini38Flash {
         provider: Vercel,
         id: models::vercel::GOOGLE_GEMINI_3_8_FLASH,
@@ -953,6 +967,8 @@ mod tests {
                     | ModelId::VercelOpenAiGpt6Astra
                     | ModelId::VercelOpenAiGpt56Sol
                     | ModelId::VercelOpenAiGpt56Luna
+                    | ModelId::VercelOpenAiGpt6Sol
+                    | ModelId::VercelOpenAiGpt6Luna
                     | ModelId::VercelGoogleGemini38Flash
                     | ModelId::VercelDeepseekFlash
                     | ModelId::VercelMoonshotaiKimiK3

@@ -729,6 +729,8 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             | ModelId::VercelOpenAiGpt6Astra
             | ModelId::VercelOpenAiGpt56Sol
             | ModelId::VercelOpenAiGpt56Luna
+            | ModelId::VercelOpenAiGpt6Sol
+            | ModelId::VercelOpenAiGpt6Luna
             | ModelId::VercelGoogleGemini38Flash
             | ModelId::VercelDeepseekFlash
             | ModelId::VercelMoonshotaiKimiK3 => continue,

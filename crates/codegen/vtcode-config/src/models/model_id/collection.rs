@@ -148,6 +148,8 @@ impl ModelId {
             ModelId::VercelOpenAiGpt56Sol,
             ModelId::VercelOpenAiGpt6Astra,
             ModelId::VercelOpenAiGpt56Luna,
+            ModelId::VercelOpenAiGpt6Sol,
+            ModelId::VercelOpenAiGpt6Luna,
             ModelId::VercelGoogleGemini38Flash,
             ModelId::VercelDeepseekFlash,
             ModelId::VercelMoonshotaiKimiK3,

@@ -238,7 +238,8 @@ disclosure does not replace the retained evidence or expose provider chain-of-th
 - VT Code applies a compact GPT-5.4 prompt contract rather than a verbatim cookbook prompt: compact outputs, low-risk
   follow-through, dependency-aware tool use, completeness checks, verification, and conditional grounding/citation
   rules.
-- Deprecated models (gpt-5, gpt-5-mini, gpt-5-nano, o3, o4-mini, gpt-5-codex, gpt-5.1-codex, etc.) are removed from the
+- Deprecated models (gpt-5, gpt-5-mini, gpt-5-nano, o3, o4-mini, gpt-5-codex, gpt-5.1-codex, gpt-5.1, gpt-5.3-codex,
+  gpt-5.4-nano, gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, etc.) are removed from the
   model picker but retained in routing constants for backward compatibility with existing configs.
 - **GPT-6 Astra (`gpt-6-astra`):** most capable OpenAI model for end-to-end agentic work (1,050,000 context, 128k max
   output, reasoning `low`/`medium`/`high`/`xhigh`/`max`). The catalog drives its Responses API route, sampling and
