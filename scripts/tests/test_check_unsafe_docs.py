@@ -70,13 +70,46 @@ class ScanFileTests(unittest.TestCase):
         )
         self.assertEqual(findings, [])
 
-    def test_type_alias_unsafe_is_not_an_unsafe_use(self):
+    def test_type_alias_unsafe_does_not_fire_clippy_rules_but_needs_a_contract(self):
         for content in (
             'type Cb = unsafe extern "C" fn() -> u32;\n',
             'type Cb2 =\n    unsafe extern "C" fn() -> u32;\n',
         ):
             with self.subTest(content=content):
+                findings = self.scan("src/lib.rs", content)
+                reasons = [f.reason for f in findings]
+                # Type-position `unsafe` fires neither clippy lint...
+                self.assertNotIn("missing `unsafe_code` allowance", reasons)
+                self.assertNotIn("missing SAFETY marker", reasons)
+                # ...but it still needs a contract doc (Rule C).
+                self.assertEqual(
+                    reasons, ["type-position `unsafe` needs a contract doc"]
+                )
+
+    def test_type_alias_unsafe_with_contract_doc_passes(self):
+        for marker in (
+            "/// Contract: the pointer is valid while the library is loaded.",
+            "    /// Indented doc comment also counts.",
+        ):
+            content = f'{marker}\ntype Cb = unsafe extern "C" fn() -> u32;\n'
+            with self.subTest(marker=marker):
                 self.assertEqual(self.scan("src/lib.rs", content), [])
+
+    def test_type_alias_unsafe_safety_comment_is_not_a_contract_doc(self):
+        # clippy rejects `// SAFETY:` on type-position `unsafe`
+        # (`unnecessary_safety_comment`), so Rule C requires a `///` doc instead.
+        content = (
+            '// SAFETY: not accepted here.\ntype Cb = unsafe extern "C" fn() -> u32;\n'
+        )
+        self.assert_reasons(
+            self.scan("src/lib.rs", content),
+            ["type-position `unsafe` needs a contract doc"],
+        )
+
+    def test_plain_type_alias_needs_no_contract(self):
+        self.assertEqual(
+            self.scan("src/lib.rs", 'type Cb = extern "C" fn() -> u32;\n'), []
+        )
 
     def test_unsafe_extern_block_needs_no_marker(self):
         content = (

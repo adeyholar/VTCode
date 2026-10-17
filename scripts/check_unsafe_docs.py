@@ -12,14 +12,19 @@ This deterministic, host-runnable check reproduces the two obligations on every
 tracked `.rs` file, whether or not it compiles here:
 
 * every file (or its crate root) that emits `unsafe_code` must carry an
-  `unsafe_code` allow/expect, and
-* every `unsafe { ... }` / `unsafe impl` must be preceded by a `SAFETY:` marker.
+  `unsafe_code` allow/expect,
+* every `unsafe { ... }` / `unsafe impl` must be preceded by a `SAFETY:` marker, and
+* every type-position `unsafe` (e.g. `type Cb = unsafe extern "C" fn()`) must be
+  preceded by a contract doc comment (`///`).
 
-It is intentionally *more permissive* than clippy — a marker anywhere in the
-preceding window counts, `unsafe extern` blocks and `unsafe trait` need no marker
-(matching the lints), and `unsafe` in type position (`type Cb = unsafe extern "C"
-fn()`) is ignored — so clippy-clean host code never trips it. It exists to catch
-the platform-gated drift clippy cannot see; treat findings as real gaps.
+The first two rules mirror clippy and are intentionally *more permissive* — a
+marker anywhere in the preceding window counts, and `unsafe extern` blocks and
+`unsafe trait` need no marker — so clippy-clean host code never trips them. The
+third rule covers a class clippy cannot see at all: `unsafe` in type position
+fires neither `unsafe_code` nor `undocumented_unsafe_blocks` (and clippy rejects a
+`// SAFETY:` marker there as `unnecessary_safety_comment`), so it must carry a
+`///` contract doc instead. It exists to catch the drift clippy cannot see; treat
+findings as real gaps.
 """
 
 from __future__ import annotations
@@ -44,6 +49,11 @@ UNSAFE_MARKER_RE = re.compile(r"\bunsafe\s*(?:\{|impl\b)")
 TYPE_ALIAS_START_RE = re.compile(r"^\s*(?:pub(?:\s*\([^)]*\))?\s+)?type\s+\w")
 ALLOW_RE = re.compile(r"#!?\[[^\]]*?\bunsafe_code\b", re.DOTALL)
 SAFETY_MARKER_RE = re.compile(r"(?i)//.*\bsafety\s*:")
+# Rule C: type-position `unsafe` fires no lint, so a contract doc comment above
+# the `type` statement stands in for the obligation. (A `// SAFETY:` marker is
+# rejected by clippy's `unnecessary_safety_comment`, so only `///` counts.)
+TYPE_UNSAFE_RE = re.compile(r"\bunsafe\b")
+TYPE_CONTRACT_DOC_RE = re.compile(r"^\s*(?:///|/\*\*)")
 MARKER_WINDOW = 12
 
 EXCLUDED_PREFIXES = ("fuzz/", "target/", "patches/")
@@ -213,6 +223,32 @@ def first_unsafe_code_line(lines: list[str]) -> int | None:
     return None
 
 
+def iter_type_unsafe_statements(lines: list[str]):
+    """Yield (start_line_no, source) for `type` statements that use `unsafe`.
+
+    Matches a single- or multi-line `type ... ;` statement in type position,
+    which `unsafe_code` and `undocumented_unsafe_blocks` both ignore. `source`
+    is the first source line, for reporting.
+    """
+    idx = 0
+    total = len(lines)
+    while idx < total:
+        if not TYPE_ALIAS_START_RE.match(code_only(lines[idx])):
+            idx += 1
+            continue
+        start = idx + 1
+        parts = []
+        while idx < total:
+            part = code_only(lines[idx])
+            parts.append(part)
+            if ";" in part:
+                break
+            idx += 1
+        if TYPE_UNSAFE_RE.search(" ".join(parts)):
+            yield start, lines[start - 1].strip()
+        idx += 1
+
+
 def scan_file(path: Path, rules: list[AllowRule]) -> list[Finding]:
     rel_path = display_path(path)
     try:
@@ -258,6 +294,22 @@ def scan_file(path: Path, rules: list[AllowRule]) -> list[Finding]:
             Finding(rel_path, line_no, "missing SAFETY marker", raw_line.strip())
         )
 
+    # Rule C: type-position `unsafe` fires no lint, so require a contract doc.
+    for start_line, source in iter_type_unsafe_statements(lines):
+        window = lines[max(0, start_line - 1 - MARKER_WINDOW) : start_line - 1]
+        if any(TYPE_CONTRACT_DOC_RE.match(candidate) for candidate in window):
+            continue
+        if is_allowlisted(rel_path, start_line, rules):
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                start_line,
+                "type-position `unsafe` needs a contract doc",
+                source,
+            )
+        )
+
     return findings
 
 
@@ -292,10 +344,13 @@ def main() -> int:
             "1. Add an adjacent `// SAFETY:` comment stating the precondition that makes the\n"
             '   `unsafe` operation sound, and/or an `#[allow(unsafe_code, reason = "...")]`\n'
             "   (prefer `#[expect(...)]` on a cfg-gated item) on the enclosing item.\n"
-            "2. Platform-gated code is not compiled on the host: run this check locally instead\n"
+            '2. For type-position `unsafe` (`type Cb = unsafe extern "C" fn()`), add a `///`\n'
+            "   contract doc comment above the `type` statement (a `// SAFETY:` marker is\n"
+            "   rejected there by `clippy::unnecessary_safety_comment`).\n"
+            "3. Platform-gated code is not compiled on the host: run this check locally instead\n"
             "   of relying on `cargo clippy`.\n"
-            "3. For a deliberate exception, add a scoped rule to scripts/unsafe_allowlist.txt.\n"
-            "4. Re-run: python3 scripts/check_unsafe_docs.py --mode enforce",
+            "4. For a deliberate exception, add a scoped rule to scripts/unsafe_allowlist.txt.\n"
+            "5. Re-run: python3 scripts/check_unsafe_docs.py --mode enforce",
             file=sys.stderr,
         )
         return 1
