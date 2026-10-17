@@ -454,6 +454,14 @@ response enters the existing completion assessment without needing prose
 completion keywords. Successful planning emits the actual plan as the final
 agent message and canonical completion result. Permission and verification
 gates remain in place; failed and cancelled tasks still report incomplete evidence.
+
+A later read-only Companion replay exposed another false positive: fuzzy
+oscillation detection reduced every repeated `code_search` call to the same tool
+name, even when each call searched for different evidence. Fuzzy oscillation now
+requires at least two distinct tool names in the repeated pattern. Exact
+normalized-action repetition, navigation budgets, and alternating multi-tool
+pattern detection remain active.
+
 The last configured planning turn is reserved for tool-free synthesis, so lengthy
 inspection cannot consume every turn before attempting an answer. The model must
 state evidence gaps. Native or textual tool calls on that final turn are rejected

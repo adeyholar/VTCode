@@ -19,7 +19,7 @@ const EVIDENCE_BOUNDED_GUIDANCE: &str = "Prefer the smallest claim the evidence 
 
 /// Shared by the single evaluator and every skeptic-panel model so both judge
 /// against the same contract.
-const EVALUATOR_SYSTEM_PROMPT: &str = "You are the VT Code exec harness evaluator. You are not the builder. Judge the candidate skeptically and prefer failing borderline cases. Return strict JSON only with keys verdict, summary, high_severity_findings, scorecard, findings, unmet_contract_items, residual_risks, required_tracker_updates, generalization_notes. generalization_notes must be an array of objects with non-empty claim, scope, evidence, and falsifier strings, with at most 8 notes. The scorecard must contain 1-5 scores for contract_fidelity, functionality, code_quality, and verification_integrity. Use verdict=pass only when every provided score is at least 4, the tracker/spec/contract all agree, verification evidence is credible, and there are no high-severity issues. If you discover new acceptance criteria through testing, add them to required_tracker_updates so the replanner can update the feature list.";
+const EVALUATOR_SYSTEM_PROMPT: &str = "You are the VT Code exec harness evaluator. You are not the builder. Judge the candidate skeptically and prefer failing borderline cases. Return strict JSON only with keys verdict, summary, high_severity_findings, scorecard, findings, unmet_contract_items, residual_risks, required_tracker_updates, generalization_notes. Each finding must be an object with severity and title strings, and an optional detail string. generalization_notes must be an array of objects with non-empty claim, scope, evidence, and falsifier strings, with at most 8 notes. The scorecard must contain 1-5 scores for contract_fidelity, functionality, code_quality, and verification_integrity. Use verdict=pass only when every provided score is at least 4, the tracker/spec/contract all agree, verification evidence is credible, and there are no high-severity issues. If you discover new acceptance criteria through testing, add them to required_tracker_updates so the replanner can update the feature list.";
 
 #[derive(Debug, Clone)]
 pub(super) struct PlannerArtifacts {
@@ -325,6 +325,10 @@ impl AgentRunner {
                 stream: false,
                 temperature: Some(temperature),
                 max_tokens: Some(max_tokens),
+                // The harness depends on machine-readable planner/evaluator
+                // output. Prompt wording alone does not enforce JSON mode at
+                // providers that support structured responses.
+                output_format: Some(serde_json::json!({ "type": "json_object" })),
                 ..Default::default()
             })
             .await
@@ -739,6 +743,18 @@ mod parse_failure_tests {
         let fenced: Probe = parse_json_response("```json\n{\"ok\":true}\n```").expect("fenced json parses");
         assert_eq!(direct, fenced);
         assert!(direct.ok);
+    }
+
+    #[test]
+    fn evaluator_accepts_finding_as_a_title_alias() {
+        let response: EvaluatorResponse = parse_json_response(
+            r#"{"verdict":"fail","summary":"Needs more evidence","findings":[{"severity":"high","finding":"Verification evidence is missing"}]}"#,
+        )
+        .expect("provider finding field parses");
+
+        let finding = response.findings.first().expect("one evaluator finding");
+        assert_eq!(finding.title, "Verification evidence is missing");
+        assert_eq!(finding.severity, "high");
     }
 
     /// The planner-response failure that terminated a harness thread
