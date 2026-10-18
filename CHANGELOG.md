@@ -2,6 +2,31 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.179.3 - 2026-10-18
+
+### Highlights
+#### Bug Fixes
+
+- Prevent false-positive task failures (b38e8a67) (@vinhnx)
+- Stop gh terminal color probe leaking ANSI during uploads  (b14cedf7) (@vinhnx)
+- Stop gh terminal color probe leaking ANSI during uploads (19e77416) 
+- Avoid false-positive task loop failures (98afb6a0) 
+- Finalize failed tasks and preserve evaluation evidence (019585ae) 
+- Preserve scoped command evidence and replanning (c714e1c2) 
+- Clarify contracts and bound auxiliary requests (ce382479) 
+#### Documentation
+
+- Pin GitHub install to 0.179.2 (97c266a4) (@vinhnx)
+- Clarify marketplace source replacement  (f9cf3112) (@vinhnx)
+- Add opt-in Cohesivity backend configuration  (f51ddf13) (@shouryamaanjain)
+- Clarify marketplace source replacement (66fcf47e) 
+#### Features
+
+- Improve OpenAI prompt caching and usage diagnostics (a3c62a70) 
+### Other Changes
+#### CI
+
+- Reduce release and validation runner usage (3d576427) 
 ## 0.179.2 - 2026-10-17
 
 ### Highlights
