@@ -228,18 +228,11 @@ pub struct DefaultToolSession {
 
 impl DefaultToolSession {
     pub fn new(cwd: PathBuf) -> Self {
-        let workspace_root = cwd.clone();
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        Self {
-            cwd,
-            workspace_root,
-            shell,
-            monitor: Arc::new(crate::tools::edited_file_monitor::EditedFileMonitor::new()),
-        }
+        Self::with_workspace(cwd.clone(), cwd)
     }
 
     pub fn with_workspace(cwd: PathBuf, workspace_root: PathBuf) -> Self {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let shell = crate::tools::shell::resolve_fallback_shell();
         Self {
             cwd,
             workspace_root,
