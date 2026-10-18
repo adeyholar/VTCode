@@ -15,6 +15,8 @@ Entry point for VT Code contributor workflows.
   keywords).
 - [C++ Core Guidelines Adoption](./CPP_CORE_GUIDELINES_ADOPTION.md) - Policy for any C/C++ code introduced in this
   repository.
+- [Deep Rust Analysis with Charon](./deep-rust-analysis.md) - Semantic Rust inspection (drops, layout, resolution) via
+  Charon, and the design lessons it mirrors.
 - [CI/CD](./ci-cd.md) - Pipeline behavior and verification stages.
 - [Markdown Quality](./markdown-quality.md) - Maintained-file selection, pinned linting, and formatting policy.
 - [Cross Compilation](./cross-compilation.md) - Multi-target build workflows.
