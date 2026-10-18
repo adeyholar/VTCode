@@ -29,10 +29,10 @@ impl TaskProcessOwner {
         // TempDir is exclusively created with owner-only directory permissions.
         // A short name also respects macOS's small Unix socket pathname limit.
         let directory = tempfile::Builder::new()
-            .prefix("vtc-")
+            .prefix(vtcode_bash_runner::process_owner::OWNER_DIRECTORY_PREFIX)
             .permissions(std::fs::Permissions::from_mode(0o700))
             .tempdir()?;
-        let socket = directory.path().join("owner");
+        let socket = directory.path().join(vtcode_bash_runner::process_owner::OWNER_SOCKET_FILE);
         let listener = UnixListener::bind(&socket)?;
         listener.set_nonblocking(true)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -170,6 +170,9 @@ mod tests {
         let mut owner = TaskProcessOwner::new().unwrap();
         let socket = owner.socket().to_owned();
         assert_eq!(std::fs::metadata(socket.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        // The supervised endpoint must satisfy the launcher's provenance gate,
+        // otherwise managed commands would silently spawn unowned.
+        assert!(vtcode_bash_runner::process_owner::is_owned_endpoint(&socket));
         let mut peer = UnixStream::connect(&socket).unwrap();
         peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut ready = [0];

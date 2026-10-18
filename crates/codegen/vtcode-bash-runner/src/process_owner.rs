@@ -15,6 +15,10 @@ use std::time::Duration;
 pub const OWNER_SOCKET_ENV: &str = "VTCODE_COMPANION_OWNER_SOCKET";
 /// Private native entry point shared with the binary-owned task launcher.
 pub const HELPER_MODE: &str = "--vtcode-owned-exec";
+/// Prefix of the private directory that contains the task owner endpoint.
+pub const OWNER_DIRECTORY_PREFIX: &str = "vtc-";
+/// Basename of the task owner endpoint inside its private directory.
+pub const OWNER_SOCKET_FILE: &str = "owner";
 const READY: u8 = 1;
 
 /// Exact argv for the shipped native helper. Original argv is never interpreted
@@ -46,6 +50,15 @@ impl OwnedCommand {
         }
     }
 
+    /// Wrap `program` when this process is itself a managed command whose
+    /// private task endpoint is still present.
+    ///
+    /// [`OWNER_SOCKET_ENV`] is inherited from the process environment, so a
+    /// spurious, stale, or forged value must not be honored: wrapping an
+    /// endpoint this process does not own fails closed inside the helper and
+    /// would disable every managed command. A value that is not a live
+    /// [`OWNER_SOCKET_ENV`] endpoint created by this user's task supervisor is
+    /// therefore ignored, and the command spawns normally.
     pub fn from_environment(
         program: &OsStr,
         args: impl IntoIterator<Item = impl AsRef<OsStr>>,
@@ -55,11 +68,65 @@ impl OwnedCommand {
             return Ok(None);
         };
         let socket = PathBuf::from(socket);
-        if !socket.is_absolute() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "task owner endpoint must be absolute"));
+        if !is_owned_endpoint(&socket) {
+            return Ok(None);
         }
         Ok(Some(Self::new(&std::env::current_exe()?, &socket, program, args, arg0)))
     }
+}
+
+/// Whether `socket` belongs to a live task owner created by this user.
+///
+/// Provenance is structural, matching how the supervisor creates the endpoint:
+/// a Unix socket named [`OWNER_SOCKET_FILE`] directly inside a directory that
+/// is prefixed [`OWNER_DIRECTORY_PREFIX`], owned by the current user, granted
+/// owner-only permissions, and located under the system temp root. Every part
+/// must hold, so a path the supervisor could not have produced is rejected.
+///
+/// Exposed so the binary-owned supervisor can assert that the endpoint it
+/// publishes satisfies the launcher's provenance contract.
+pub fn is_owned_endpoint(socket: &Path) -> bool {
+    is_owned_endpoint_under(socket, &std::env::temp_dir())
+}
+
+/// [`is_owned_endpoint`] with an explicit temp root, so the containment gate is
+/// testable without mutating the process environment.
+fn is_owned_endpoint_under(socket: &Path, temp_root: &Path) -> bool {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+
+    if !socket.is_absolute() || socket.file_name() != Some(OsStr::new(OWNER_SOCKET_FILE)) {
+        return false;
+    }
+    // `symlink_metadata` keeps a symlink from standing in for a real endpoint.
+    let Ok(endpoint) = std::fs::symlink_metadata(socket) else {
+        return false;
+    };
+    if !endpoint.file_type().is_socket() {
+        return false;
+    }
+    let Some(directory) = socket.parent() else {
+        return false;
+    };
+    let Ok(directory_metadata) = std::fs::metadata(directory) else {
+        return false;
+    };
+    let owner_only = directory_metadata.permissions().mode() & 0o077 == 0;
+    let owned_by_self = directory_metadata.is_dir() && directory_metadata.uid() == nix::unistd::geteuid().as_raw();
+    if !owner_only || !owned_by_self {
+        return false;
+    }
+    if !directory
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.starts_with(OWNER_DIRECTORY_PREFIX))
+    {
+        return false;
+    }
+    let Ok(directory) = vtcode_commons::canonicalize(directory) else {
+        return false;
+    };
+    let temp_root = vtcode_commons::canonicalize(temp_root).unwrap_or_else(|_| temp_root.to_path_buf());
+    directory.starts_with(temp_root)
 }
 
 /// Dispatch before agent environment hardening, worker threads, tracing, or the async runtime.
@@ -210,5 +277,95 @@ unsafe fn run_watchdog(owner_fd: libc::c_int, ready_fd: libc::c_int, group: libc
         unsafe { libc::kill(-group, libc::SIGKILL) };
         // SAFETY: Even if kill fails, never return into fork-inherited Rust.
         unsafe { libc::_exit(1) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::TempDir;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::net::UnixListener;
+
+    fn private_directory(root: &Path, name: &str) -> PathBuf {
+        let path = root.join(name);
+        std::fs::create_dir(&path).expect("create private directory");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).expect("owner-only directory");
+        path
+    }
+
+    fn bind_endpoint(directory: &Path, name: &str) -> PathBuf {
+        let socket = directory.join(name);
+        // The bound path stays a socket file after the listener is dropped.
+        drop(UnixListener::bind(&socket).expect("bind endpoint"));
+        socket
+    }
+
+    #[test]
+    fn accepts_a_supervisor_shaped_endpoint() {
+        let root = TempDir::new().expect("temp root");
+        let directory = private_directory(root.path(), "vtc-accepted");
+        let socket = bind_endpoint(&directory, OWNER_SOCKET_FILE);
+
+        assert!(is_owned_endpoint(&socket));
+        assert!(is_owned_endpoint_under(&socket, &std::env::temp_dir()));
+    }
+
+    #[test]
+    fn ignores_a_stale_or_invalid_endpoint() {
+        let root = TempDir::new().expect("temp root");
+        let missing = root.path().join("vtc-stale").join(OWNER_SOCKET_FILE);
+        // A stale value points at an endpoint the supervisor has removed.
+        assert!(!is_owned_endpoint(&missing));
+
+        let directory = private_directory(root.path(), "vtc-stale");
+        std::fs::write(&missing, b"not a socket").expect("regular file");
+        assert!(!is_owned_endpoint(&missing));
+
+        let _foreign = bind_endpoint(&directory, "endpoint");
+        assert!(!is_owned_endpoint(&directory.join("endpoint")));
+        assert!(!is_owned_endpoint(Path::new(OWNER_SOCKET_FILE)));
+    }
+
+    #[test]
+    fn ignores_an_endpoint_outside_a_private_directory() {
+        let root = TempDir::new().expect("temp root");
+        let directory = root.path().join("vtc-public");
+        std::fs::create_dir(&directory).expect("public directory");
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).expect("world-accessible");
+        let socket = bind_endpoint(&directory, OWNER_SOCKET_FILE);
+
+        assert!(!is_owned_endpoint(&socket));
+    }
+
+    #[test]
+    fn ignores_a_directory_the_supervisor_did_not_name() {
+        let root = TempDir::new().expect("temp root");
+        let directory = private_directory(root.path(), "other-owner");
+        let socket = bind_endpoint(&directory, OWNER_SOCKET_FILE);
+
+        assert!(!is_owned_endpoint(&socket));
+    }
+
+    #[test]
+    fn ignores_a_symlinked_endpoint() {
+        let root = TempDir::new().expect("temp root");
+        let target = bind_endpoint(root.path(), "target.sock");
+        let directory = private_directory(root.path(), "vtc-symlinked");
+        let socket = directory.join(OWNER_SOCKET_FILE);
+        symlink(&target, &socket).expect("symlink endpoint");
+
+        assert!(!is_owned_endpoint(&socket));
+    }
+
+    #[test]
+    fn ignores_an_endpoint_outside_the_temp_root() {
+        let root = TempDir::new().expect("temp root");
+        let other_root = TempDir::new().expect("other root");
+        let directory = private_directory(root.path(), "vtc-containment");
+        let socket = bind_endpoint(&directory, OWNER_SOCKET_FILE);
+
+        assert!(is_owned_endpoint(&socket));
+        assert!(!is_owned_endpoint_under(&socket, other_root.path()));
     }
 }
