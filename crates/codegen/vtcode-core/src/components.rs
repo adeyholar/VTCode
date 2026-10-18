@@ -69,9 +69,6 @@ use vtcode_commons::serde_helpers::json_to_string_pretty;
 
 use crate::cache::{CacheKey, UnifiedCache, estimate_json_size};
 use crate::tool_policy::ToolPolicy;
-use crate::tools::handlers::tool_handler::{
-    ToolCallError, ToolHandler, ToolInvocation, ToolKind, ToolOutput, ToolPayload,
-};
 use crate::tools::result::ToolResult as SplitToolResult;
 use crate::tools::traits::Tool;
 
@@ -987,57 +984,6 @@ where
 
     fn execution_cost(&self) -> u8 {
         CanProvideToolMetadata::execution_cost(&self.ctx)
-    }
-}
-
-// ============================================================================
-// CGP-backed ToolHandler facade
-// ============================================================================
-
-/// A facade that projects a CGP-wired context as a `ToolHandler` trait object.
-///
-/// This replaces `ToolToHandlerAdapter` — instead of wrapping a `Tool` in a
-/// `ToolHandler` newtype, the same context used by `ToolFacade` can also be
-/// projected as a `ToolHandler` with zero additional adaptation code.
-pub struct HandlerFacade<Ctx> {
-    ctx: Ctx,
-}
-
-impl<Ctx> HandlerFacade<Ctx> {
-    pub fn new(ctx: Ctx) -> Self {
-        Self { ctx }
-    }
-}
-
-#[async_trait]
-impl<Ctx> ToolHandler for HandlerFacade<Ctx>
-where
-    Ctx: CanApproveTool + CanExecuteTool + Send + Sync + 'static,
-{
-    fn kind(&self) -> ToolKind {
-        ToolKind::Function
-    }
-
-    async fn handle(&self, invocation: ToolInvocation) -> Result<ToolOutput, ToolCallError> {
-        // Extract arguments from payload
-        let args: Value = match &invocation.payload {
-            ToolPayload::Function { arguments } => serde_json::from_str(arguments)
-                .map_err(|e| ToolCallError::respond(format!("Invalid arguments: {e}")))?,
-            _ => return Err(ToolCallError::respond("Unsupported payload type")),
-        };
-
-        self.ctx
-            .approve_tool(&invocation.tool_name, "handle")
-            .await
-            .map_err(|e| ToolCallError::respond(e.to_string()))?;
-
-        match self.ctx.execute_tool_json(&invocation.tool_name, args).await {
-            Ok(result) => {
-                let text = value_to_text(&result);
-                Ok(ToolOutput::simple(text))
-            }
-            Err(e) => Err(ToolCallError::Internal(e)),
-        }
     }
 }
 
