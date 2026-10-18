@@ -147,9 +147,12 @@ See: `crates/codegen/vtcode-core/src/tools/exec_session.rs`.
 ## Refactored Runtime Boundaries
 
 - `src/agent/runloop/unified/turn/session_loop_runner/orchestration/mod.rs` owns session transitions.
-  Its `session_teardown.rs` child owns bounded exit drains, completed-artifact cleanup,
-  persistent-memory finalization, and subagent shutdown. Emit the terminal event before
-  draining persistence; retain the existing ordering and error precedence in the caller.
+  `session_iteration.rs` runs one session (setup, hydration, interaction) and hands its
+  `SessionTailContext` to the `session_teardown.rs` child, which runs the exit tail: terminal
+  event, one bounded maintenance group, TUI/terminal restoration, exit summary, and the
+  resume/`/new` restart decision. Teardown also owns bounded exit drains, completed-artifact
+  cleanup, persistent-memory finalization, and subagent shutdown. Emit the terminal event
+  before draining persistence; retain the existing ordering and error precedence in the tail.
   Completed-artifact filesystem cleanup runs on the blocking pool and is awaited before
   persistent-memory finalization, so tracker archival finishes before the next phase.
 - `src/agent/runloop/tool_output/mod.rs` dispatches output. Its `tracker.rs` child owns
