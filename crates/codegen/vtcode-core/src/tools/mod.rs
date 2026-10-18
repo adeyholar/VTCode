@@ -154,7 +154,6 @@ pub mod file_ops;
 pub mod file_search_bridge;
 pub mod file_search_rpc;
 pub mod file_tracker;
-pub mod generation_helpers;
 mod grep_backend;
 pub mod grep_cache;
 pub mod grep_file;
