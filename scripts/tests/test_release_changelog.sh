@@ -300,6 +300,37 @@ EOF
 )
 assert_equal "$(cat "$fixture_dir/changelogs/CHANGELOG.md")" "$expected" "legacy caller uses the shared insertion helper"
 
+# The release caller passes a command-substituted entry (no trailing newline);
+# the inserted entry must still be separated from the retained history by a blank
+# line so the previous `## version` heading keeps its blank line above (MD022).
+cat >"$fixture_dir/changelogs/CHANGELOG.md" <<'EOF'
+# Changelog
+
+Intro.
+
+## 1.0.0 - 2026-10-04
+
+Original version body.
+EOF
+(
+	cd "$fixture_dir/changelogs"
+	insert_changelog_entry "${entry_one%$'\n'}"
+)
+expected=$(
+	cat <<EOF
+# Changelog
+
+Intro.
+
+${entry_one%$'\n'}
+
+## 1.0.0 - 2026-10-04
+
+Original version body.
+EOF
+)
+assert_equal "$(cat "$fixture_dir/changelogs/CHANGELOG.md")" "$expected" "stripped entry keeps a blank line before retained history"
+
 # remove_changelog_version_section: middle removal keeps neighbors byte-identical.
 cat >"$fixture_dir/changelogs/CHANGELOG.md" <<'EOF'
 # Changelog

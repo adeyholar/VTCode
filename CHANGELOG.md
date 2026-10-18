@@ -2,322 +2,403 @@
 
 All notable changes to vtcode will be documented in this file.
 
+<!-- markdownlint-disable MD012 MD013 MD024 MD033 -->
+<!-- Rules relaxed for this generated file only: MD012 (a full regeneration leaves one blank line at end-of-file), MD013 (commit subjects are unbounded so entries can exceed 120 columns), MD024 (two tags can normalize to the same version heading), MD033 (commit subjects may contain `<Type>` spellings). -->
+
 ## 0.179.4 - 2026-10-18
 
 ### Highlights
+
 #### Bug Fixes
 
-- Pick CI run by version so artifact downloads match (96e890cd) 
+- Pick CI run by version so artifact downloads match (96e890cd)
+
 ### Other Changes
+
 ## 0.179.3 - 2026-10-18
 
 ### Highlights
+
 #### Bug Fixes
 
 - Prevent false-positive task failures (b38e8a67) (@vinhnx)
 - Stop gh terminal color probe leaking ANSI during uploads  (b14cedf7) (@vinhnx)
-- Stop gh terminal color probe leaking ANSI during uploads (19e77416) 
-- Avoid false-positive task loop failures (98afb6a0) 
-- Finalize failed tasks and preserve evaluation evidence (019585ae) 
-- Preserve scoped command evidence and replanning (c714e1c2) 
-- Clarify contracts and bound auxiliary requests (ce382479) 
+- Stop gh terminal color probe leaking ANSI during uploads (19e77416)
+- Avoid false-positive task loop failures (98afb6a0)
+- Finalize failed tasks and preserve evaluation evidence (019585ae)
+- Preserve scoped command evidence and replanning (c714e1c2)
+- Clarify contracts and bound auxiliary requests (ce382479)
+
 #### Documentation
 
 - Pin GitHub install to 0.179.2 (97c266a4) (@vinhnx)
 - Clarify marketplace source replacement  (f9cf3112) (@vinhnx)
 - Add opt-in Cohesivity backend configuration  (f51ddf13) (@shouryamaanjain)
-- Clarify marketplace source replacement (66fcf47e) 
+- Clarify marketplace source replacement (66fcf47e)
+
 #### Features
 
-- Improve OpenAI prompt caching and usage diagnostics (a3c62a70) 
+- Improve OpenAI prompt caching and usage diagnostics (a3c62a70)
+
 ### Other Changes
+
 #### CI
 
-- Reduce release and validation runner usage (3d576427) 
+- Reduce release and validation runner usage (3d576427)
+
 ## 0.179.2 - 2026-10-17
 
 ### Highlights
+
 #### Bug Fixes
 
 - Tolerate clock skew and slow CI run registration (d2080edf) (@vinhnx)
 - Use --locked instead of --frozen for Windows release build (2fea0c40) (@vinhnx)
 - Wait for active CI run in Step 4 fallback (2653c515) (@vinhnx)
-- Document and allow platform-gated unsafe FFI (f7b4e2b8) 
+- Document and allow platform-gated unsafe FFI (f7b4e2b8)
+
 #### Documentation
 
 - Record gh account switch for 403s, trim redundancies (177549a2) (@vinhnx)
-- State the plugin ABI contract for type-position unsafe (ace2bea8) 
-- Reference the verification-discipline skill (be5d24a3) 
+- State the plugin ABI contract for type-position unsafe (ace2bea8)
+- Reference the verification-discipline skill (be5d24a3)
+
 #### Features
 
-- Handle Oct 2026 OpenAI deprecations (8c42a0ce) 
-- Add unsafe-docs gate for platform-gated unsafe drift (d52a82f5) 
-- Require a contract doc for type-position unsafe (7427b97f) 
+- Handle Oct 2026 OpenAI deprecations (8c42a0ce)
+- Add unsafe-docs gate for platform-gated unsafe drift (d52a82f5)
+- Require a contract doc for type-position unsafe (7427b97f)
+
 ### Other Changes
+
 #### Other
 
-- Improve native provider fast mode and model catalog (ecc4cf99) 
+- Improve native provider fast mode and model catalog (ecc4cf99)
+
 #### Refactors
 
-- Encode hunk-count and overflow invariants as contracts (802b2fdf) 
+- Encode hunk-count and overflow invariants as contracts (802b2fdf)
+
 ## 0.179.1 - 2026-10-16
 
 ### Highlights
+
 #### Bug Fixes
 
 - Tolerate clock skew and slow CI run registration (d2080edf) (@vinhnx)
 - Use --locked instead of --frozen for Windows release build (2fea0c40) (@vinhnx)
-- Wait for active CI run in Step 4 fallback (2653c515) 
+- Wait for active CI run in Step 4 fallback (2653c515)
+
 #### Documentation
 
-- Record gh account switch for 403s, trim redundancies (177549a2) 
+- Record gh account switch for 403s, trim redundancies (177549a2)
+
 ### Other Changes
+
 ## 0.179.0 - 2026-10-16
 
 ### Highlights
+
 #### Bug Fixes
 
-- Invalidate cached exec-slice reads on mutation; drop reuse-stub re-attachment (e133f122) 
-- Keep mid-turn prompt verbatim across model switch (5472fd76) 
+- Invalidate cached exec-slice reads on mutation; drop reuse-stub re-attachment (e133f122)
+- Keep mid-turn prompt verbatim across model switch (5472fd76)
+
 #### Documentation
 
-- Document exec-slice reuse and history-verbatim reference stubs (695eb2ee) 
+- Document exec-slice reuse and history-verbatim reference stubs (695eb2ee)
+
 #### Features
 
-- Record bounded raw payload when structured JSON fails to parse (ca950fab) 
-- Update cloud model catalog (cec48a81) 
-- Reuse bounded shell slice reads across turns via shared exec read-target parser (088c0259) 
-- Serve bounded reference stub when reuse response duplicates history content (0f4c7419) 
+- Record bounded raw payload when structured JSON fails to parse (ca950fab)
+- Update cloud model catalog (cec48a81)
+- Reuse bounded shell slice reads across turns via shared exec read-target parser (088c0259)
+- Serve bounded reference stub when reuse response duplicates history content (0f4c7419)
+
 ### Other Changes
+
 #### Other
 
-- Refactor LLM error handling and enhance Anthropic speed configuration (8e405558) 
-- Add eval plan (a5f63040) 
-- Add SWE bench eval plan (f6ce0bbb) 
+- Refactor LLM error handling and enhance Anthropic speed configuration (8e405558)
+- Add eval plan (a5f63040)
+- Add SWE bench eval plan (f6ce0bbb)
+
 #### Refactors
 
-- Add Provider::name_matches as single canonical name matcher (54aa9e5c) 
-- Consolidate local_server base-URL resolution; lock z.ai legacy-env precedence (dda8281b) 
+- Add Provider::name_matches as single canonical name matcher (54aa9e5c)
+- Consolidate local_server base-URL resolution; lock z.ai legacy-env precedence (dda8281b)
+
 ## 0.178.0 - 2026-10-16
 
 ### Highlights
+
 #### Bug Fixes
 
-- Correct Merge Gateway Muse Spark Open caps from live catalog (174e3d92) 
+- Correct Merge Gateway Muse Spark Open caps from live catalog (174e3d92)
+
 #### Documentation
 
-- Refine README for clarity and consistency (58b1467e) 
+- Refine README for clarity and consistency (58b1467e)
+
 #### Features
 
-- Add Meta Muse Spark Open models and presets (21196ee1) 
-- Add Meta Muse Spark Open model and update related documentation (d50a82d0) 
-- Add OpenRouterAttributionConfig to provider initialization (01c65adc) 
+- Add Meta Muse Spark Open models and presets (21196ee1)
+- Add Meta Muse Spark Open model and update related documentation (d50a82d0)
+- Add OpenRouterAttributionConfig to provider initialization (01c65adc)
+
 ### Other Changes
+
 #### Other
 
-- Add OpenRouter provider support and attribution configuration (0e0f9158) 
+- Add OpenRouter provider support and attribution configuration (0e0f9158)
+
 #### Refactors
 
-- Use » marker for tracker current row and modal group headers (368c8205) 
+- Use » marker for tracker current row and modal group headers (368c8205)
+
 ## 0.177.1 - 2026-10-16
 
 ### Highlights
+
 #### Bug Fixes
 
-- Repair three stale tests and isolate them from host credentials (9e97a9c6) 
+- Repair three stale tests and isolate them from host credentials (9e97a9c6)
+
 #### Documentation
 
-- Add hard-prompt timeout recommendations for Argon model (15a104df) 
+- Add hard-prompt timeout recommendations for Argon model (15a104df)
+
 #### Features
 
-- Improve planning recovery and tool result compaction (4763e7cb) 
+- Improve planning recovery and tool result compaction (4763e7cb)
+
 ### Other Changes
+
 #### Other
 
-- Merge remote-tracking branch 'origin/main' (df98ce2a) 
-- Add source inspection tests and documentation for VT Code internals (fede78d6) 
-- Implement completion verification tests and introduce mutation intent handling (f3680454) 
-- Refactor code structure for improved readability and maintainability (fd9ab197) 
-- Implement loop detection and metadata preservation in task tracker; normalize inline file inputs with MIME-prefixed data URLs. (ee3251e6) 
-- Implement tracker request handling and loop detection improvements (f92d406b) 
-- Add fast mode functionality with toggle command and documentation (78660e3c) 
-- Add ultrafast badge style and tests for header display (6d210194) 
-- Refactor input handling to queue messages during active turns and update documentation for clarity (f712d237) 
-- Implement streaming reasoning state and associated tests for UI interaction (995b6426) 
-- Enhance guidance and error handling for code search and execution processes (96a89aa9) 
-- Implement navigation recovery and synthesis handling; refine preflight failure logic and enhance tool outcome tests. (9719cbff) 
-- Record compaction boundary in prompt cache health and add tests for cache miss behavior (31174a0b) 
-- Enhance verification process and error handling for command execution (8732dfdf) 
-- Fix README installation command and update runtime guidance for clarity; enhance tests for path glob handling and verification logic (d208f189) 
+- Merge remote-tracking branch 'origin/main' (df98ce2a)
+- Add source inspection tests and documentation for VT Code internals (fede78d6)
+- Implement completion verification tests and introduce mutation intent handling (f3680454)
+- Refactor code structure for improved readability and maintainability (fd9ab197)
+- Implement loop detection and metadata preservation in task tracker; normalize inline file inputs with MIME-prefixed data URLs. (ee3251e6)
+- Implement tracker request handling and loop detection improvements (f92d406b)
+- Add fast mode functionality with toggle command and documentation (78660e3c)
+- Add ultrafast badge style and tests for header display (6d210194)
+- Refactor input handling to queue messages during active turns and update documentation for clarity (f712d237)
+- Implement streaming reasoning state and associated tests for UI interaction (995b6426)
+- Enhance guidance and error handling for code search and execution processes (96a89aa9)
+- Implement navigation recovery and synthesis handling; refine preflight failure logic and enhance tool outcome tests. (9719cbff)
+- Record compaction boundary in prompt cache health and add tests for cache miss behavior (31174a0b)
+- Enhance verification process and error handling for command execution (8732dfdf)
+- Fix README installation command and update runtime guidance for clarity; enhance tests for path glob handling and verification logic (d208f189)
+
 #### Refactors
 
-- Improve tool definition filtering and enhance prompt section management (171da117) 
-- Share cached stores, budgets, and metadata accessors (267e2a10) 
-- Remove unused dependencies (f7dbf173) 
-- Share last-user-message scan across turn modules (8a4505c8) 
-- Share metadata-line parsing in task_tracking (ce42be4f) 
-- Share profiling await boilerplate via local macro (88829390) 
-- Share cache eviction, reads, and mtime scans in resources (19084374) 
-- Share allOf schema blocks in task_tracking (fe9629f2) 
-- Unify record constructors, history reads, and output field list (836f3a03) 
+- Improve tool definition filtering and enhance prompt section management (171da117)
+- Share cached stores, budgets, and metadata accessors (267e2a10)
+- Remove unused dependencies (f7dbf173)
+- Share last-user-message scan across turn modules (8a4505c8)
+- Share metadata-line parsing in task_tracking (ce42be4f)
+- Share profiling await boilerplate via local macro (88829390)
+- Share cache eviction, reads, and mtime scans in resources (19084374)
+- Share allOf schema blocks in task_tracking (fe9629f2)
+- Unify record constructors, history reads, and output field list (836f3a03)
+
 ## 0.177.0 - 2026-10-13
 
 ### Highlights
+
 #### Bug Fixes
 
-- Stop treating bare system binaries as skills and unify CLI discovery (a0f7c28e) 
-- Keep exit summary visible and resumable on degraded teardown (988f30f8) 
+- Stop treating bare system binaries as skills and unify CLI discovery (a0f7c28e)
+- Keep exit summary visible and resumable on degraded teardown (988f30f8)
+
 #### Features
 
-- Enhance WebMCP handoff handling and add related tests (c6982974) 
-- Add cursor restore sequence handling and improve postamble writing (185d568e) 
+- Enhance WebMCP handoff handling and add related tests (c6982974)
+- Add cursor restore sequence handling and improve postamble writing (185d568e)
+
 ### Other Changes
+
 #### Other
 
-- Implement OpenResponsesProvider with compaction, legacy, and native response handling (1606aafc) 
-- Refactor compaction handling and improve diagnostics logging (afe2c636) 
-- Refactor Homebrew formula update process and add tests for formula transformation (81c83155) 
-- Refactor state management: extract Ctrl+C handling, follow-up tracking, prompt caching, and verification logic into separate modules (72327110) 
+- Implement OpenResponsesProvider with compaction, legacy, and native response handling (1606aafc)
+- Refactor compaction handling and improve diagnostics logging (afe2c636)
+- Refactor Homebrew formula update process and add tests for formula transformation (81c83155)
+- Refactor state management: extract Ctrl+C handling, follow-up tracking, prompt caching, and verification logic into separate modules (72327110)
+
 #### Refactors
 
-- Streamline public tool resolution and enhance command safety checks (e4a03524) 
-- Extract archived history cleaning helper (39481dc3) 
-- Share explicit path syntax helper (f0f0b724) 
-- Extract request envelope tracking (892fe89d) 
-- Share link-detector token patterns (d80bd2fb) 
-- Streamline read-only command classification and enhance verifier logic (0df5e8c2) 
-- Simplify permission checks and remove unused methods (be82846a) 
-- Extract command text once in safety gateway evaluation (2c324b1c) 
-- Add Gemini 4 Argon model and update related configurations (b82ec6b1) 
+- Streamline public tool resolution and enhance command safety checks (e4a03524)
+- Extract archived history cleaning helper (39481dc3)
+- Share explicit path syntax helper (f0f0b724)
+- Extract request envelope tracking (892fe89d)
+- Share link-detector token patterns (d80bd2fb)
+- Streamline read-only command classification and enhance verifier logic (0df5e8c2)
+- Simplify permission checks and remove unused methods (be82846a)
+- Extract command text once in safety gateway evaluation (2c324b1c)
+- Add Gemini 4 Argon model and update related configurations (b82ec6b1)
+
 ## 0.176.0 - 2026-10-12
 
 ### Highlights
+
 #### Features
 
-- Add Muse Wonder 1.0 and Wonder Full 1.0 models to Meta AI provider (af050104) 
+- Add Muse Wonder 1.0 and Wonder Full 1.0 models to Meta AI provider (af050104)
+
 ### Other Changes
+
 ## 0.175.8 - 2026-10-12
 
 ### Highlights
+
 #### Documentation
 
 - Add optional Sem code discovery (4622eee7) (@rs545837)
+
 ### Other Changes
+
 #### Other
 
 - Refactor OpenAI response handling and enhance Decisions probe functionality (1fab8751) (@vinhnx)
+
 ## 0.175.6 - 2026-10-11
 
 ### Highlights
+
 #### Bug Fixes
 
-- Qualify macro transcriber path with absolute crate:: route (dd2a8a3d) 
-- Use byte offsets when extracting streamed JSON objects (793e1af5) 
-- Keep VTCODE_LOCAL_AUTOPULL strict on its side-effecting path (219b19ec) 
-- Ensure rejected plans remain blocked and provide clear feedback (4f31d405) 
+- Qualify macro transcriber path with absolute crate:: route (dd2a8a3d)
+- Use byte offsets when extracting streamed JSON objects (793e1af5)
+- Keep VTCODE_LOCAL_AUTOPULL strict on its side-effecting path (219b19ec)
+- Ensure rejected plans remain blocked and provide clear feedback (4f31d405)
+
 #### Documentation
 
-- Correct file_err! usage example (85b6787f) 
-- Update README for clarity and consistency in descriptions (0b08e19c) 
+- Correct file_err! usage example (85b6787f)
+- Update README for clarity and consistency in descriptions (0b08e19c)
+
 #### Features
 
-- Enhance rejection handling to ignore cosmetic changes in operations (952b638b) 
+- Enhance rejection handling to ignore cosmetic changes in operations (952b638b)
+
 ### Other Changes
+
 #### Refactors
 
-- Route tri-state env bools through canonical parser (09e4f065) 
-- Classify errors by type and add LLMError::metadata accessor (3c9bb642) 
-- Update operating task tracker descriptions for clarity and consistency (d4bc962e) 
+- Route tri-state env bools through canonical parser (09e4f065)
+- Classify errors by type and add LLMError::metadata accessor (3c9bb642)
+- Update operating task tracker descriptions for clarity and consistency (d4bc962e)
+
 ## 0.175.5 - 2026-10-11
 
 ### Highlights
+
 #### Documentation
 
-- Docs: update installation instructions and enhance project configuration details (15b892ab) 
+- Docs: update installation instructions and enhance project configuration details (15b892ab)
+
 #### Features
 
-- Style the authoritative handoff diff in the TUI (6bf3512d) 
-- Optimize regex usage by introducing LazyLock for static compilation (e3469a8f) 
+- Style the authoritative handoff diff in the TUI (6bf3512d)
+- Optimize regex usage by introducing LazyLock for static compilation (e3469a8f)
+
 ### Other Changes
+
 #### Other
 
-- Implement preflight validation recovery mechanism and enhance tool call handling (11809e56) 
+- Implement preflight validation recovery mechanism and enhance tool call handling (11809e56)
+
 #### Performance
 
-- Memoize parsed bash trees across shell classification passes (0b17b246) 
+- Memoize parsed bash trees across shell classification passes (0b17b246)
+
 ## 0.175.4 - 2026-10-11
 
 ### Highlights
+
 #### Bug Fixes
 
-- Retry CI artifact downloads to survive transient gh failures (066511c8) 
-- Redact stateless GitHub App installation tokens (cb095bde) 
-- Keep workflow-coordination tools eager in every mode (ed861a66) 
-- Reinforce HOVER revision feedback and evidence retention (5331b630) 
+- Retry CI artifact downloads to survive transient gh failures (066511c8)
+- Redact stateless GitHub App installation tokens (cb095bde)
+- Keep workflow-coordination tools eager in every mode (ed861a66)
+- Reinforce HOVER revision feedback and evidence retention (5331b630)
+
 #### Documentation
 
-- Enhance HOVER self-correction loop details and update related documentation (63699c0d) 
+- Enhance HOVER self-correction loop details and update related documentation (63699c0d)
+
 #### Features
 
-- Add Decisions Probe usage guide and integrate streaming response handling (82c863a6) 
-- Offer OpenAI Decisions probe opt-in on /model (6b9cedac) 
-- Enhance tool serialization for deferred loading handling (7d76c18b) 
+- Add Decisions Probe usage guide and integrate streaming response handling (82c863a6)
+- Offer OpenAI Decisions probe opt-in on /model (6b9cedac)
+- Enhance tool serialization for deferred loading handling (7d76c18b)
+
 ### Other Changes
+
 #### Other
 
-- Enhance local clearing and compaction strategies; add tests for budget and history retention (1fc39c92) 
-- Add comprehensive tests for turn loop functionality and plan handling (9f7fcffc) 
-- Add tests for session memory envelope compaction and recovery context previews (9ae4937a) 
-- Add comprehensive tests for compaction functionality across various scenarios (9310a2da) 
-- Add recent tool-batch retention feature and update documentation (4decc46d) 
+- Enhance local clearing and compaction strategies; add tests for budget and history retention (1fc39c92)
+- Add comprehensive tests for turn loop functionality and plan handling (9f7fcffc)
+- Add tests for session memory envelope compaction and recovery context previews (9ae4937a)
+- Add comprehensive tests for compaction functionality across various scenarios (9310a2da)
+- Add recent tool-batch retention feature and update documentation (4decc46d)
+
 #### Refactors
 
-- Extract cron parsing into scheduler/cron module (ffac6200) 
-- Extract service install rendering into scheduler/service module (bfe5672b) 
-- Extract schedule model types into scheduler/spec module (a4a1f3a9) 
-- Extract session scheduling and time parsing into scheduler/session module (3a8b9dde) 
-- Extract durable store and claim handling into scheduler/store module (618199b0) 
-- Extract run daemon into scheduler/daemon module (1c1d30f5) 
-- Extract history settings and env overrides into settings module (df487d78) 
-- Extract message codec into message module (1db5b045) 
-- Extract archive metadata types into metadata module (3c418b28) 
-- Extract snapshot and listing types into snapshot module (a76986bc) 
-- Extract identifier and path helpers into identifier module (74243172) 
-- Extract transcript builders into transcript module (4ab48975) 
-- Extract session search into search module (81219022) 
-- Extract retention pruning into retention module (42295a91) 
-- Extract snapshot shrink pipeline into shrink module (6f1cd859) 
-- Extract SessionArchive core into archive module (86aff490) 
-- Extract session query and listing IO into query module (4939b9f5) 
-- Move inline test suite into tool_policy/tests module (54eede37) 
-- Extract MCP policy store into mcp module (2be260c5) 
-- Extract shell approval helpers into shell_approval module (9e88bda4) 
-- Extract alternative policy configs into alternative module (3ba951cb) 
-- Extract policy model configs into model module (f34b600c) 
-- Consolidate prompt handler and constraints into model module (f107046f) 
-- Extract ToolPolicyManager core into manager module (33dac555) 
-- Move inline test suite into loader/tests module (02e9bd87) 
-- Extract lightweight metadata cache into cache module (104ac530) 
-- Extract mention detection into mentions module (5cc7054f) 
-- Extract codex compat filtering into codex module (d752f2df) 
-- Extract skill resource loading into resources module (5a4e3359) 
-- Extract skill discovery walk into discovery module (eeee3f55) 
-- Extract enhanced loader into enhanced module (e94b9a7c) 
-- Enforce locked checks and add test suite for development gate (cad5d451) 
-- Simplify permission evaluation logic and enhance tool filtering (442adc5b) 
+- Extract cron parsing into scheduler/cron module (ffac6200)
+- Extract service install rendering into scheduler/service module (bfe5672b)
+- Extract schedule model types into scheduler/spec module (a4a1f3a9)
+- Extract session scheduling and time parsing into scheduler/session module (3a8b9dde)
+- Extract durable store and claim handling into scheduler/store module (618199b0)
+- Extract run daemon into scheduler/daemon module (1c1d30f5)
+- Extract history settings and env overrides into settings module (df487d78)
+- Extract message codec into message module (1db5b045)
+- Extract archive metadata types into metadata module (3c418b28)
+- Extract snapshot and listing types into snapshot module (a76986bc)
+- Extract identifier and path helpers into identifier module (74243172)
+- Extract transcript builders into transcript module (4ab48975)
+- Extract session search into search module (81219022)
+- Extract retention pruning into retention module (42295a91)
+- Extract snapshot shrink pipeline into shrink module (6f1cd859)
+- Extract SessionArchive core into archive module (86aff490)
+- Extract session query and listing IO into query module (4939b9f5)
+- Move inline test suite into tool_policy/tests module (54eede37)
+- Extract MCP policy store into mcp module (2be260c5)
+- Extract shell approval helpers into shell_approval module (9e88bda4)
+- Extract alternative policy configs into alternative module (3ba951cb)
+- Extract policy model configs into model module (f34b600c)
+- Consolidate prompt handler and constraints into model module (f107046f)
+- Extract ToolPolicyManager core into manager module (33dac555)
+- Move inline test suite into loader/tests module (02e9bd87)
+- Extract lightweight metadata cache into cache module (104ac530)
+- Extract mention detection into mentions module (5cc7054f)
+- Extract codex compat filtering into codex module (d752f2df)
+- Extract skill resource loading into resources module (5a4e3359)
+- Extract skill discovery walk into discovery module (eeee3f55)
+- Extract enhanced loader into enhanced module (e94b9a7c)
+- Enforce locked checks and add test suite for development gate (cad5d451)
+- Simplify permission evaluation logic and enhance tool filtering (442adc5b)
+
 #### Tests
 
-- Lock ghs token boundary and stream-split redaction (e48f265b) 
+- Lock ghs token boundary and stream-split redaction (e48f265b)
+
 ## 0.175.3 - 2026-10-10
 
 ### Highlights
+
 #### Bug Fixes
 
-- Retry CI artifact downloads to survive transient gh failures (066511c8) 
+- Retry CI artifact downloads to survive transient gh failures (066511c8)
+
 ### Other Changes
+
 ## 0.175.2 - 2026-10-10
 
 ### Highlights
+
 #### Bug Fixes
 
 - Use cargo-style RUSTFLAGS in OSS Scanner Dockerfile (0899411a) (@vinhnx)
@@ -332,25 +413,30 @@ All notable changes to vtcode will be documented in this file.
 - Bound live-preview line buffer and one-shot command capture (378cfedc) (@vinhnx)
 - Surface layer loader thread panics as errors (6fb3b8e0) (@vinhnx)
 - Retry streaming-only routes via streaming transport (5ed04670) (@vinhnx)
+
 #### Documentation
 
 - Restructure community section and tighten wording (c5161737) (@vinhnx)
 - Refine wording and fix support subsection nesting (162ca2db) (@vinhnx)
 - Guard codegen-units=1 for fat LTO per uv#22303 (2c752163) (@vinhnx)
 - Record inline-dock follow-up for background agents window (23aa93d6) (@vinhnx)
+
 #### Features
 
 - Show inline Ctrl+B hint in transcript progress row for running PTY (afcba2f0) (@vinhnx)
 - Preview extracted readable text for HTML pages (608afb39) (@vinhnx)
 - Add service tier to header context and related tests (f01db343) (@vinhnx)
 - Toggle-close background panel with open shortcut (d51aba50) (@vinhnx)
+
 ### Other Changes
+
 #### Other
 
 - Refactor command session tool identification and related functions (22e77abf) (@vinhnx)
 - Implement durable local matrix orchestration with task management and verification (a4f6ef7d) (@vinhnx)
 - Add hypothesis revision dimension and scoring to evaluator (dd3f3d0b) (@vinhnx)
 - Move tests from lib.rs to separate tests.rs file (7b10b103) (@vinhnx)
+
 #### Refactors
 
 - Parse DuckDuckGo HTML with astral-html Reader (7b52cccf) (@vinhnx)
@@ -366,269 +452,331 @@ All notable changes to vtcode will be documented in this file.
 - Dock background panel inline with 75% expand (72813453) (@vinhnx)
 - Rename LocalAgentsState window_area to panel_area (b8a6d066) (@vinhnx)
 - Extract turn test suites and deduplicate tool-call floor (cd744507) (@vinhnx)
+
 #### Tests
 
 - Lock incident measurement loop to path cap (72dfc853) (@vinhnx)
 - Cover header-click expand toggle on docked panel (9fc8761b) (@vinhnx)
+
 ## 0.175.1 - 2026-10-08
 
 ### Highlights
+
 #### Bug Fixes
 
-- Revert parallel asset uploads that wedged Step 4 (804fd340) 
+- Revert parallel asset uploads that wedged Step 4 (804fd340)
+
 #### Features
 
-- Emit determinate progress via OSC 7501 (74d51498) 
+- Emit determinate progress via OSC 7501 (74d51498)
+
 ### Other Changes
+
 #### Performance
 
-- Replace RwLock with ArcSwap for read-heavy theme runtime (dad2216a) 
+- Replace RwLock with ArcSwap for read-heavy theme runtime (dad2216a)
+
 ## 0.175.0 - 2026-10-08
 
 ### Highlights
+
 #### Bug Fixes
 
-- Revert parallel asset uploads that wedged Step 4 (804fd340) 
+- Revert parallel asset uploads that wedged Step 4 (804fd340)
+
 ### Other Changes
+
 ## 0.174.0 - 2026-10-08
 
 ### Highlights
+
 #### Bug Fixes
 
-- Leave claude-haiku-5-5 unclassified for reasoning (148d867f) 
-- Align prefix classifier and vision for haiku routes (7199ec47) 
+- Leave claude-haiku-5-5 unclassified for reasoning (148d867f)
+- Align prefix classifier and vision for haiku routes (7199ec47)
+
 #### Features
 
-- Add claude-haiku-5-5 to anthropic and merge gateway (79f15708) 
+- Add claude-haiku-5-5 to anthropic and merge gateway (79f15708)
+
 ### Other Changes
+
 ## 0.173.2 - 2026-10-07
 
 ### Highlights
+
 #### Bug Fixes
 
-- Preserve configured status during response progress (2cb2b6d0) 
-- Deduplicate planning guidance and preserve mode sections (f2f94a79) 
-- Harden accessibility and CI workflows (e10bc82d) 
+- Preserve configured status during response progress (2cb2b6d0)
+- Deduplicate planning guidance and preserve mode sections (f2f94a79)
+- Harden accessibility and CI workflows (e10bc82d)
+
 #### Features
 
-- Show response progress and streamline checkpoints (50beab35) 
-- Strict Agent Plugins 1.0.0 conformance for MCP, paths, and plugin data (7270cd5c) 
-- Apply Agent Skills progressive disclosure and authoring patterns (9c37fe0b) 
-- Complete v1 session lifecycle and clarify legacy stack (15fea267) 
+- Show response progress and streamline checkpoints (50beab35)
+- Strict Agent Plugins 1.0.0 conformance for MCP, paths, and plugin data (7270cd5c)
+- Apply Agent Skills progressive disclosure and authoring patterns (9c37fe0b)
+- Complete v1 session lifecycle and clarify legacy stack (15fea267)
+
 ### Other Changes
+
 #### CI
 
-- Run independent steps in parallel (2d9c0e39) 
+- Run independent steps in parallel (2d9c0e39)
+
 #### Other
 
-- Fix README (5794cd37) 
-- Setup dprint (446f8444) 
+- Fix README (5794cd37)
+- Setup dprint (446f8444)
+
 #### Refactors
 
-- Remove muse spark models (1fdb9d59) 
+- Remove muse spark models (1fdb9d59)
+
 #### Tests
 
-- Benchmark directory listing responsiveness (d3b74089) 
-- Clarify size fixtures and strengthen section boundaries (6de9c827) 
+- Benchmark directory listing responsiveness (d3b74089)
+- Clarify size fixtures and strengthen section boundaries (6de9c827)
+
 ## 0.173.1 - 2026-10-07
 
 ### Highlights
+
 #### Documentation
 
 - Add opt-in Parallel Search configuration  (6462f5b8) (@georgeatparallel)
+
 #### Features
 
-- Add mistral-large-4-0 route (40c6f044) 
+- Add mistral-large-4-0 route (40c6f044)
+
 ### Other Changes
+
 ## 0.173.0 - 2026-10-06
 
 ### Highlights
+
 #### Bug Fixes
 
-- Retain checker diagnostics across session polling (03639ae4) 
-- Converge navigation and preserve recovery outcomes (ad6c09b1) 
-- Fast /new teardown and bounded exit tail (d1935a6a) 
-- Fast /new busy submit and bounded teardown tail (253866ec) 
+- Retain checker diagnostics across session polling (03639ae4)
+- Converge navigation and preserve recovery outcomes (ad6c09b1)
+- Fast /new teardown and bounded exit tail (d1935a6a)
+- Fast /new busy submit and bounded teardown tail (253866ec)
+
 #### Features
 
-- Add Mistral Large 4 model (e9960c6d) 
+- Add Mistral Large 4 model (e9960c6d)
+
 ### Other Changes
+
 #### Other
 
-- Update README (a1afa982) 
-- Update README (3ccf7ea5) 
+- Update README (a1afa982)
+- Update README (3ccf7ea5)
+
 ## 0.172.4 - 2026-10-06
 
 ### Highlights
+
 #### Bug Fixes
 
-- Push initial header context for provider/model summary (ebc51e3f) 
-- Dedup drafting plan indicator on mid-turn entry (33fd9b35) 
-- Preserve bounded tool recovery and verifier status (6b4886dd) 
+- Push initial header context for provider/model summary (ebc51e3f)
+- Dedup drafting plan indicator on mid-turn entry (33fd9b35)
+- Preserve bounded tool recovery and verifier status (6b4886dd)
+
 #### Documentation
 
-- Restructure README for clearer reading flow (b8574782) 
+- Restructure README for clearer reading flow (b8574782)
+
 ### Other Changes
+
 #### Performance
 
-- Skip plan scans for ordinary Markdown (293b72d8) 
+- Skip plan scans for ordinary Markdown (293b72d8)
+
 ## 0.172.3 - 2026-10-06
 
 ### Highlights
+
 #### Bug Fixes
 
-- Actionable task_tracker preflight errors (4e00350c) 
-- Gate tracker correction to shape errors (b17ed606) 
+- Actionable task_tracker preflight errors (4e00350c)
+- Gate tracker correction to shape errors (b17ed606)
+
 #### Documentation
 
-- Refine wording and restructure (93a16af6) 
-- Trim badges and tidy contents (14685602) 
-- Refresh TODO, README badges, and tool policy (f394aa9d) 
+- Refine wording and restructure (93a16af6)
+- Trim badges and tidy contents (14685602)
+- Refresh TODO, README badges, and tool policy (f394aa9d)
+
 #### Features
 
-- Remove /ide command and IDE context pipeline (061a0f72) 
+- Remove /ide command and IDE context pipeline (061a0f72)
+
 ### Other Changes
+
 #### Performance
 
-- Event-driven clock tick with on-demand animation ticks (8d378ee6) 
-- Remove measured runtime overhead (4f7011b5) 
+- Event-driven clock tick with on-demand animation ticks (8d378ee6)
+- Remove measured runtime overhead (4f7011b5)
+
 #### Refactors
 
-- Share task-tracker schema fragments (4146279a) 
+- Share task-tracker schema fragments (4146279a)
+
 ## 0.172.2 - 2026-10-05
 
 ### Highlights
+
 #### Bug Fixes
 
-- Offload artifact cleanup and reuse tracker selection (17cee4a2) 
-- Scope persistent shell approval to learned read-only families (4513b888) 
-- Launch interactive CLI without shell interpolation (9628d136) 
-- Omit reasoning on xiaomimimo routes lacking joint tool support (18ebc09c) 
-- Share stable workspace trust management (37c9484c) 
-- Preserve core frame without an active overlay (2e529cd9) 
-- Provide registered command output context (916e8d25) 
+- Offload artifact cleanup and reuse tracker selection (17cee4a2)
+- Scope persistent shell approval to learned read-only families (4513b888)
+- Launch interactive CLI without shell interpolation (9628d136)
+- Omit reasoning on xiaomimimo routes lacking joint tool support (18ebc09c)
+- Share stable workspace trust management (37c9484c)
+- Preserve core frame without an active overlay (2e529cd9)
+- Provide registered command output context (916e8d25)
+
 #### Documentation
 
-- Overhaul hero, add at-a-glance table, tighten quick start (5ee555c7) 
-- Codify test module and file scope rules (db9071fe) 
+- Overhaul hero, add at-a-glance table, tighten quick start (5ee555c7)
+- Codify test module and file scope rules (db9071fe)
+
 ### Other Changes
+
 #### Refactors
 
-- Extract teardown tracker and execution history modules (a9d71e65) 
-- Extract shared wire helpers and deduplicate defaults (3f8fcb60) 
-- Split artifact parsing and validation (8cb963ed) 
-- Extract evidence and settings controllers (f761d725) 
-- Extract quick-action and workspace views (1d289732) 
-- Share CLI execution and extract config commands (43618ec3) 
-- Extract interactive terminal lifecycle (d4ccbba8) 
-- Share bounded subprocess line framing (63e11e2b) 
-- Share inline message command definitions (690fc9a9) 
-- Share stateless control command forwarding (9837fe12) 
-- Extract execution reentrancy guard (5fedd38c) 
-- Extract request attempt lifecycle (f557833f) 
-- Share execution preparation and base routing (c59a0a38) 
-- Extract awaited MCP route discovery (1388169f) 
-- Extract registered handler dispatch (1df35c9a) 
-- Extract execution output preparation (0703c6ab) 
-- Extract prompt stream conversion (341a40f7) 
-- Extract local terminal lifecycle (973a7993) 
-- Share inline PTY presentation (0a20cd89) 
-- Encapsulate observed call state (a92ff2f9) 
-- Share session thread bootstrap (0ed06541) 
-- Share session config reload polling (6159852c) 
-- Extract changelog helpers and retain final records (98995a46) 
-- Share insertion and handle headerless changelogs (c8bdb643) 
-- Audit extraction boundaries and align test layout (e02f439e) 
-- Isolate bootstrap and embed sample template (467d681f) 
+- Extract teardown tracker and execution history modules (a9d71e65)
+- Extract shared wire helpers and deduplicate defaults (3f8fcb60)
+- Split artifact parsing and validation (8cb963ed)
+- Extract evidence and settings controllers (f761d725)
+- Extract quick-action and workspace views (1d289732)
+- Share CLI execution and extract config commands (43618ec3)
+- Extract interactive terminal lifecycle (d4ccbba8)
+- Share bounded subprocess line framing (63e11e2b)
+- Share inline message command definitions (690fc9a9)
+- Share stateless control command forwarding (9837fe12)
+- Extract execution reentrancy guard (5fedd38c)
+- Extract request attempt lifecycle (f557833f)
+- Share execution preparation and base routing (c59a0a38)
+- Extract awaited MCP route discovery (1388169f)
+- Extract registered handler dispatch (1df35c9a)
+- Extract execution output preparation (0703c6ab)
+- Extract prompt stream conversion (341a40f7)
+- Extract local terminal lifecycle (973a7993)
+- Share inline PTY presentation (0a20cd89)
+- Encapsulate observed call state (a92ff2f9)
+- Share session thread bootstrap (0ed06541)
+- Share session config reload polling (6159852c)
+- Extract changelog helpers and retain final records (98995a46)
+- Share insertion and handle headerless changelogs (c8bdb643)
+- Audit extraction boundaries and align test layout (e02f439e)
+- Isolate bootstrap and embed sample template (467d681f)
+
 ## 0.172.1 - 2026-10-04
 
 ### Highlights
+
 #### Bug Fixes
 
-- Gate test-only executor fixtures out of release builds (7b017cd3) 
-- Sync stale expectations with record_decision, stdin gating, and next_action contracts (4f6197a0) 
-- Opt pipe exec sessions into stdin and accept Control verb cue (639e9741) 
-- Seed process env in copilot sanitizer test instead of assuming CI (29b80081) 
-- Re-export exec_session public types after module split (dfec28ff) 
-- Restore inline MCP render and record all MCP spellings (80c3ac8e) 
+- Gate test-only executor fixtures out of release builds (7b017cd3)
+- Sync stale expectations with record_decision, stdin gating, and next_action contracts (4f6197a0)
+- Opt pipe exec sessions into stdin and accept Control verb cue (639e9741)
+- Seed process env in copilot sanitizer test instead of assuming CI (29b80081)
+- Re-export exec_session public types after module split (dfec28ff)
+- Restore inline MCP render and record all MCP spellings (80c3ac8e)
+
 ### Other Changes
+
 #### Other
 
-- Fmt policy-denial assertion in execution_result tests (8e5a8bb4) 
+- Fmt policy-denial assertion in execution_result tests (8e5a8bb4)
+
 #### Performance
 
-- Add DebugNoInline derive and outline fan-out error Debug impls (383258ca) 
+- Add DebugNoInline derive and outline fan-out error Debug impls (383258ca)
+
 #### Refactors
 
-- Consolidate forked truncation, env-flag, and whitespace helpers (2a51f41f) 
-- Share operand prefix/quote normalization (0e8cd912) 
-- Canonicalize fuzzy query in vtcode-commons (803e393d) 
-- Extract inline test modules into sibling tests.rs files (fd7a1ee1) 
-- Extract inline test modules into sibling tests.rs files (07512e54) 
-- Extract inline test modules into sibling tests.rs files (1951406b) 
-- Extract inline test modules into sibling tests.rs files (60059cd4) 
-- Add parse_env_bool, first_json_block, humanize_duration_compact (ce13f18a) 
-- Route seven truncate forks through vtcode-commons (e5a2086e) 
-- Single infer_provider_from_model; drop dead http-client twin (1a04dd46) 
-- Shared SSE pump helper for provider stream loops (8af872ba) 
-- Single usage alias-chain helper for Responses-style blocks (a1194c97) 
-- Split tool_output_handler into concern submodules (3d28e17a) 
-- Split tool_outcomes/helpers into concern submodules (825328af) 
-- Split run_loop_context into concern submodules (3d744616) 
-- Split compaction/mod.rs into concern submodules (73c8d347) 
-- Split merge_gateway into concern submodules (9cc39004) 
-- Split exec_session into concern submodules (9f91aa66) 
-- Single MCP tool-name parser shared across TUI surfaces (e2dce535) 
-- Split lib.rs into concern submodules (ea00c6cb) 
-- Split subagents.rs into concern submodules (87c36b29) 
-- Split core/agent.rs into domain config submodules (9a2511ed) 
-- Split openai_chatgpt_oauth.rs into concern submodules (49d49156) 
-- Split prompts/system.rs into concern submodules (e489086e) 
-- Split modal/render.rs into concern submodules (41bd6aa8) 
-- Collapse duplicate TurnExecutionPhase enum into TurnPhase (00306c34) 
-- Single AnsiRenderer::is_compact_display predicate (2f6534b4) 
-- Route display truncation through truncate_utf8_prefix (d8abeb12) 
-- Label MCP failure panel events with bare tool name (cc04528a) 
-- One parser call decides MCP label and bare name (961426ed) 
-- Split app/session/events.rs into concern submodules (3c44343a) 
-- Split transcript_review.rs into concern submodules (0176482e) 
-- Split tool_output/streams.rs into concern submodules (b4226931) 
-- Split utils/ansi.rs into concern submodules (96a45caa) 
-- Split open_responses/bridge.rs into concern submodules (0f5bd9d8) 
-- Split openai/provider/websocket.rs into concern submodules (86e3102d) 
-- Split gemini/helpers.rs into concern submodules (295cc93f) 
-- Split session bootstrap helpers out of orchestration.rs (2b6150f0) 
-- Narrow re-exports to actual consumer scope (5bacfaac) 
+- Consolidate forked truncation, env-flag, and whitespace helpers (2a51f41f)
+- Share operand prefix/quote normalization (0e8cd912)
+- Canonicalize fuzzy query in vtcode-commons (803e393d)
+- Extract inline test modules into sibling tests.rs files (fd7a1ee1)
+- Extract inline test modules into sibling tests.rs files (07512e54)
+- Extract inline test modules into sibling tests.rs files (1951406b)
+- Extract inline test modules into sibling tests.rs files (60059cd4)
+- Add parse_env_bool, first_json_block, humanize_duration_compact (ce13f18a)
+- Route seven truncate forks through vtcode-commons (e5a2086e)
+- Single infer_provider_from_model; drop dead http-client twin (1a04dd46)
+- Shared SSE pump helper for provider stream loops (8af872ba)
+- Single usage alias-chain helper for Responses-style blocks (a1194c97)
+- Split tool_output_handler into concern submodules (3d28e17a)
+- Split tool_outcomes/helpers into concern submodules (825328af)
+- Split run_loop_context into concern submodules (3d744616)
+- Split compaction/mod.rs into concern submodules (73c8d347)
+- Split merge_gateway into concern submodules (9cc39004)
+- Split exec_session into concern submodules (9f91aa66)
+- Single MCP tool-name parser shared across TUI surfaces (e2dce535)
+- Split lib.rs into concern submodules (ea00c6cb)
+- Split subagents.rs into concern submodules (87c36b29)
+- Split core/agent.rs into domain config submodules (9a2511ed)
+- Split openai_chatgpt_oauth.rs into concern submodules (49d49156)
+- Split prompts/system.rs into concern submodules (e489086e)
+- Split modal/render.rs into concern submodules (41bd6aa8)
+- Collapse duplicate TurnExecutionPhase enum into TurnPhase (00306c34)
+- Single AnsiRenderer::is_compact_display predicate (2f6534b4)
+- Route display truncation through truncate_utf8_prefix (d8abeb12)
+- Label MCP failure panel events with bare tool name (cc04528a)
+- One parser call decides MCP label and bare name (961426ed)
+- Split app/session/events.rs into concern submodules (3c44343a)
+- Split transcript_review.rs into concern submodules (0176482e)
+- Split tool_output/streams.rs into concern submodules (b4226931)
+- Split utils/ansi.rs into concern submodules (96a45caa)
+- Split open_responses/bridge.rs into concern submodules (0f5bd9d8)
+- Split openai/provider/websocket.rs into concern submodules (86e3102d)
+- Split gemini/helpers.rs into concern submodules (295cc93f)
+- Split session bootstrap helpers out of orchestration.rs (2b6150f0)
+- Narrow re-exports to actual consumer scope (5bacfaac)
+
 #### Tests
 
-- Lock is_compact_display normalization contract (7f754b99) 
+- Lock is_compact_display normalization contract (7f754b99)
+
 ## 0.172.0 - 2026-10-03
 
 ### Highlights
+
 #### Bug Fixes
 
-- Anchor changelog insert and repair top ordering (37a09f7c) 
-- Clarify wait/poll TUI labels and harness guidance (f32f5797) 
-- Overlap TUI teardown with the exit tail and kill PTYs immediately (b5631334) 
-- Record prompt pressure before approval modal (02155a6d) 
+- Anchor changelog insert and repair top ordering (37a09f7c)
+- Clarify wait/poll TUI labels and harness guidance (f32f5797)
+- Overlap TUI teardown with the exit tail and kill PTYs immediately (b5631334)
+- Record prompt pressure before approval modal (02155a6d)
+
 #### Documentation
 
 - Add ACCESSIBILITY.md for GitHub accessibility tab (72a2351c) (@vinhnx)
-- Document usage and evidence navigation (7b7facc1) 
+- Document usage and evidence navigation (7b7facc1)
+
 #### Features
 
-- Stream Responses over persistent WebSockets (c2f9d38e) 
-- Add MiMo V2.6 Pro and Flash routes (10b50891) 
-- Add deterministic execution explanations (b6006467) 
+- Stream Responses over persistent WebSockets (c2f9d38e)
+- Add MiMo V2.6 Pro and Flash routes (10b50891)
+- Add deterministic execution explanations (b6006467)
+
 ### Other Changes
+
 #### Performance
 
-- Filter-first scans, parse-once caches, alloc-free model checks (6e3421cb) 
+- Filter-first scans, parse-once caches, alloc-free model checks (6e3421cb)
+
 #### Refactors
 
-- Emulate named args with Options structs (e9d6d846) 
-- Split shell approval routing modules (53a04dd6) 
-- Carry non-empty and resolved invariants in types (da07a9e3) 
+- Emulate named args with Options structs (e9d6d846)
+- Split shell approval routing modules (53a04dd6)
+- Carry non-empty and resolved invariants in types (da07a9e3)
+
 ## Unreleased
 
 ### Features
@@ -652,50 +800,60 @@ All notable changes to vtcode will be documented in this file.
 ## 0.171.5 - 2026-10-02
 
 ### Highlights
+
 #### Bug Fixes
 
 - Harden shell approval family learning (GHSA-r249-hpfx-x2w7)  (5840697c) (@vinhnx)
-- Preserve verifier identity during session recovery (e9b86573) 
+- Preserve verifier identity during session recovery (e9b86573)
+
 ### Other Changes
+
 #### Refactors
 
-- Dedup intent classification and remove dead helpers (e4d48bb2) 
+- Dedup intent classification and remove dead helpers (e4d48bb2)
 
 ## 0.171.4 - 2026-10-02
 
 ### Highlights
+
 #### Bug Fixes
 
-- Reduce session recovery and context churn (dca67aeb) 
-- Lighten transcript review refresh, search, and close path (cf89fb8e) 
-- Classify quoted awk literals as read-only to stop repeat prompts (249c8403) 
-- Bound TUI exit tail to remove fullscreen exit delay (861d493a) 
+- Reduce session recovery and context churn (dca67aeb)
+- Lighten transcript review refresh, search, and close path (cf89fb8e)
+- Classify quoted awk literals as read-only to stop repeat prompts (249c8403)
+- Bound TUI exit tail to remove fullscreen exit delay (861d493a)
+
 #### Documentation
 
-- Restructure sections for clarity (77e0d10d) 
-- Close doc gaps for 0.169.3-0.171.3 behavior changes (ddaddecc) 
-- Update README (ab44d3f0) 
-- Update README (2f503e09) 
-- Update README (d5806d92) 
-- Fix GitHub alert syntax so caution/note callouts render (7385e02e) 
-- Update guide (4957a8b2) 
+- Restructure sections for clarity (77e0d10d)
+- Close doc gaps for 0.169.3-0.171.3 behavior changes (ddaddecc)
+- Update README (ab44d3f0)
+- Update README (2f503e09)
+- Update README (d5806d92)
+- Fix GitHub alert syntax so caution/note callouts render (7385e02e)
+- Update guide (4957a8b2)
+
 #### Features
 
-- Tint activity shimmer sweep by agent mode (8cba8b8b) 
-- Sage build accent with mode-highlighted shimmer sweep (39574be9) 
-- Extend exec session lifecycle with stdin gating and cleanup actions (c7ea326b) 
+- Tint activity shimmer sweep by agent mode (8cba8b8b)
+- Sage build accent with mode-highlighted shimmer sweep (39574be9)
+- Extend exec session lifecycle with stdin gating and cleanup actions (c7ea326b)
+
 ### Other Changes
+
 #### Other
 
-- Apply markdownlint list normalization to audited files (c3c814ca) 
-- Restore borderless composer and original shimmer (e4b73211) 
-- Update (bcee82cc) 
+- Apply markdownlint list normalization to audited files (c3c814ca)
+- Restore borderless composer and original shimmer (e4b73211)
+- Update (bcee82cc)
+
 #### Performance
 
-- Share cached tool lists and clone only search survivors (dd6512c1) 
+- Share cached tool lists and clone only search survivors (dd6512c1)
+
 #### Refactors
 
-- Single-home guidance lines and sync goldens (0a083750) 
+- Single-home guidance lines and sync goldens (0a083750)
 
 ## 0.171.3 - 2026-10-01
 
@@ -15200,8 +15358,8 @@ No significant changes.
 
 ## v0.73.2 - 2026-01-29
 
-* fix: update GitHub release title format and improve changelog generation (97571aa2)
-* chore: update homebrew formula to v0.73.1 (4ca75038)
+- fix: update GitHub release title format and improve changelog generation (97571aa2)
+- chore: update homebrew formula to v0.73.1 (4ca75038)
 
 ## [Version 0.73.1] - 2026-01-28
 
