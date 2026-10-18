@@ -325,6 +325,81 @@ else
     pass "download missing args rejected"
 fi
 
+echo "Testing ci_run_has_version_artifact / find_ci_run_for_version..."
+
+# Instrumented `gh` stub. `run list` returns two successful runs, newest first
+# (200 built the previous version, 100 built the requested one). `api` reports
+# each run's artifact names keyed by the run id in the artifacts URL.
+version_match_calls="$tmp/version-match-calls"
+: >"$version_match_calls"
+gh() {
+    if [[ "$1" == "run" && "$2" == "list" ]]; then
+        printf 'call\n' >>"$version_match_calls"
+        printf '200\n100\n'
+        return 0
+    fi
+    if [[ "$1" == "api" ]]; then
+        printf 'call\n' >>"$version_match_calls"
+        local arg url=""
+        for arg in "$@"; do
+            [[ "$arg" == *"/runs/"* ]] && url="$arg"
+        done
+        local rid="${url#*runs/}"
+        rid="${rid%%/*}"
+        case "$rid" in
+        100) printf 'vtcode-9.9.9-x86_64-unknown-linux-gnu\nvtcode-9.9.9-x86_64-unknown-linux-musl\n' ;;
+        200) printf 'vtcode-9.9.8-x86_64-unknown-linux-gnu\n' ;;
+        esac
+        return 0
+    fi
+    return 1
+}
+export -f gh
+
+if ci_run_has_version_artifact 100 "9.9.9" && ! ci_run_has_version_artifact 100 "9.9.8"; then
+    pass "ci_run_has_version_artifact matches the version embedded in artifact names"
+else
+    fail_test "ci_run_has_version_artifact version matching"
+fi
+
+got=$(find_ci_run_for_version "9.9.9" 20 || true)
+if [[ "$got" == "100" ]]; then
+    pass "find_ci_run_for_version skips stale runs and finds the matching version"
+else
+    fail_test "find_ci_run_for_version: expected 100, got '$got'"
+fi
+
+# No run matches the requested version -> empty output and nonzero status.
+set +e
+got=$(find_ci_run_for_version "7.7.7" 20)
+rc=$?
+set -e
+if [[ "$rc" -ne 0 && -z "$got" ]]; then
+    pass "find_ci_run_for_version reports no match for an unbuilt version"
+else
+    fail_test "expected no match (rc=$rc, got '$got')"
+fi
+
+# API failure must fail closed (never adopt an unverified run).
+gh() { return 1; }
+export -f gh
+if ci_run_has_version_artifact 100 "9.9.9" >/dev/null 2>&1; then
+    fail_test "ci_run_has_version_artifact should fail closed on API error"
+else
+    pass "ci_run_has_version_artifact fails closed on API error"
+fi
+if find_ci_run_for_version "9.9.9" 20 >/dev/null 2>&1; then
+    fail_test "find_ci_run_for_version should fail closed on API error"
+else
+    pass "find_ci_run_for_version fails closed on API error"
+fi
+
+if find_ci_run_for_version >/dev/null 2>&1; then
+    fail_test "find_ci_run_for_version missing arg should fail"
+else
+    pass "find_ci_run_for_version missing arg rejected"
+fi
+
 echo "Testing ensure_release_push_access..."
 
 # Save harness-provided tokens; the fallback path unsets them.

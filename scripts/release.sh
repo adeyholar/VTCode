@@ -1030,9 +1030,14 @@ main() {
 		local run_id="${CI_RUN_ID:-}"
 
 		if [[ -z "$run_id" ]]; then
-			# Newest successful run (--limit 10: the newest runs may still be
-			# in progress, or may have failed).
-			run_id=$(gh run list --workflow build-linux-windows.yml --branch main --event workflow_dispatch --limit 10 --json databaseId,conclusion --jq '.[] | select(.conclusion == "success") | .databaseId' 2>/dev/null | head -1 || true)
+			# Newest successful run that actually built THIS version. Falling
+			# back to the plain newest successful run would select the previous
+			# release's run while this version's CI is still queued/building;
+			# its artifacts are named for the old version, so every download
+			# misses and the release aborts. Match on the version embedded in
+			# the artifact names instead.
+			print_info "Looking for a successful CI run that built $released_version..."
+			run_id=$(find_ci_run_for_version "$released_version" 20 || true)
 		fi
 
 		if [[ -z "$run_id" ]]; then
@@ -1043,9 +1048,19 @@ main() {
 			active_run=$(gh run list --workflow build-linux-windows.yml --branch main --event workflow_dispatch --limit 5 --json databaseId,status --jq '.[] | select(.status == "in_progress" or .status == "queued") | .databaseId' 2>/dev/null | head -1 || true)
 			if [[ -n "$active_run" ]]; then
 				print_info "CI run $active_run still in progress; waiting for completion..."
+				# `gh run watch` blocks until the run completes and exits
+				# nonzero unless the conclusion is success. CI jobs carry
+				# 45m timeouts, so a stalled run is bounded server-side. The
+				# active run is not guaranteed to be this version's (a retry of
+				# a previous version could still be building), so confirm it
+				# published this version's artifacts before adopting it.
 				if gh run watch "$active_run" --exit-status >/dev/null 2>&1; then
-					print_success "CI builds completed successfully"
-					run_id="$active_run"
+					if ci_run_has_version_artifact "$active_run" "$released_version"; then
+						print_success "CI builds completed successfully"
+						run_id="$active_run"
+					else
+						print_warning "CI run $active_run did not build $released_version - will use macOS binaries only"
+					fi
 				else
 					print_warning "CI run $active_run did not succeed - will use macOS binaries only"
 				fi
