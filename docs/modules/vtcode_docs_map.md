@@ -158,6 +158,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Declarative Macro Hygiene — Reference Notes?", "How does Source (not
     vendored) work?", "How does Why this matters to VT Code work?"
 
+- **File**: `docs/development/deep-rust-analysis.md`
+  - **Content**: Deep Rust Analysis with Charon
+  - **Topics**: What Charon gives you, Design lessons VT Code adopts, Boundaries and non-goals
+  - **User Questions**: "What can you tell me about Deep Rust Analysis with Charon?", "How does What Charon gives you
+    work?", "How does Design lessons VT Code adopts work?"
+
 - **File**: `docs/development/DESIRE_PATHS.md`
   - **Content**: Desire Paths in VT Code
   - **Topics**: Philosophy, Current Paved Paths, Desire Paths to Implement, How to Report Friction, Implementation
