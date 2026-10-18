@@ -39,7 +39,10 @@ static TOOL_CONFIG: OnceLock<ToolConfigSnapshot> = OnceLock::new();
 /// process). A second call with a DIFFERENT snapshot returns an error,
 /// since silently dropping the new value would mask a real config-loading
 /// bug (e.g. two vtcode.toml files racing during a hot reload).
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
+#[allow(
+    dead_code,
+    reason = "Installer kept test-facing: tool config snapshots are installed by test setups today."
+)]
 pub fn install_tool_config(snapshot: ToolConfigSnapshot) -> anyhow::Result<()> {
     match TOOL_CONFIG.set(snapshot) {
         Ok(()) => Ok(()),
@@ -70,7 +73,7 @@ pub fn tool_config() -> Option<&'static ToolConfigSnapshot> {
 /// with `#[distributed_slice(BUILTIN_TOOLS)]`. The function receives an optional
 /// `PlanningWorkflowState` reference for tools that depend on planning workflow runtime state;
 /// tools that do not need it simply ignore the parameter.
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
+#[allow(dead_code, reason = "Factory signature of the BUILTIN_TOOLS distributed slice.")]
 pub type BuiltinToolFactory = fn(Option<&PlanningWorkflowState>) -> ToolRegistration;
 
 #[cfg(test)]

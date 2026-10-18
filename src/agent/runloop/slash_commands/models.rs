@@ -277,9 +277,6 @@ pub(crate) enum SecretCommandAction {
     /// `/secret migrate [provider]` — move API keys from workspace `.env` to
     /// secure storage.
     Migrate { provider: Option<String> },
-    /// `/secret help` — usage.
-    #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
-    Help,
 }
 
 #[derive(Clone, Debug)]

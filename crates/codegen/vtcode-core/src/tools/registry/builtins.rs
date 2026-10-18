@@ -42,7 +42,10 @@ use super::{ToolRegistry, native_cgp_tool_factory};
 ///
 /// In metadata-only contexts (e.g., declaration building), callers may pass
 /// `None`, and a placeholder `PlanningWorkflowState` will be used.
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
+#[allow(
+    dead_code,
+    reason = "Test-only reference implementation: registry::pack assembly is verified against this loop."
+)]
 pub(super) fn builtin_tool_registrations(
     planning_workflow_state: Option<&PlanningWorkflowState>,
 ) -> Vec<ToolRegistration> {
@@ -497,7 +500,10 @@ fn register_apply_patch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
 // - load_skill
 // - load_skill_resource
 
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
+#[allow(
+    dead_code,
+    reason = "Test-only reference implementation: registry::pack assembly is verified against this loop."
+)]
 fn with_builtin_behavior(registration: ToolRegistration) -> ToolRegistration {
     if let Some(behavior) = builtin_tool_behavior(registration.name()) {
         registration.with_behavior(behavior)
@@ -506,6 +512,10 @@ fn with_builtin_behavior(registration: ToolRegistration) -> ToolRegistration {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "Test-only reference implementation: registry::pack assembly is verified against this loop."
+)]
 fn with_builtin_network_access(registration: ToolRegistration) -> ToolRegistration {
     use super::ToolNetworkAccess;
     let access = match registration.name() {

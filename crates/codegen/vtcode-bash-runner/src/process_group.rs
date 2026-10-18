@@ -306,7 +306,6 @@ fn is_process_running(pid: u32) -> bool {
 }
 
 #[cfg(not(unix))]
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn is_process_running(_pid: u32) -> bool {
     // On non-Unix, assume running (will fail gracefully)
     true

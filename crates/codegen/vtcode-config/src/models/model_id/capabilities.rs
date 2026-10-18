@@ -2,7 +2,6 @@ use crate::models::{Provider, ProviderModelSupport};
 
 use super::ModelId;
 
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 mod capability_generated {
     include!(concat!(env!("OUT_DIR"), "/model_capabilities.rs"));
 }

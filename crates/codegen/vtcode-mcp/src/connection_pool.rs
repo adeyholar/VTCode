@@ -331,7 +331,6 @@ impl PooledMcpManager {
     }
 
     /// Check if a tool is read-only (safe to cache)
-    #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
     fn is_read_only_tool(&self, tool_name: &str) -> bool {
         // This is a simple heuristic - in practice, you might want to
         // check tool metadata or maintain a list of read-only tools

@@ -89,46 +89,6 @@ pub(crate) async fn handle_manage_secrets(
             handle_migrate_secrets(&mut ctx, target).await?;
             Ok(SlashCommandControl::Continue)
         }
-        SecretCommandAction::Help => {
-            ctx.renderer
-                .line(MessageStyle::Info, "Secret management — store API keys securely (keyring or encrypted file).")?;
-            ctx.renderer.line(MessageStyle::Output, "")?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /secret                          Interactive secret manager (TUI)")?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /secret list                     Show all provider key statuses")?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /secret status [provider] [key]  Check a specific provider's key")?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /secret add <provider> [key]     Store a new API key securely")?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /secret delete <provider> [key]  Remove a stored key")?;
-            ctx.renderer.line(
-                MessageStyle::Output,
-                "  /secret migrate [provider]       Move keys from .env to secure storage",
-            )?;
-            ctx.renderer.line(MessageStyle::Output, "")?;
-            ctx.renderer.line(
-                MessageStyle::Info,
-                "Providers: openai, anthropic, openrouter, copilot, google, bedrock, mistral, groq, ...",
-            )?;
-            ctx.renderer.line(
-                MessageStyle::Info,
-                "OAuth/subscription providers (openai, openrouter, copilot) use /login instead of /secret.",
-            )?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /login openai     ChatGPT subscription auth (no API key needed)")?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /login openrouter  OpenRouter OAuth")?;
-            ctx.renderer
-                .line(MessageStyle::Output, "  /login copilot    GitHub Copilot managed auth")?;
-            ctx.renderer.line(MessageStyle::Output, "")?;
-            ctx.renderer.line(
-                MessageStyle::Output,
-                "Get your API key from the provider's platform page (e.g. https://platform.openai.com/api-keys).",
-            )?;
-            Ok(SlashCommandControl::Continue)
-        }
     }
 }
 

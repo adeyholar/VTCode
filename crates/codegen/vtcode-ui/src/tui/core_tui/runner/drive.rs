@@ -35,7 +35,6 @@ fn handle_focus_change_event(event: &crossterm::event::Event, focus_callback: Op
 }
 
 #[cfg(unix)]
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn is_suspend_shortcut(event: &crossterm::event::Event) -> bool {
     use ratatui::crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers};
 
@@ -49,7 +48,6 @@ fn is_suspend_shortcut(event: &crossterm::event::Event) -> bool {
 }
 
 #[cfg(unix)]
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn suspend_to_shell<B: Backend, S: TuiSessionDriver>(
     terminal: &mut Terminal<B>,
     session: &mut S,
@@ -294,12 +292,9 @@ pub(super) struct DriveRuntimeOptions<E> {
     pub(super) event_callback: Option<super::EventCallback<E>>,
     pub(super) focus_callback: Option<FocusChangeCallback>,
     pub(super) input_activity_counter: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
-    #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
     pub(super) use_alternate_screen: bool,
-    #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
     pub(super) keyboard_flags: crossterm::event::KeyboardEnhancementFlags,
     pub(super) fullscreen: FullscreenInteractionSettings,
-    #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
     pub(super) preview_callback: Option<super::PreviewCallback>,
 }
 

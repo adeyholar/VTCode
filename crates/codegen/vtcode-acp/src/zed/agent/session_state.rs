@@ -143,7 +143,6 @@ impl ZedAgent {
         }
     }
 
-    #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
     pub(super) fn should_send_tool_notice(&self, session: &SessionHandle) -> bool {
         session
             .data
@@ -152,7 +151,6 @@ impl ZedAgent {
             .unwrap_or(false)
     }
 
-    #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
     pub(super) fn mark_tool_notice_sent(&self, session: &SessionHandle) {
         if let Ok(data) = session.data.lock() {
             data.tool_notice_sent.store(true, Ordering::Relaxed);

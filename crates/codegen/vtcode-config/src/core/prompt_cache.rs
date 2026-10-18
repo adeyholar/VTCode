@@ -622,7 +622,6 @@ fn default_openai_prompt_cache_key_mode() -> OpenAIPromptCacheKeyMode {
     OpenAIPromptCacheKeyMode::Session
 }
 
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn default_anthropic_extended_ttl() -> Option<u64> {
     Some(prompt_cache::ANTHROPIC_EXTENDED_TTL_SECONDS)
 }
@@ -639,7 +638,6 @@ fn default_anthropic_max_breakpoints() -> u8 {
     prompt_cache::ANTHROPIC_MAX_BREAKPOINTS
 }
 
-#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
 fn default_min_message_length() -> usize {
     prompt_cache::ANTHROPIC_MIN_MESSAGE_LENGTH_FOR_CACHE
 }
