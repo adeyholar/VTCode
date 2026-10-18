@@ -204,7 +204,6 @@ pub mod cached_executor;
 pub mod lru_cache;
 pub mod pattern_detection;
 pub mod registry_adapters;
-pub mod time_compat;
 pub mod tool_middleware;
 pub mod workflow_optimizer;
 pub use resilience::circuit_breaker;

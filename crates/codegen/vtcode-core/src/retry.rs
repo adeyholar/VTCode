@@ -209,7 +209,7 @@ fn decision_for_category_with_tool(
     policy.decision_for_category(category, attempt_index, retry_after)
 }
 
-pub(crate) fn category_was_retryable(error: &VtCodeError) -> bool {
+fn category_was_retryable(error: &VtCodeError) -> bool {
     error.category.is_retryable() && !error.is_misconfiguration()
 }
 
