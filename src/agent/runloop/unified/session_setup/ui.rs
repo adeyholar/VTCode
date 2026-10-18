@@ -118,6 +118,7 @@ pub(crate) async fn initialize_session_ui(
         handle,
         ctrl_c_state,
         ctrl_c_notify,
+        settings_snapshot,
         input_activity_counter,
         pty_counter,
         settings_event_receiver,
@@ -233,6 +234,7 @@ pub(crate) async fn initialize_session_ui(
         vt_cfg.cloned(),
         ctrl_c_state.clone(),
         ctrl_c_notify.clone(),
+        settings_snapshot.clone(),
     )));
     // Merge prompt-template slash commands without blocking first paint.
     // The session spawns with built-ins; this one-shot task appends workspace
@@ -530,6 +532,7 @@ pub(crate) async fn initialize_session_ui(
         header_context,
         ctrl_c_state,
         ctrl_c_notify,
+        settings_snapshot,
         input_activity_counter,
         checkpoint_manager,
         session_archive,

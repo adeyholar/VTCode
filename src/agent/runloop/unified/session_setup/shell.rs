@@ -50,6 +50,7 @@ pub(crate) struct SessionShell {
     pub handle: InlineHandle,
     pub ctrl_c_state: Arc<crate::agent::runloop::unified::state::CtrlCState>,
     pub ctrl_c_notify: Arc<Notify>,
+    pub settings_snapshot: crate::agent::runloop::unified::session_settings::SharedSettingsSnapshot,
     pub input_activity_counter: Arc<AtomicU64>,
     pub pty_counter: Arc<AtomicUsize>,
     pub settings_event_receiver: tokio::sync::mpsc::UnboundedReceiver<InlineEvent>,
@@ -100,6 +101,13 @@ pub(crate) async fn initialize_session_shell(
 
     let ctrl_c_state = Arc::new(crate::agent::runloop::unified::state::CtrlCState::new());
     let ctrl_c_notify = Arc::new(Notify::new());
+    // Seeded from the initial config; refreshed by the interaction loop so the
+    // busy-turn settings task never opens a picker with stale current values.
+    let settings_snapshot = crate::agent::runloop::unified::session_settings::shared_settings_snapshot(
+        config.provider.clone(),
+        config.model.clone(),
+        config.reasoning_effort,
+    );
     let input_activity_counter = Arc::new(AtomicU64::new(0));
     let pty_counter = Arc::new(AtomicUsize::new(0));
     let editor_open_dispatcher = Arc::new(EditorOpenDispatcher::new(super::ui::immediate_file_open_allowed(vt_cfg)));
@@ -211,6 +219,7 @@ pub(crate) async fn initialize_session_shell(
         handle,
         ctrl_c_state,
         ctrl_c_notify,
+        settings_snapshot,
         input_activity_counter,
         pty_counter,
         settings_event_receiver,

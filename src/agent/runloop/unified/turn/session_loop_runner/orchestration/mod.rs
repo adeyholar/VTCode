@@ -424,6 +424,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let mut header_context = ui_setup.header_context;
         let ctrl_c_state = ui_setup.ctrl_c_state;
         let ctrl_c_notify = ui_setup.ctrl_c_notify;
+        let settings_snapshot = ui_setup.settings_snapshot;
         let input_activity_counter = ui_setup.input_activity_counter;
         let checkpoint_manager = ui_setup.checkpoint_manager;
         let mut session_archive = ui_setup.session_archive;
@@ -981,6 +982,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             header_context: &mut header_context,
                             ctrl_c_state: &ctrl_c_state,
                             ctrl_c_notify: &ctrl_c_notify,
+                            settings_snapshot: &settings_snapshot,
                             input_activity_counter: &input_activity_counter,
                             config: &mut config,
                             vt_cfg: &mut vt_cfg,

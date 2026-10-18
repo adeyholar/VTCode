@@ -94,6 +94,15 @@ pub(super) async fn run_interaction_loop_impl(
     const STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(200);
 
     loop {
+        // Publish any settings change applied since the previous iteration
+        // (idle `/model`, live config reload, settings palette) so a busy-turn
+        // picker opened while a request is in flight reads current values.
+        crate::agent::runloop::unified::session_settings::publish_settings_if_changed(
+            ctx.settings_snapshot,
+            &ctx.config.provider,
+            &ctx.config.model,
+            ctx.config.reasoning_effort,
+        );
         let mut workspace_config_reloaded = false;
         let should_refresh_status = last_status_refresh.elapsed() >= STATUS_REFRESH_INTERVAL;
         if should_refresh_status {
