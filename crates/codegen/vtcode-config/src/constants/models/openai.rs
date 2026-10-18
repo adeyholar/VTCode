@@ -5,13 +5,13 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     GPT_6_SOL,
     GPT_6_1_SOL,
     GPT_6_LUNA,
-    "gpt-5.6",       // GPT-5.6 alias (routes to gpt-5.6-sol)
-    "gpt-5.6-sol",   // GPT-5.6 Sol flagship model
-    "gpt-5.6-terra", // GPT-5.6 Terra balanced model
-    "gpt-5.6-luna",  // GPT-5.6 Luna efficient model
-    "gpt-5.1-mini",
-    "gpt-oss-20b",
-    "gpt-oss-120b",
+    GPT_5_6,       // GPT-5.6 alias (routes to gpt-5.6-sol)
+    GPT_5_6_SOL,   // GPT-5.6 Sol flagship model
+    GPT_5_6_TERRA, // GPT-5.6 Terra balanced model
+    GPT_5_6_LUNA,  // GPT-5.6 Luna efficient model
+    GPT_5_1_MINI,
+    GPT_OSS_20B,
+    GPT_OSS_120B,
 ];
 
 /// Models that require the OpenAI Responses API
@@ -25,7 +25,6 @@ pub const RESPONSES_API_MODELS: &[&str] = &[
     GPT_5_6_SOL,
     GPT_5_6_TERRA,
     GPT_5_6_LUNA,
-    GPT_5_6_SOL,
     GPT_5_1_MINI,
 ];
 
@@ -40,7 +39,6 @@ pub const REASONING_MODELS: &[&str] = &[
     GPT_5_6_SOL,
     GPT_5_6_TERRA,
     GPT_5_6_LUNA,
-    GPT_5_6_SOL,
 ];
 
 /// Models that support the native OpenAI `service_tier` request parameter.
@@ -328,6 +326,42 @@ mod tests {
                 deprecated_model_replacement(replacement).is_none(),
                 "replacement target {replacement} must not itself be deprecated"
             );
+        }
+    }
+
+    #[test]
+    fn capability_lists_have_no_duplicates() {
+        // `RESPONSES_API_MODELS` is joined into user-facing help text and
+        // `SERVICE_TIER_MODELS` aliases it, so duplicates reach users.
+        for (list_name, list) in [
+            ("SUPPORTED_MODELS", SUPPORTED_MODELS),
+            ("RESPONSES_API_MODELS", RESPONSES_API_MODELS),
+            ("REASONING_MODELS", REASONING_MODELS),
+            ("STREAMING_REQUIRED_MODELS", STREAMING_REQUIRED_MODELS),
+            ("HARMONY_MODELS", HARMONY_MODELS),
+        ] {
+            let mut seen = std::collections::HashSet::new();
+            for model in list {
+                assert!(seen.insert(*model), "{list_name} lists {model} more than once");
+            }
+        }
+    }
+
+    #[test]
+    fn capability_lists_stay_within_supported_models() {
+        // A capability list must never advertise a model the catalog dropped.
+        for (list_name, list) in [
+            ("RESPONSES_API_MODELS", RESPONSES_API_MODELS),
+            ("REASONING_MODELS", REASONING_MODELS),
+            ("STREAMING_REQUIRED_MODELS", STREAMING_REQUIRED_MODELS),
+            ("HARMONY_MODELS", HARMONY_MODELS),
+        ] {
+            for model in list {
+                assert!(
+                    SUPPORTED_MODELS.contains(model),
+                    "{list_name} advertises {model}, which is not in SUPPORTED_MODELS"
+                );
+            }
         }
     }
 }
