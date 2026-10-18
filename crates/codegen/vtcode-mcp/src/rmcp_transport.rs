@@ -37,6 +37,10 @@ pub fn create_stdio_transport(
         let _command = cmd.current_dir(working_dir);
     }
 
+    // Match `create_stdio_transport_with_stderr`: the child receives the
+    // caller-resolved environment only, never vtcode's full process environment.
+    let _command = cmd.env_clear();
+
     // Configure environment variables
     for (key, value) in env {
         let _command = cmd.env(key, value);
@@ -138,9 +142,60 @@ pub fn create_http_transport(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_transport_creation() {
         // Test transport creation with configuration
         // Detailed tests in integration tests
+    }
+
+    /// MCP stdio children must receive the caller-resolved environment only. Before
+    /// this was pinned, this transport inherited vtcode's whole process environment
+    /// while its `_with_stderr` sibling already cleared it.
+    #[tokio::test]
+    async fn stdio_transport_child_receives_only_the_resolved_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let dump = dir.path().join("child-env.txt");
+        let process_has_home = std::env::var_os("HOME").is_some();
+
+        let config = McpStdioServerConfig {
+            command: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "env > \"$MCP_DUMP\"".to_string()],
+            working_directory: None,
+        };
+        let mut env = hashbrown::HashMap::new();
+        drop(env.insert(
+            OsString::from("PATH"),
+            std::env::var_os("PATH").unwrap_or_else(|| OsString::from("/usr/bin:/bin")),
+        ));
+        drop(env.insert(OsString::from("MCP_MARKER"), OsString::from("marker-value")));
+        drop(env.insert(OsString::from("MCP_DUMP"), dump.as_os_str().to_os_string()));
+        // HOME is present in this process but deliberately absent from the map, so
+        // inheritance stays observable in the dump below.
+        assert!(!env.contains_key(&OsString::from("HOME")));
+
+        let _transport = create_stdio_transport(&config, &env).unwrap();
+        let contents = child_env_dump(&dump).await;
+
+        assert!(contents.contains("MCP_MARKER=marker-value"), "resolved map not applied: {contents}");
+        assert!(contents.lines().any(|line| line.starts_with("PATH=")), "resolved PATH not applied: {contents}");
+        if process_has_home {
+            assert!(
+                !contents.lines().any(|line| line.starts_with("HOME=")),
+                "MCP stdio child inherited the process environment: {contents}"
+            );
+        }
+    }
+
+    /// Wait (bounded) for the spawned child to flush its environment dump.
+    async fn child_env_dump(path: &std::path::Path) -> String {
+        for _ in 0..100 {
+            if let Ok(contents) = tokio::fs::read_to_string(path).await {
+                return contents;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("MCP stdio child never wrote {}", path.display());
     }
 }
