@@ -126,6 +126,71 @@ async fn pipe_session_activity_receiver_notifies_on_output() -> anyhow::Result<(
     Ok(())
 }
 
+/// A sandbox-active pipe session rebuilds the child environment from the central
+/// allowlist: a planted credential and an arbitrary caller variable cannot reach
+/// the process, while allowlisted names and the sandbox markers do.
+#[tokio::test]
+#[cfg(unix)]
+async fn sandbox_active_pipe_session_hands_the_child_only_the_allowlisted_environment() -> anyhow::Result<()> {
+    let temp_dir = tempdir()?;
+    let workspace_root = canonicalize_workspace(temp_dir.path());
+    let pty_sessions = PtySessionManager::new(workspace_root.clone(), PtyConfig::default());
+    let manager = ExecSessionManager::new(workspace_root.clone(), pty_sessions);
+
+    let mut env = HashMap::new();
+    drop(env.insert("PATH".to_string(), "/usr/bin:/bin".to_string()));
+    drop(env.insert("OPENAI_API_KEY".to_string(), "sk-planted-never-leaks".to_string()));
+    drop(env.insert("VTCODE_PROBE_NEVER_LEAKS".to_string(), "probe".to_string()));
+    drop(env.insert("PYTHONUNBUFFERED".to_string(), "1".to_string()));
+    drop(env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()));
+
+    manager
+        .create_pipe_session_with_sandbox_and_background(
+            "env-1".to_string().into(),
+            vec!["/usr/bin/env".to_string()],
+            workspace_root,
+            env,
+            true,
+            false,
+        )
+        .await?;
+
+    let mut activity_rx = manager
+        .activity_receiver("env-1")
+        .await?
+        .expect("pipe sessions should expose activity receiver");
+    let output = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(output) = manager.read_session_output("env-1", true).await? {
+                return Ok::<String, anyhow::Error>(output);
+            }
+            activity_rx.changed().await?;
+        }
+    })
+    .await??;
+    manager.close_session("env-1").await?;
+
+    // An allowlisted inherited name survives the rebuild ...
+    assert!(output.contains("PATH=/usr/bin:/bin"), "allowlisted PATH must survive: {output}");
+    // ... while credentials and arbitrary caller variables do not.
+    assert!(!output.contains("OPENAI_API_KEY"), "credential names must not reach the child: {output}");
+    assert!(!output.contains("sk-planted-never-leaks"), "credential values must not reach the child: {output}");
+    assert!(
+        !output.contains("VTCODE_PROBE_NEVER_LEAKS"),
+        "non-allowlisted caller variables must not reach the child: {output}"
+    );
+    // The markers prove the sanitized launch ran instead of the child inheriting
+    // whatever the caller happened to hold.
+    assert!(output.contains("VTCODE_SANDBOX_ACTIVE=1"), "sandbox marker missing: {output}");
+    assert!(output.contains("VTCODE_SANDBOX_TYPE=exec-session"), "sandbox type marker missing: {output}");
+    // Pipeline hygiene the pipe launcher sets for streaming builds has to survive
+    // the same rebuild: unbuffered output keeps live previews streaming, and the
+    // git prompt guard keeps builds from stalling on a credential prompt.
+    assert!(output.contains("PYTHONUNBUFFERED=1"), "streaming hygiene lost in rebuild: {output}");
+    assert!(output.contains("GIT_TERMINAL_PROMPT=0"), "prompt-guard hygiene lost in rebuild: {output}");
+    Ok(())
+}
+
 #[tokio::test]
 #[cfg(unix)]
 async fn concurrent_pipe_session_create_with_same_id_creates_exactly_one() -> anyhow::Result<()> {
