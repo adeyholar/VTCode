@@ -64,15 +64,49 @@ fn test_should_accept_refinement_rejects_role_play() {
 }
 
 #[test]
-fn test_finalize_refined_prompt_uses_canonical_diagnostic_tools() {
-    let refined = finalize_refined_prompt("debug the failing command".to_string());
+fn refinement_request_preserves_input_and_defines_rewrite_contract() {
+    let raw = "Review `src/parser.rs`; do not edit files or run commands.";
+    let request = refinement_request(raw, "test-model", &["low", "high"], 0.3);
+    assert_eq!(request.messages.len(), 1);
+    assert_eq!(request.messages[0].content.as_text(), raw);
+    let system = request.system_prompt.as_deref().unwrap();
+    assert!(system.contains("Do not answer or execute it"));
+    assert!(system.contains("negations, authorization limits, paths, identifiers"));
+    assert!(system.contains("Add no requirements or facts"));
+    assert!(system.contains("return it unchanged"));
+    assert!(system.contains("Return only the rewritten request"));
+    assert!(system.contains("without changing files"));
+    assert_eq!(request.reasoning_effort, Some(ReasoningEffortLevel::Low));
+    assert_eq!(request.temperature, None);
+    assert!(matches!(request.tool_choice, Some(uni::ToolChoice::None)));
+    assert!(request.tools.is_none());
+}
 
-    assert!(refined.contains("`exec_command`"));
-    assert!(refined.contains("`code_search`"));
-    assert!(!refined.contains("search_dispatch"));
-    assert!(!refined.contains("command_session"));
-    assert!(!refined.contains("debug_agent"));
-    assert!(!refined.contains("search_tools"));
+#[test]
+fn refinement_request_bounds_output_and_omits_unsupported_effort() {
+    let short = refinement_request("Review the parser without edits", "plain", &[], 0.2);
+    let long = refinement_request(&"parser context ".repeat(10_000), "reasoning", &["high"], 0.4);
+    assert!(short.max_tokens.is_some_and(|tokens| (2048..8192).contains(&tokens)));
+    assert_eq!(long.max_tokens, Some(8192));
+    assert_eq!(short.reasoning_effort, None);
+    assert_eq!(long.reasoning_effort, None);
+    assert_eq!(short.temperature, Some(0.2));
+    assert_eq!(long.temperature, None);
+}
+
+#[test]
+fn accepted_refinement_rejects_incomplete_or_tool_call_responses() {
+    let raw = "Review parser errors without changing files";
+    let complete = uni::LLMResponse {
+        content: Some(raw.to_string()),
+        finish_reason: uni::FinishReason::Stop,
+        ..Default::default()
+    };
+    assert_eq!(accepted_refinement(raw, complete.clone()), Some(raw.to_string()));
+    for finish_reason in [uni::FinishReason::Length, uni::FinishReason::ToolCalls] {
+        assert_eq!(accepted_refinement(raw, uni::LLMResponse { finish_reason, ..complete.clone() }), None);
+    }
+    assert_eq!(accepted_refinement(raw, uni::LLMResponse { content: None, ..complete }), None);
 }
 
 // Vibe coding tests

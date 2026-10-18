@@ -931,6 +931,7 @@ async fn evaluator_request_includes_verification_results() {
     assert!(evaluator_prompt.contains("contract_fidelity"));
     assert!(evaluator_prompt.contains("Execution evidence (recent bounded tool records)"));
     assert!(evaluator_prompt.contains("Tool call: task_tracker"));
+    assert!(!evaluator_prompt.contains("new acceptance criteria"));
     assert!(evaluator_request.system_prompt.as_deref().is_some_and(|prompt| {
         prompt.contains("smallest claim the evidence supports")
             && prompt.contains("falsifier")
@@ -940,6 +941,12 @@ async fn evaluator_request_includes_verification_results() {
             && prompt.contains("integer values from 1 through 5")
             && !prompt.contains("arXiv")
     }));
+    let evaluator_system = evaluator_request.system_prompt.as_deref().expect("evaluator system prompt");
+    assert!(evaluator_system.contains("only for unmet requirements already established by the user's request"));
+    assert!(evaluator_system.contains("Identify the requirement and its missing observable check"));
+    assert!(evaluator_system.contains("Optional improvements and out-of-scope observations belong in residual_risks"));
+    assert!(evaluator_system.contains("must not independently cause failure"));
+    assert!(!evaluator_system.contains("discover new acceptance criteria"));
 
     let planner_request = requests
         .iter()

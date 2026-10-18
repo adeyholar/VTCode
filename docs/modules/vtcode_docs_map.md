@@ -284,6 +284,12 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Process Hardening?", "How does Architecture work?", "How does
     Security Measures work?"
 
+- **File**: `docs/development/prompt-model-evaluation.md`
+  - **Content**: Prompt and Model Evaluation
+  - **Topics**: Comparison procedure, Outcomes and measurements, Settings and tradeoffs, References
+  - **User Questions**: "What can you tell me about Prompt and Model Evaluation?", "How does Comparison procedure
+    work?", "How does Outcomes and measurements work?"
+
 - **File**: `docs/development/release-changelog-ownership.md`
   - **Content**: Release changelog ownership
   - **User Questions**: "What can you tell me about Release changelog ownership?"

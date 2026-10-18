@@ -37,6 +37,8 @@ Entry point for VT Code contributor workflows.
   article with the VT Code applicability mapping; consult before touching `vtcode-safety/src/sandboxing/`.
 - [Runtime Guidance](./runtime-guidance.md) - Boundary between compiled universal behavior and dynamic project
   instructions.
+- [Prompt and Model Evaluation](./prompt-model-evaluation.md) - Supplied-context cases, settings comparisons, and
+  cost/latency measurement.
 - [vtcode Binary Gotchas](./vtcode-binary-gotchas.md) - Binary startup, runloop recovery, allocator, and
   request-assembly invariants.
 - [AI Tool Surface Migration](./ai-tool-surface-migration.md) - Breaking-change notes for the Codex-style default tools.

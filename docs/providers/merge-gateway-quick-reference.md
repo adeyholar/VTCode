@@ -14,7 +14,10 @@
 | Authentication    | **\*\***                                                                                                                                                                              |
 | Tool calls        | Supported                                                                                                                                                                             |
 | Streaming usage   | Supported via native Responses SSE                                                                                                                                                    |
-| Reasoning effort  | Forwarded per route: `reasoning_effort` (OpenAI/xAI/Moonshot/ZAI) or `thinking.budget_tokens` (Anthropic/Gemini/DeepSeek/Qwen/MiniMax/Thinking Machines); unknown routes omitted |
+| Reasoning effort  | Per-route reasoning_effort or thinking.budget_tokens; unknown routes omitted. See the provider guide.                                                                                 |
+
+Native Merge requests currently omit text verbosity. Use explicit prompt output requirements; direct OpenAI settings
+do not imply gateway support. See [evaluation guidance](../development/prompt-model-evaluation.md).
 
 Curated routes:
 

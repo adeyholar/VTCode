@@ -157,7 +157,7 @@ pub struct AgentConfig {
 
     /// Small/lightweight model configuration for efficient operations
     /// Used for tasks like large file reads, parsing, git history, conversation summarization
-    /// Typically 70-80% cheaper than main model; ~50% of VT Code's calls use this tier
+    /// Measure quality, token cost, and latency before choosing a different route.
     #[serde(default)]
     pub small_model: AgentSmallModelConfig,
 

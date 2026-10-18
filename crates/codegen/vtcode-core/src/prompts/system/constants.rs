@@ -131,5 +131,5 @@ pub const SPECIALIZED_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 pub(super) const STRUCTURED_REASONING_INSTRUCTIONS: &str = r#"
 ## Structured Reasoning
 
-When visible structure helps, you can tag your reasoning: `<analysis>` for facts and options, `<reasoning_plan>` for advisory steps, `<uncertainty>` for blockers, and `<verification>` for checks you ran. `<plan>` is reserved for the planning workflow's approval artifact. When code or tools will consume a decision, prefer JSON or a function call over prose.
+When visible structure helps, tag conclusions and supporting evidence with `<analysis>`, advisory steps with `<reasoning_plan>`, blockers with `<uncertainty>`, and observed checks with `<verification>`. Do not expose private chain-of-thought. `<plan>` is reserved for the planning workflow's approval artifact. When code or tools will consume a decision, prefer JSON or a function call over prose.
 "#;

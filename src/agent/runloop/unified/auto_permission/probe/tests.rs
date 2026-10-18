@@ -7,6 +7,7 @@ struct ScriptedProvider {
     choice: Option<&'static str>,
     decisions_error: bool,
     generation: Option<&'static str>,
+    generation_finish: uni::FinishReason,
     decisions_delay: Duration,
     generation_delay: Duration,
     usage: bool,
@@ -21,6 +22,7 @@ impl Default for ScriptedProvider {
             choice: Some("SAFE"),
             decisions_error: false,
             generation: Some("SUSPECT"),
+            generation_finish: uni::FinishReason::Stop,
             decisions_delay: Duration::ZERO,
             generation_delay: Duration::ZERO,
             usage: true,
@@ -89,7 +91,7 @@ impl uni::LLMProvider for ScriptedProvider {
             model: "gpt-6-luna".into(),
             tool_calls: None,
             usage: self.usage.then(|| usage(311, 2)),
-            finish_reason: uni::FinishReason::Stop,
+            finish_reason: self.generation_finish.clone(),
             reasoning: None,
             reasoning_details: None,
             organization_id: None,
@@ -174,8 +176,9 @@ async fn decisions_probe_inconclusive_and_http_error_fall_back_to_configured_pro
         let requests = provider.generation_requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].model, "gpt-6-luna");
-        assert_eq!(requests[0].max_tokens, Some(256));
+        assert_eq!(requests[0].max_tokens, Some(2056));
         assert_eq!(requests[0].reasoning_effort, Some(ReasoningEffortLevel::Low));
+        assert_eq!(requests[0].temperature, None);
         assert_eq!(requests[0].messages[0].content.as_text(), provider.decisions_inputs.lock().unwrap()[0]);
         assert_eq!(stats.total_usage().input_tokens, if error { 311 } else { 448 });
         assert_eq!(stats.total_usage().output_tokens, 2);
@@ -211,8 +214,10 @@ async fn decisions_disabled_and_ineligible_paths_do_not_dispatch_decisions_and_k
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].model, "gpt-6-luna");
         assert_eq!(requests[1].model, "gpt-6-astra");
-        assert_eq!(requests[0].max_tokens, Some(8));
-        assert!(requests[0].reasoning_effort.is_none());
+        assert_eq!(requests[0].max_tokens, Some(2056));
+        assert_eq!(requests[1].max_tokens, Some(2056));
+        assert_eq!(requests[0].reasoning_effort, Some(ReasoningEffortLevel::Low));
+        assert_eq!(requests[1].reasoning_effort, Some(ReasoningEffortLevel::Low));
     }
 }
 
@@ -232,6 +237,20 @@ async fn decisions_probe_missing_usage_and_both_inconclusive_results_do_not_beco
     let (result, stats) = run(&mut provider, true).await;
     assert!(result.unwrap().is_none());
     assert!(stats.total_cost_usd().is_none());
+}
+
+#[tokio::test]
+async fn truncated_safe_probe_is_inconclusive_and_preserves_usage() {
+    let mut provider = ScriptedProvider {
+        generation: Some("SAFE"),
+        generation_finish: uni::FinishReason::Length,
+        ..Default::default()
+    };
+    let (result, stats) = run(&mut provider, false).await;
+    assert!(result.is_err(), "a truncated SAFE label must not establish safety");
+    assert_eq!(provider.generation_requests.lock().unwrap().len(), 2);
+    assert_eq!(stats.total_usage().input_tokens, 622);
+    assert_eq!(stats.total_usage().output_tokens, 4);
 }
 
 #[tokio::test]

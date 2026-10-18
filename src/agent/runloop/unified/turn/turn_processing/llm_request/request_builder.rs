@@ -464,7 +464,7 @@ pub(super) async fn build_turn_request(
         tool_choice,
         parallel_tool_config: parallel_config,
         reasoning_effort,
-        verbosity: None,
+        verbosity: ctx.vt_cfg.map(|cfg| cfg.agent.verbosity),
         metadata,
         context_management,
         previous_response_id,

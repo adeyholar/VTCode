@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD013 -->
 # vtcode-llm
 
-[Root AGENTS.md](../../../AGENTS.md) | **Canonical** LLM provider trait, types, and implementations.
+[Root AGENTS.md](../../../AGENTS.md) | **Canonical** LLM provider trait, types, and implementations. Fixed-length auxiliary calls use `LLMRequest::set_auxiliary_output_budget`; reapply after model fallback and reject incomplete verdicts.
 
 ## Key Modules
 

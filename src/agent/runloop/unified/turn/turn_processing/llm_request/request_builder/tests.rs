@@ -112,6 +112,7 @@ async fn recovery_request_keeps_tools_for_cache_and_disables_tool_choice() {
     let mut ctx = backing.turn_processing_context();
     let mut vt_cfg = VTCodeConfig::default();
     vt_cfg.agent.reasoning_effort = ReasoningEffortLevel::High;
+    vt_cfg.agent.verbosity = vtcode_core::config::types::VerbosityLevel::High;
     ctx.vt_cfg = Some(&vt_cfg);
     ctx.activate_recovery("loop detector");
 
@@ -128,6 +129,8 @@ async fn recovery_request_keeps_tools_for_cache_and_disables_tool_choice() {
         .expect("recovery request should build");
 
     assert_eq!(normal_built.request.reasoning_effort, Some(ReasoningEffortLevel::High));
+    assert_eq!(normal_built.request.verbosity, Some(vtcode_core::config::types::VerbosityLevel::High));
+    assert_eq!(built.request.verbosity, normal_built.request.verbosity);
     // Recovery keeps the same reasoning effort so the provider prefix
     // stays cache-stable (OpenAI: changing effort rewrites instructions).
     assert_eq!(built.request.reasoning_effort, Some(ReasoningEffortLevel::High));

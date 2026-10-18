@@ -211,6 +211,34 @@ pub struct LLMRequest {
     pub anthropic_request_overrides: Option<AnthropicRequestOverrides>,
 }
 
+impl LLMRequest {
+    /// Budget a short auxiliary answer separately from any hidden reasoning.
+    ///
+    /// Select low effort only when advertised; otherwise retain the provider's
+    /// default. Reasoning routes receive 2,048 additional output tokens and no
+    /// sampling controls. This is a bounded allowance, not a completion guarantee.
+    /// Reapply after changing `model`, including on a fallback route.
+    pub fn set_auxiliary_output_budget(
+        &mut self,
+        provider: &(impl super::LLMProvider + ?Sized),
+        visible_output_tokens: u32,
+    ) {
+        let levels = provider.supported_reasoning_efforts(&self.model);
+        let reasoning = provider.supports_reasoning(&self.model) || !levels.is_empty();
+        self.reasoning_effort = levels.contains(&"low").then_some(ReasoningEffortLevel::Low);
+        self.max_tokens = Some(visible_output_tokens.max(1).saturating_add(if reasoning { 2048 } else { 0 }));
+        self.verbosity = Some(VerbosityLevel::Low);
+        if reasoning {
+            self.temperature = None;
+            self.top_p = None;
+            self.top_k = None;
+            self.do_sample = None;
+            self.presence_penalty = None;
+            self.frequency_penalty = None;
+        }
+    }
+}
+
 /// Per-model sampling parameter overrides resolved from a custom provider
 /// profile. Every field defaults to `None`, meaning the agent loop's global
 /// configuration value applies unchanged.

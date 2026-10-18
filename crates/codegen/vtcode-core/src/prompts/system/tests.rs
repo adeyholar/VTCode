@@ -674,7 +674,7 @@ fn test_default_prompt_stays_lean_but_complete() {
     let prompt = default_system_prompt();
 
     assert!(prompt.contains("## Contract"), "Default prompt should include the lean contract section");
-    assert!(prompt.contains("Be concise by being selective"), "Default prompt should clamp output shape");
+    assert!(prompt.contains("Small tasks: up to four bullets"), "Default prompt should clamp output shape");
     assert!(
         prompt.contains(crate::prompts::runtime_guidance::VERIFICATION_OUTCOME_LINE),
         "Default prompt should require honest verification reporting"
@@ -1442,7 +1442,7 @@ Work the way a senior engineer on this codebase would: understand the relevant c
 - User cancellation ends the current task: do not retry, recover, call tools, or auto-continue cancelled work. Preserve output/state. Resume only on fresh user input. Exit takes priority.
 - Reuse evidence; read missing/changed ranges. At caps, edit/verify, never copy. Verify standalone; use `max_output_tokens`, exit codes, never `; echo $?`.
 - Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reuse retained source.
-- Say in one sentence what you will do before starting; update only on findings, direction changes, or blockers. Do not repeat plans or narrate calls. The UI reports runtime phases; do not echo them or invent percentages. Finish with the outcome, then what changed, checks, and user action. Be concise by being selective.
+- State next step in one sentence; update only on findings, direction changes, or blockers. Do not repeat plans or calls. UI reports phases; never echo them or invent percentages. Finish with the outcome, changes, checks, blockers, user action; omit empty categories. Small tasks: up to four bullets; expand as requested.
 - Write plain text without emojis, including verification results (`pass (6/6)`).
 
 ## Contract
@@ -1519,7 +1519,7 @@ You are VT Code (Build mode), a coding agent working in the user's repository an
 - User cancellation ends the current task: do not retry, recover, call tools, or auto-continue cancelled work. Preserve output/state. Resume only on fresh user input. Exit takes priority.
 - Reuse evidence; read missing/changed ranges. At caps, edit/verify, never copy. Verify standalone; use `max_output_tokens`, exit codes, never `; echo $?`.
 - Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reuse retained source.
-- Say in one sentence what you will do before starting; update only on findings, direction changes, or blockers. Do not repeat plans or narrate calls. The UI reports runtime phases; do not echo them or invent percentages. Finish with the outcome, then what changed, checks, and user action. Be concise by being selective.
+- State next step in one sentence; update only on findings, direction changes, or blockers. Do not repeat plans or calls. UI reports phases; never echo them or invent percentages. Finish with the outcome, changes, checks, blockers, user action; omit empty categories. Small tasks: up to four bullets; expand as requested.
 - Write plain text without emojis, including verification results (`pass (6/6)`).
 
 ## Contract
@@ -1541,7 +1541,7 @@ You are VT Code (Build mode), a coding agent working in the user's repository an
 
 ## Structured Reasoning
 
-When visible structure helps, you can tag your reasoning: `<analysis>` for facts and options, `<reasoning_plan>` for advisory steps, `<uncertainty>` for blockers, and `<verification>` for checks you ran. `<plan>` is reserved for the planning workflow's approval artifact. When code or tools will consume a decision, prefer JSON or a function call over prose.
+When visible structure helps, tag conclusions and supporting evidence with `<analysis>`, advisory steps with `<reasoning_plan>`, blockers with `<uncertainty>`, and observed checks with `<verification>`. Do not expose private chain-of-thought. `<plan>` is reserved for the planning workflow's approval artifact. When code or tools will consume a decision, prefer JSON or a function call over prose.
 
 
 ## Shell Profile

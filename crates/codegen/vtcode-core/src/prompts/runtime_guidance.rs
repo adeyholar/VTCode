@@ -21,7 +21,7 @@ pub(crate) const RUNTIME_GUIDANCE_SECTION: &str = r#"## Runtime Guidance
 - User cancellation ends the current task: do not retry, recover, call tools, or auto-continue cancelled work. Preserve output/state. Resume only on fresh user input. Exit takes priority.
 - Reuse evidence; read missing/changed ranges. At caps, edit/verify, never copy. Verify standalone; use `max_output_tokens`, exit codes, never `; echo $?`.
 - Tool previews are bounded per result; accumulated output never exhausts tool access. Page `spool_path` within `spool_line_count` in small non-overlapping ranges; stop at EOF. {"cleared":"tool_input"} is not executable; rebuild arguments. Recovery expires at a fresh turn; navigation synthesis may resume once under policy. Reuse retained source.
-- Say in one sentence what you will do before starting; update only on findings, direction changes, or blockers. Do not repeat plans or narrate calls. The UI reports runtime phases; do not echo them or invent percentages. Finish with the outcome, then what changed, checks, and user action. Be concise by being selective.
+- State next step in one sentence; update only on findings, direction changes, or blockers. Do not repeat plans or calls. UI reports phases; never echo them or invent percentages. Finish with the outcome, changes, checks, blockers, user action; omit empty categories. Small tasks: up to four bullets; expand as requested.
 - Write plain text without emojis, including verification results (`pass (6/6)`).
 "#;
 
@@ -124,12 +124,12 @@ mod tests {
         assert!(RUNTIME_GUIDANCE_SECTION.contains("state plainly what is missing"));
         // Communication contract: one line before starting, updates only on
         // findings, outcome-first final report. No hidden-reasoning mentions.
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("Say in one sentence what you will do before starting"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("State next step in one sentence"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("update only on findings, direction changes, or blockers"));
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("Finish with the outcome, then what changed"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("Finish with the outcome, changes, checks, blockers"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("Before tools: state the next phase in one line"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("hidden reasoning"));
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("Be concise by being selective"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("Small tasks: up to four bullets"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Delegate only sizeable, independent work to subagents"));
         // Grounding.
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Read code before claims"));
@@ -190,11 +190,11 @@ mod tests {
         assert!(RUNTIME_GUIDANCE_SECTION.contains("even at either read cap"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Never retry unchanged failed input"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("At caps, edit/verify"));
-        assert!(
-            RUNTIME_GUIDANCE_SECTION.contains("The UI reports runtime phases; do not echo them or invent percentages")
-        );
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("UI reports phases; never echo them or invent percentages"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Write plain text without emojis"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("including verification results"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("omit empty categories"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("up to four bullets; expand as requested"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("`pass (6/6)`"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains(
             "- Diagnose failures; change approach. Treat empty searches as evidence. Check optional tools once; report unavailable checks as skipped. Use returned `next_wait_args`; completion notices are final.\n"
@@ -213,7 +213,7 @@ mod tests {
         ));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("accumulated output never exhausts tool access"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("preview_budget_exhausted"));
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("Do not repeat plans or narrate calls"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("Do not repeat plans or calls"));
         // Shouted pressure words are not part of the prompt style.
         for shout in ["MUST", "NEVER", "ALWAYS", "CRITICAL", "IMPORTANT"] {
             assert!(!RUNTIME_GUIDANCE_SECTION.contains(shout), "unexpected shouting: {shout}");
