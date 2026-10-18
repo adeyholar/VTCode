@@ -21,6 +21,9 @@
 
 use std::io;
 
+#[cfg(windows)]
+mod windows;
+
 #[cfg(unix)]
 use nix::errno::Errno;
 #[cfg(target_os = "linux")]
@@ -268,14 +271,7 @@ pub fn kill_child_process_group_with_signal(_child: &mut tokio::process::Child, 
 /// Kill a process by PID on Windows.
 #[cfg(windows)]
 pub fn kill_process(pid: u32) -> io::Result<()> {
-    let status = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other("taskkill failed"))
-    }
+    windows::kill_process(pid)
 }
 
 /// No-op on non-Windows platforms.
@@ -400,8 +396,8 @@ pub fn graceful_kill_process_group(
     {
         let _ = initial_signal;
         let pid_arg = pid.to_string();
-        match std::process::Command::new("taskkill").args(["/PID", &pid_arg, "/T"]).status() {
-            Ok(status) if status.success() => {
+        match std::process::Command::new("taskkill").args(["/PID", &pid_arg, "/T"]).output() {
+            Ok(output) if output.status.success() => {
                 std::thread::sleep(grace_period);
                 match kill_process(pid) {
                     Ok(()) => GracefulTerminationResult::ForcefulKill,

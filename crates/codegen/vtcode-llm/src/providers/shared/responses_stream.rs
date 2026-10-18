@@ -12,7 +12,8 @@ use hashbrown::{HashMap, HashSet};
 use serde_json::{Value, json};
 
 use super::{
-    StreamAggregator, generate_tool_call_id, parse_cache_write_tokens_from_usage, parse_cached_prompt_tokens_from_usage,
+    StreamAggregator, ToolCallIndexes, generate_tool_call_id, parse_cache_write_tokens_from_usage,
+    parse_cached_prompt_tokens_from_usage,
 };
 
 // Retained shared Responses stream processor.
@@ -110,10 +111,9 @@ pub(crate) struct ResponsesNormalizedStreamProcessor<P> {
     parse_final_response: P,
     aggregator: StreamAggregator,
     seen_tool_calls: HashSet<String>,
-    tool_call_indexes: HashMap<String, usize>,
+    tool_call_indexes: ToolCallIndexes,
     tool_call_names: HashMap<String, String>,
     tool_call_ids_by_item_id: HashMap<String, String>,
-    next_tool_call_index: usize,
     fabricated_ids: HashMap<usize, String>,
     fabricated_fallback_id: Option<String>,
     final_response: Option<Value>,
@@ -130,10 +130,9 @@ where
             options,
             parse_final_response,
             seen_tool_calls: HashSet::new(),
-            tool_call_indexes: HashMap::new(),
+            tool_call_indexes: ToolCallIndexes::default(),
             tool_call_names: HashMap::new(),
             tool_call_ids_by_item_id: HashMap::new(),
-            next_tool_call_index: 0,
             fabricated_ids: HashMap::new(),
             fabricated_fallback_id: None,
             final_response: None,
@@ -205,7 +204,7 @@ where
             }
             ResponsesStreamEvent::FunctionCallNameDelta { call_id, item_id, name, output_index } => {
                 self.record_tool_call_item_id(item_id.as_deref(), &call_id);
-                self.record_tool_call_name(&call_id, &name, output_index);
+                self.record_tool_call_name(&call_id, &name, output_index)?;
                 self.push_tool_call_start(&mut events, call_id, Some(name));
             }
             ResponsesStreamEvent::FunctionCallArgumentsDelta { call_id, item_id, delta, output_index } => {
@@ -215,7 +214,9 @@ where
                 } else {
                     call_id
                 };
-                let index = self.resolve_tool_call_index(&call_id, output_index);
+                let index = self
+                    .tool_call_indexes
+                    .resolve(&call_id, output_index, self.options.provider_name)?;
 
                 let name = self.tool_call_names.get(&call_id).cloned();
                 self.push_tool_call_start(&mut events, call_id.clone(), name);
@@ -233,7 +234,7 @@ where
             }
             ResponsesStreamEvent::CompletedToolCall { call_id, item_id, name, arguments, output_index } => {
                 self.record_tool_call_item_id(item_id.as_deref(), &call_id);
-                let index = self.record_tool_call_name(&call_id, &name, output_index);
+                let index = self.record_tool_call_name(&call_id, &name, output_index)?;
                 self.push_tool_call_start(&mut events, call_id.clone(), Some(name));
                 self.aggregator.handle_tool_calls(&[json!({
                     "index": index,
@@ -268,11 +269,18 @@ where
         Ok(events)
     }
 
-    fn record_tool_call_name(&mut self, call_id: &str, name: &str, output_index: Option<usize>) -> usize {
+    fn record_tool_call_name(
+        &mut self,
+        call_id: &str,
+        name: &str,
+        output_index: Option<usize>,
+    ) -> Result<usize, LLMError> {
         self.tool_call_names
             .entry(call_id.to_string())
             .or_insert_with(|| name.to_string());
-        let index = self.resolve_tool_call_index(call_id, output_index);
+        let index = self
+            .tool_call_indexes
+            .resolve(call_id, output_index, self.options.provider_name)?;
         self.aggregator.handle_tool_calls(&[json!({
             "index": index,
             "id": call_id,
@@ -280,7 +288,7 @@ where
                 "name": name,
             }
         })]);
-        index
+        Ok(index)
     }
 
     pub(crate) fn finish(self) -> Result<Vec<NormalizedStreamEvent>, LLMError> {
@@ -335,23 +343,6 @@ where
         if self.seen_tool_calls.insert(call_id.clone()) {
             events.push(NormalizedStreamEvent::ToolCallStart { call_id, name });
         }
-    }
-
-    fn resolve_tool_call_index(&mut self, call_id: &str, output_index: Option<usize>) -> usize {
-        if let Some(index) = output_index {
-            self.tool_call_indexes.insert(call_id.to_string(), index);
-            self.next_tool_call_index = self.next_tool_call_index.max(index + 1);
-            return index;
-        }
-
-        if let Some(index) = self.tool_call_indexes.get(call_id).copied() {
-            return index;
-        }
-
-        let index = self.next_tool_call_index;
-        self.tool_call_indexes.insert(call_id.to_string(), index);
-        self.next_tool_call_index += 1;
-        index
     }
 }
 
@@ -524,6 +515,20 @@ mod tests {
             emit_reasoning: true,
             include_cached_prompt_metrics: false,
         }
+    }
+
+    #[test]
+    fn normalized_stream_rejects_exhausted_tool_call_index() {
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options(), parse_response);
+        let error = processor
+            .handle_payload(json!({
+                "type":"response.function_call_arguments.delta", "call_id":"too-large",
+                "item_id":"fc-overflow", "sequence_number":1,
+                "output_index":usize::MAX, "delta":"{"
+            }))
+            .unwrap_err();
+        assert!(error.to_string().contains("tool call index space exhausted"), "{error}");
+        assert!(error.to_string().contains("TestProvider"));
     }
 
     fn parse_response(value: Value) -> Result<LLMResponse, crate::provider::LLMError> {

@@ -1325,6 +1325,162 @@ async fn replan_retains_required_updates_and_executable_item_metadata() {
 }
 
 #[tokio::test]
+async fn replan_tracker_updates_are_idempotent_and_enrich_only_uncompleted_placeholders() {
+    use super::super::orchestration::EvaluationArtifacts;
+
+    let temp = TempDir::new().unwrap();
+    let workspace = workspace_root(&temp);
+    let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "deduplicated-replan")).await;
+    seed_tracker(&workspace, json!([
+        {"description":"Finished requirement", "status":"completed", "files":["first.rs"], "outcome":"First contract held", "verify":["check-first"]},
+        {"description":"Check final absence", "status":"in_progress"}
+    ])).await;
+    let evaluation = EvaluationArtifacts {
+        generalization_notes: vec![],
+        evaluation_path: workspace.join(".vtcode/tasks/current_evaluation.md"),
+        passed: false,
+        summary: "Confirm remaining requirements".into(),
+        required_tracker_updates: vec![
+            "Finished requirement".into(),
+            "Check final absence".into(),
+            "New requirement".into(),
+            "New requirement".into(),
+        ],
+        unmet_contract_items: vec![],
+    };
+    let replan = json!({"new_tracker_items":[
+        {"description":"Finished requirement", "files":["first.rs"], "verify":["check-first"]},
+        {"description":"Check final absence", "outcome":"No file remains", "verify":["test ! -e target/smoke"]},
+        {"description":"New requirement", "files":["second.rs"], "verify":["check-second"]},
+        {"description":"New requirement", "files":["second.rs"], "verify":["check-second"]}
+    ]});
+    runner.provider_client = Box::new(QueuedProvider::new(vec![json_response(replan.clone()), json_response(replan)]));
+    let tracker_path = workspace.join(".vtcode/tasks/current_task.md");
+    let mut previous = None;
+    for round in 1..=2 {
+        runner
+            .replan_from_failure(&task("Verify final state", "deduplicated"), &evaluation, round)
+            .await
+            .unwrap();
+        let contents = fs::read_to_string(&tracker_path).unwrap();
+        if let Some(before) = previous.replace(contents.clone()) {
+            assert_eq!(contents, before, "a repeated replan must not rewrite progress or duplicate requirements");
+        }
+        let tool = TaskTrackerTool::new(workspace.clone(), runner.tool_registry.planning_workflow_state());
+        let listed = tool.execute(json!({"action":"list"})).await.unwrap();
+        let items = listed["checklist"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0]["status"], "completed");
+        assert_eq!(items[0]["outcome"], "First contract held");
+        assert_eq!(items[0]["verify"], json!(["check-first"]));
+        assert_eq!(items[1]["status"], "in_progress");
+        assert_eq!(items[1]["outcome"], "No file remains");
+        assert_eq!(items[1]["verify"], json!(["test ! -e target/smoke"]));
+        assert_eq!(items[2]["status"], "pending");
+        assert_eq!(items[2]["files"], json!(["second.rs"]));
+        assert_eq!(items[2]["verify"], json!(["check-second"]));
+    }
+}
+
+#[tokio::test]
+async fn replan_tracker_preserves_different_criteria_and_completed_placeholders() {
+    use super::super::orchestration::EvaluationArtifacts;
+
+    let temp = TempDir::new().unwrap();
+    let workspace = workspace_root(&temp);
+    let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "distinct-replan")).await;
+    seed_tracker(
+        &workspace,
+        json!([
+            {"description":"Verify result", "status":"completed", "verify":["check-old"]},
+            {"description":"Already finished", "status":"completed"}
+        ]),
+    )
+    .await;
+    let evaluation = EvaluationArtifacts {
+        generalization_notes: vec![],
+        evaluation_path: workspace.join(".vtcode/tasks/current_evaluation.md"),
+        passed: false,
+        summary: "Verify the new criteria".into(),
+        required_tracker_updates: vec![],
+        unmet_contract_items: vec![],
+    };
+    let replan = json!({"new_tracker_items":[
+        {"description":"Verify result", "verify":["check-new"]},
+        {"description":"Already finished", "verify":["check-details"]}
+    ]});
+    runner.provider_client = Box::new(QueuedProvider::new(vec![json_response(replan.clone()), json_response(replan)]));
+    for round in 1..=2 {
+        runner
+            .replan_from_failure(&task("Verify changed criteria", "distinct"), &evaluation, round)
+            .await
+            .unwrap();
+    }
+    let tool = TaskTrackerTool::new(workspace, runner.tool_registry.planning_workflow_state());
+    let listed = tool.execute(json!({"action":"list"})).await.unwrap();
+    let items = listed["checklist"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[0]["status"], "completed");
+    assert_eq!(items[0]["verify"], json!(["check-old"]));
+    assert_eq!(items[1]["status"], "completed");
+    assert_eq!(items[1]["verify"], json!([]));
+    assert_eq!(items[2]["status"], "pending");
+    assert_eq!(items[2]["verify"], json!(["check-new"]));
+    assert_eq!(items[3]["status"], "pending");
+    assert_eq!(items[3]["verify"], json!(["check-details"]));
+}
+
+#[tokio::test]
+async fn replan_tracker_enrichment_preserves_hierarchical_addresses_and_ambiguous_rows() {
+    use super::super::orchestration::EvaluationArtifacts;
+
+    let temp = TempDir::new().unwrap();
+    let workspace = workspace_root(&temp);
+    let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "hierarchical-replan")).await;
+    let state = runner.tool_registry.planning_workflow_state();
+    fs::create_dir_all(state.plans_dir()).unwrap();
+    let plan = state.plans_dir().join("replan.md");
+    fs::write(&plan, "# Replan\n").unwrap();
+    state.set_plan_file(Some(plan)).await;
+    state.enable();
+    let tool = TaskTrackerTool::new(workspace.clone(), state);
+    tool.execute(json!({"action":"create", "items":[
+        "Parent", "  [~] Unique child", "Repeated description", "Repeated description"
+    ]}))
+    .await
+    .unwrap();
+    let evaluation = EvaluationArtifacts {
+        generalization_notes: vec![],
+        evaluation_path: workspace.join(".vtcode/tasks/current_evaluation.md"),
+        passed: false,
+        summary: "Add concrete checks".into(),
+        required_tracker_updates: vec![],
+        unmet_contract_items: vec![],
+    };
+    let replan = json!({"new_tracker_items":[
+        {"description":"Unique child", "verify":["check-child"]},
+        {"description":"Repeated description", "verify":["check-distinct"]}
+    ]});
+    runner.provider_client = Box::new(QueuedProvider::new(vec![json_response(replan.clone()), json_response(replan)]));
+    for round in 1..=2 {
+        runner
+            .replan_from_failure(&task("Verify hierarchy", "hierarchy"), &evaluation, round)
+            .await
+            .unwrap();
+    }
+    let listed = tool.execute(json!({"action":"list"})).await.unwrap();
+    let items = listed["checklist"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 5);
+    assert_eq!(items[1]["index_path"], "1.1");
+    assert_eq!(items[1]["status"], "in_progress");
+    assert_eq!(items[1]["verify"], json!(["check-child"]));
+    assert_eq!(items[2]["verify"], json!([]));
+    assert_eq!(items[3]["verify"], json!([]));
+    assert_eq!(items[4]["status"], "pending");
+    assert_eq!(items[4]["verify"], json!(["check-distinct"]));
+}
+
+#[tokio::test]
 async fn evaluator_scorecard_below_threshold_forces_revision() {
     let temp = TempDir::new().expect("tempdir");
 

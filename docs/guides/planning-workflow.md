@@ -143,6 +143,13 @@ Reads and no-op updates do not rewrite identical mirrors.
 All tracker artifacts are read before an update is published. Reported publication failures roll back earlier
 writes; detected concurrent edits are preserved and rollback failures remain visible in the error.
 
+Headless evaluator/replanner additions reconcile against one live tracker snapshot per batch.
+Repeated descriptions and metadata already covered by the existing step preserve its status and checks;
+omitted fields never erase existing metadata.
+A unique unfinished placeholder can gain its missing metadata in place. Completed placeholders, ambiguous duplicate
+descriptions, and different verification criteria are retained; new criteria become a separate pending item.
+This reconciliation applies to harness-generated revisions, leaving the explicit tracker `add` action unchanged.
+
 Successful tracker updates honor display mode: compact shows header plus the single current task (`» …`, first
 `in_progress` leaf else first `pending`/`blocked`; header-only when all done) while expanded shows header plus truncated
 tree (max 30 rows + `… N more`) so each task item is visible inline. The full hierarchical tree is always TODO-panel

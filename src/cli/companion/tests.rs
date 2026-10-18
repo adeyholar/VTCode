@@ -2,6 +2,10 @@ use super::*;
 use serde_json::json;
 use tempfile::TempDir;
 
+#[cfg(unix)]
+#[path = "tests/process_cleanup.rs"]
+mod process_cleanup;
+
 fn input(prompt: &str) -> StartTaskInput {
     StartTaskInput {
         prompt: prompt.into(),
@@ -384,7 +388,7 @@ fn launch_uses_fixed_argv_and_never_grants_trust_or_passes_proxy_credentials() {
         CompanionService::new("/workspace".into(), "/bin/vtcode".into(), "TEST_PROXY_SECRET".into(), Vec::new());
     let malicious = "--workspace /tmp/escape $(touch injected); resume --last";
     let mut request = input(malicious);
-    let command = service.command(&request);
+    let command = service.command(&request, None);
     let command = command.as_std();
     let args: Vec<_> = command.get_args().map(|s| s.to_string_lossy().into_owned()).collect();
     assert_eq!(args, ["--workspace", "/workspace", "exec", "--json", "--dry-run",]);
@@ -392,7 +396,7 @@ fn launch_uses_fixed_argv_and_never_grants_trust_or_passes_proxy_credentials() {
     assert_eq!(env.get(std::ffi::OsStr::new("TEST_PROXY_SECRET")), Some(&None));
     assert_eq!(env.get(std::ffi::OsStr::new("VTCODE_TRUST_WORKSPACE")), Some(&Some(std::ffi::OsStr::new("deny"))));
     request.mode = TaskMode::Implement;
-    assert!(!service.command(&request).as_std().get_args().any(|s| s == "--dry-run"));
+    assert!(!service.command(&request, None).as_std().get_args().any(|s| s == "--dry-run"));
 }
 
 #[test]
@@ -454,7 +458,7 @@ fn companion_launch_preserves_selected_config_inline_policy_and_cli_denies() {
         "TEST_PROXY_SECRET".into(),
         launch_args(&parent, Some(config_path.clone())),
     );
-    let command = service.command(&input("--disallowed-tools ''"));
+    let command = service.command(&input("--disallowed-tools ''"), None);
     let child = Cli::try_parse_from(
         std::iter::once(OsString::from("vtcode")).chain(command.as_std().get_args().map(std::ffi::OsStr::to_os_string)),
     )
@@ -650,11 +654,11 @@ fn companion_bounds_canonical_failure_details_and_distinguishes_supervisor_failu
     let deadline = projection.failure_progress(&outcome, true, true);
     assert!(deadline.contains("task deadline exceeded"));
     let cleanup = EventProjection::default().failure_progress(&None, false, false);
-    assert!(cleanup.contains("process group cleanup failed"));
+    assert!(cleanup.contains("owned process cleanup failed"));
     assert!(cleanup.contains("child reap could not be confirmed"));
     let mut completed_projection = EventProjection::default();
     completed_projection.observe(&mut snapshot(), event(completed()));
-    assert_eq!(completed_projection.failure_progress(&None, false, true), "process group cleanup failed");
+    assert_eq!(completed_projection.failure_progress(&None, false, true), "owned process cleanup failed");
 }
 
 #[cfg(unix)]

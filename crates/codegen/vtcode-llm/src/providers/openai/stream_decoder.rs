@@ -14,7 +14,8 @@ use crate::providers::shared::StreamTelemetry;
 use crate::providers::shared::parse_cache_write_tokens_from_usage;
 use crate::providers::shared::parse_cached_prompt_tokens_from_usage;
 use crate::providers::shared::{
-    ResponsesStreamEventPolicy, StreamAssemblyError, extract_data_payload, response_stream_event_policy,
+    ResponsesStreamEventPolicy, StreamAssemblyError, ToolCallIndexes, extract_data_payload,
+    response_stream_event_policy,
 };
 use async_stream::try_stream;
 use futures::StreamExt;
@@ -95,8 +96,7 @@ fn merge_final_response_metadata(
 #[derive(Default)]
 struct ResponsesToolCallState {
     item_id_to_call_id: HashMap<String, String>,
-    tool_call_indexes: HashMap<String, usize>,
-    next_tool_call_index: usize,
+    tool_call_indexes: ToolCallIndexes,
     fabricated_ids: HashMap<usize, String>,
     fabricated_fallback_id: Option<String>,
 }
@@ -107,29 +107,28 @@ impl ResponsesToolCallState {
         aggregator: &mut crate::providers::shared::StreamAggregator,
         item: &Value,
         output_index: Option<usize>,
-    ) {
+    ) -> Result<(), provider::LLMError> {
         if item.get("type").and_then(Value::as_str) != Some("function_call") {
-            return;
+            return Ok(());
         }
 
         let item_id = item.get("id").and_then(Value::as_str).filter(|value| !value.is_empty());
         let provider_call_id = item.get("call_id").and_then(Value::as_str).filter(|value| !value.is_empty());
         let Some(call_id) = provider_call_id.or(item_id) else {
-            return;
+            return Ok(());
         };
         let Some(name) = item.get("name").and_then(Value::as_str).or_else(|| {
             item.get("function")
                 .and_then(|function| function.get("name"))
                 .and_then(Value::as_str)
         }) else {
-            return;
+            return Ok(());
         };
 
         self.capture_item_call_id_mapping(item_id, provider_call_id);
 
-        let output_index =
-            output_index.or_else(|| item_id.and_then(|item_id| self.tool_call_indexes.get(item_id).copied()));
-        let index = self.resolve_tool_call_index(call_id, output_index);
+        let output_index = output_index.or_else(|| item_id.and_then(|item_id| self.tool_call_indexes.get(item_id)));
+        let index = self.tool_call_indexes.resolve(call_id, output_index, "OpenAI")?;
         aggregator.handle_tool_calls(&[json!({
             "index": index,
             "id": call_id,
@@ -137,6 +136,7 @@ impl ResponsesToolCallState {
                 "name": name,
             }
         })]);
+        Ok(())
     }
 
     fn handle_arguments_delta(
@@ -156,7 +156,7 @@ impl ResponsesToolCallState {
             Some(call_id) => call_id,
             None => self.fabricated_call_id(output_index),
         };
-        let index = self.resolve_tool_call_index(&call_id, output_index);
+        let index = self.tool_call_indexes.resolve(&call_id, output_index, "OpenAI")?;
 
         if !delta.is_empty() {
             aggregator.handle_tool_calls(&[json!({
@@ -204,23 +204,6 @@ impl ResponsesToolCallState {
                 .get_or_insert_with(crate::providers::shared::generate_tool_call_id)
                 .clone(),
         }
-    }
-
-    fn resolve_tool_call_index(&mut self, call_id: &str, output_index: Option<usize>) -> usize {
-        if let Some(index) = output_index {
-            self.tool_call_indexes.insert(call_id.to_string(), index);
-            self.next_tool_call_index = self.next_tool_call_index.max(index + 1);
-            return index;
-        }
-
-        if let Some(index) = self.tool_call_indexes.get(call_id).copied() {
-            return index;
-        }
-
-        let index = self.next_tool_call_index;
-        self.tool_call_indexes.insert(call_id.to_string(), index);
-        self.next_tool_call_index += 1;
-        index
     }
 }
 
@@ -661,7 +644,7 @@ pub(crate) fn create_responses_stream(
                                             .get("output_index")
                                             .and_then(Value::as_u64)
                                             .map(|value| value as usize),
-                                    );
+                                    )?;
                                 }
                             }
                             "response.function_call_arguments.delta" => {
@@ -931,16 +914,18 @@ mod tests {
         let mut aggregator = StreamAggregator::new("gpt-5".to_string());
         let mut tool_call_state = ResponsesToolCallState::default();
 
-        tool_call_state.capture_metadata(
-            &mut aggregator,
-            &json!({
-                "type": "function_call",
-                "id": "fc_1",
-                "call_id": "call_1",
-                "name": "search_workspace"
-            }),
-            Some(0),
-        );
+        tool_call_state
+            .capture_metadata(
+                &mut aggregator,
+                &json!({
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "search_workspace"
+                }),
+                Some(0),
+            )
+            .unwrap();
         tool_call_state
             .handle_arguments_delta(
                 &mut aggregator,
@@ -961,6 +946,21 @@ mod tests {
                 "{\"query\":\"vtcode\"}".to_string(),
             )])
         );
+    }
+
+    #[test]
+    fn responses_tool_call_metadata_rejects_exhausted_index_before_aggregation() {
+        let mut aggregator = StreamAggregator::new("gpt-5".to_string());
+        let mut state = ResponsesToolCallState::default();
+        let error = state
+            .capture_metadata(
+                &mut aggregator,
+                &json!({"type":"function_call", "call_id":"too-large", "name":"search_workspace"}),
+                Some(usize::MAX),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("tool call index space exhausted"));
+        assert!(aggregator.finalize().tool_calls.is_none());
     }
 
     #[test]

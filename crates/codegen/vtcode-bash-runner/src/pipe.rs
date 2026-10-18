@@ -170,10 +170,29 @@ async fn spawn_process_internal(opts: PipeSpawnOptions) -> Result<SpawnedProcess
         anyhow::bail!("missing program for pipe spawn");
     }
 
+    #[cfg(unix)]
+    let owned = crate::process_owner::OwnedCommand::from_environment(
+        opts.program.as_ref(),
+        opts.args.iter(),
+        opts.arg0.as_deref().map(std::ffi::OsStr::new),
+    )?;
+
+    #[cfg(unix)]
+    let mut command = match &owned {
+        Some(owned) => {
+            let mut command = Command::new(&owned.executable);
+            command.args(&owned.arguments);
+            command
+        }
+        None => Command::new(&opts.program),
+    };
+    #[cfg(not(unix))]
     let mut command = Command::new(&opts.program);
 
     #[cfg(unix)]
-    if let Some(ref arg0) = opts.arg0 {
+    if owned.is_none()
+        && let Some(ref arg0) = opts.arg0
+    {
         command.arg0(arg0);
     }
 
@@ -204,9 +223,16 @@ async fn spawn_process_internal(opts: PipeSpawnOptions) -> Result<SpawnedProcess
         }
     }
 
-    for arg in &opts.args {
-        command.arg(arg);
+    #[cfg(unix)]
+    if let Some(owned) = &owned {
+        // Environment filtering remains authoritative; add only this private
+        // lifetime endpoint after applying the admitted command's environment.
+        command.env(crate::process_owner::OWNER_SOCKET_ENV, &owned.owner_socket);
+    } else {
+        command.args(&opts.args);
     }
+    #[cfg(not(unix))]
+    command.args(&opts.args);
 
     match opts.stdin_mode {
         PipeStdinMode::Piped => {

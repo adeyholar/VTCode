@@ -430,6 +430,62 @@ then terminates remaining owned processes and reaps the child. Cancellation is
 not rollback. Listener shutdown cancels and joins task supervisors before return.
 The transport crate owns only task interfaces; launch/supervision belongs to the binary.
 
+Windows process cleanup uses an owned synchronization handle to distinguish a
+missing or exited process from permission and termination failures. A process
+that exits during termination is also successful cleanup. Both forced and
+graceful `taskkill` helpers capture stdout/stderr; helper diagnostics must never
+enter the stdio MCP protocol. The Windows-only `windows-sys` dependency supplies
+the native handle and wait APIs, reusing the version already in the lockfile.
+The handle is closed by RAII on every return path.
+
+This lifetime check follows the owned-handle principle inspected in
+[`codex-rs/utils/pty/src/win/job.rs`](https://github.com/openai/codex/blob/8c076942cb70fba8e5c4732c23f1faabc4aed484/codex-rs/utils/pty/src/win/job.rs)
+(Apache-2.0, copyright 2025 OpenAI). No upstream code was copied and no Job Object
+containment is claimed. Unix managed commands use the separate lifetime
+mechanism described below because they detach into their own process groups.
+
+Windows regression sources cover exited/repeated cleanup, live-child
+termination, and invalid PID rejection. Cross-compilation checks those sources;
+it does not establish native Windows runtime behavior.
+
+### Unix managed-command ownership
+
+Each active task owns a private Unix socket in an exclusively created directory
+with mode `0700`. The exec runner, pipe launcher, and both PTY launch sites use
+the shared native helper in `vtcode-bash-runner::process_owner`. The binary
+dispatches this mode before agent-specific environment hardening, worker
+threads, or the async runtime. It
+preserves the admitted program, literal argv, `argv[0]`, working directory,
+environment filtering, and sandbox launcher. An absent or closed endpoint fails
+before target execution. Command approval remains with the existing launchers.
+Normal agent startup still applies process hardening; managed commands retain
+their admitted environment, including explicit unsandboxed loader overrides.
+
+After endpoint acknowledgement, the helper double-forks a group-local watchdog
+and replaces itself with the admitted command. The watchdog pins its own group
+identity, closes standard streams, and waits for owner EOF. EOF or an I/O error
+causes it to kill its own group. Double-forking keeps shell `wait` independent of
+the watchdog. Fork-child paths use documented async-signal-safe operations;
+ownership and readiness sockets close before the target executes. Cleanup does
+not maintain a registry of stale numeric tool process IDs.
+
+One service guard kills the root exec group, closes ownership connections, and
+joins the private cleanup worker before publishing a terminal result. Its drop
+path also runs on supervisor abort. Admission is capped at 256 live connections;
+startup acknowledgement and shutdown peer draining each have a two-second bound.
+A cleanup failure remains an error on repeated shutdown. The production task
+deadline remains thirty minutes; tests use the same private supervision path
+with a shorter budget.
+
+The regression sources exercise the shipped helper with real pipe and PTY
+groups, output closure, literal arguments, `argv[0]`, missing endpoints,
+descriptor closure, unrelated-process survival, and repeated shutdown. Service
+fixtures launch real detached helper groups and cover cancellation, collector
+failure, runner SIGKILL, deadline, and supervisor abort. This is a managed-group
+lifetime contract: descendants that deliberately create another process group
+or session are outside it. Native Linux and Windows behavior requires separate
+host validation; cross-compilation alone does not establish runtime behavior.
+
 ### Local validation (2026-10-17)
 
 The installed local plugin's stdio launcher completed MCP initialization, tool

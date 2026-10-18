@@ -47,6 +47,9 @@ vtcode-exec-events = { workspace = true, optional = true }
 libc = { workspace = true }
 nix = { workspace = true, features = ["user", "signal", "process"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [lib]
 doctest = false
 

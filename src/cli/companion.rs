@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +27,8 @@ const MAX_CHANGES: usize = 128;
 const TASK_TIMEOUT: Duration = Duration::from_secs(1800);
 
 mod command_evidence;
+#[cfg(unix)]
+mod process_owner;
 
 struct TaskRecord {
     snapshot: TaskSnapshot,
@@ -147,8 +149,21 @@ impl CompanionService {
         }
     }
 
-    fn command(&self, input: &StartTaskInput) -> Command {
+    fn command(&self, input: &StartTaskInput, owner_socket: Option<&Path>) -> Command {
         let mut command = Command::new(&self.executable);
+        #[cfg(unix)]
+        if let Some(socket) = owner_socket {
+            // The native helper replaces itself with this same exec entrypoint
+            // only after its lifetime monitor is ready. Keep launch argv exact.
+            command.args([
+                std::ffi::OsStr::new(vtcode_bash_runner::process_owner::HELPER_MODE),
+                self.executable.as_os_str(),
+                self.executable.as_os_str(),
+            ]);
+            command.env(vtcode_bash_runner::process_owner::OWNER_SOCKET_ENV, socket);
+        }
+        #[cfg(not(unix))]
+        let _ = owner_socket;
         command
             .current_dir(&self.workspace)
             .args(&self.launch_args)
@@ -174,9 +189,8 @@ impl CompanionService {
     }
 }
 
-#[async_trait]
-impl CompanionTasks for CompanionService {
-    async fn start(&self, input: StartTaskInput) -> Result<TaskSnapshot, String> {
+impl CompanionService {
+    async fn start_with_timeout(&self, input: StartTaskInput, timeout: Duration) -> Result<TaskSnapshot, String> {
         if input.prompt.trim().is_empty() || input.prompt.len() > MAX_PROMPT_BYTES || input.prompt.contains('\0') {
             return Err("prompt must contain 1 to 16384 UTF-8 bytes and no NUL".into());
         }
@@ -216,11 +230,22 @@ impl CompanionTasks for CompanionService {
                 )
             }
         };
+        #[cfg(unix)]
+        let owner = process_owner::TaskProcessOwner::new()
+            .map_err(|error| format!("failed to initialize task process ownership: {error}"))?;
+        #[cfg(unix)]
+        let owner_socket = Some(owner.socket());
+        #[cfg(not(unix))]
+        let owner_socket = None;
         let mut child = self
-            .command(&input)
+            .command(&input, owner_socket)
             .spawn()
             .map_err(|error| format!("failed to launch VT Code exec: {error}"))?;
-        let mut process_group = ProcessGroup(child.id());
+        let mut process_group = ProcessGroup {
+            pid: child.id(),
+            #[cfg(unix)]
+            owner,
+        };
         let mut stdin = child.stdin.take().ok_or("exec stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("exec stdout unavailable")?;
         let mut stderr = child.stderr.take().ok_or("exec stderr unavailable")?;
@@ -280,12 +305,12 @@ impl CompanionTasks for CompanionService {
             let outcome = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => None,
-                _ = tokio::time::sleep(TASK_TIMEOUT) => Some(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "task deadline exceeded"))),
+                _ = tokio::time::sleep(timeout) => Some(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "task deadline exceeded"))),
                 result = run => Some(result),
             };
             // Also terminate descendants retaining pipes after their parent exits.
             if outcome.is_none() {
-                if let Some(pid) = process_group.0 {
+                if let Some(pid) = process_group.pid {
                     let _ = vtcode_bash_runner::process_group::kill_process_group_with_signal(
                         pid,
                         vtcode_bash_runner::KillSignal::Int,
@@ -341,6 +366,13 @@ impl CompanionTasks for CompanionService {
         }
         Ok(snapshot)
     }
+}
+
+#[async_trait]
+impl CompanionTasks for CompanionService {
+    async fn start(&self, input: StartTaskInput) -> Result<TaskSnapshot, String> {
+        self.start_with_timeout(input, TASK_TIMEOUT).await
+    }
 
     async fn get(&self, task_id: &str) -> Result<TaskSnapshot, String> {
         let mut tasks = self.tasks.lock().await;
@@ -366,14 +398,34 @@ impl CompanionTasks for CompanionService {
 }
 
 // Drops also clean up if the supervisor future is aborted during runtime teardown.
-struct ProcessGroup(Option<u32>);
+struct ProcessGroup {
+    pid: Option<u32>,
+    #[cfg(unix)]
+    owner: process_owner::TaskProcessOwner,
+}
 
 impl ProcessGroup {
     fn terminate(&mut self) -> std::io::Result<()> {
-        match self.0.take() {
+        let group_result = match self.pid.take() {
             Some(pid) => vtcode_bash_runner::process_group::kill_process_group(pid),
             None => Ok(()),
+        };
+        #[cfg(unix)]
+        {
+            // Keep the root watchdog pinning its group ID until after the
+            // numeric group signal. The same ordering covers explicit cleanup
+            // and supervisor-future drop, without relying on capture order.
+            let owner_result = self.owner.shutdown();
+            match (group_result, owner_result) {
+                (Err(group), Err(owner)) => Err(std::io::Error::other(format!(
+                    "group cleanup failed: {group}; task owner cleanup failed: {owner}"
+                ))),
+                (Err(error), _) | (_, Err(error)) => Err(error),
+                (Ok(()), Ok(())) => Ok(()),
+            }
         }
+        #[cfg(not(unix))]
+        group_result
     }
 }
 
@@ -424,7 +476,7 @@ impl EventProjection {
             reasons.push("runtime reported a failure".into());
         }
         if !cleanup_ok {
-            reasons.push("process group cleanup failed".into());
+            reasons.push("owned process cleanup failed".into());
         }
         if !reap_ok {
             reasons.push("child reap could not be confirmed".into());

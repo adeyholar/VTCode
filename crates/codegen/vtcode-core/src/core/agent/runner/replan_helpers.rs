@@ -6,18 +6,17 @@
 use super::AgentRunner;
 use super::evaluator_types::GeneralizationNote;
 use super::orchestration::{EvaluationArtifacts, PlannerArtifacts};
-use super::planner_types::ReplanResponse;
+use super::planner_types::{PlannerItem, ReplanResponse};
 use crate::core::agent::harness_artifacts;
 use crate::core::agent::task::Task;
 use crate::tools::handlers::TaskTrackerTool;
-use crate::tools::traits::Tool;
-use serde_json::json;
 use tracing::warn;
+
+mod tracker_updates;
 
 impl AgentRunner {
     /// Build a `TaskTrackerTool` from the runner's workspace and planning
-    /// workflow state. Extracted to avoid repeating construction in
-    /// `apply_required_tracker_updates` and `replan_from_failure`.
+    /// workflow state, shared by both sources of reconciled tracker additions.
     fn tracker_tool(&self) -> TaskTrackerTool {
         TaskTrackerTool::new(self._workspace.clone(), self.tool_registry.planning_workflow_state())
     }
@@ -87,24 +86,20 @@ impl AgentRunner {
         })
     }
 
-    /// Apply the evaluator's `required_tracker_updates` by adding each as a
-    /// new tracker item.
+    /// Reconcile the evaluator's required updates without duplicating existing
+    /// requirements or resetting their progress.
     async fn apply_required_tracker_updates(&self, updates: &[String]) {
-        let tracker_tool = self.tracker_tool();
-        for update in updates {
-            let trimmed = update.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let result = tracker_tool
-                .execute(json!({
-                    "action": "add",
-                    "description": trimmed,
-                }))
-                .await;
-            if let Err(e) = result {
-                warn!(error = %e, item = trimmed, "failed to add required tracker update");
-            }
+        let items: Vec<_> = updates
+            .iter()
+            .map(|description| PlannerItem {
+                description: description.clone(),
+                files: Vec::new(),
+                outcome: String::new(),
+                verify: Vec::new(),
+            })
+            .collect();
+        if let Err(error) = self.apply_tracker_items(&items).await {
+            warn!(error = %error, "failed to apply required tracker updates");
         }
     }
 
@@ -160,22 +155,10 @@ impl AgentRunner {
             }
         }
 
-        if !replan.new_tracker_items.is_empty() {
-            let tracker_tool = self.tracker_tool();
-            for item in &replan.new_tracker_items {
-                if let Err(error) = tracker_tool
-                    .execute(json!({
-                        "action": "add",
-                        "description": item.description,
-                        "outcome": item.outcome,
-                        "verify": item.verify,
-                        "files": item.files,
-                    }))
-                    .await
-                {
-                    warn!(error = %error, "failed to add tracker item from replan");
-                }
-            }
+        if !replan.new_tracker_items.is_empty()
+            && let Err(error) = self.apply_tracker_items(&replan.new_tracker_items).await
+        {
+            warn!(error = %error, "failed to apply tracker items from replan");
         }
     }
 

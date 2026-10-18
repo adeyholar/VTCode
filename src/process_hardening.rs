@@ -26,11 +26,11 @@ fn remove_env_var(key: OsString) {
     env_lock::remove_var(key);
 }
 
-/// Perform early process hardening as the first operation in `main()`.
+/// Perform early agent process hardening before agent initialization.
 ///
-/// Call this before any other operations, thread spawning, or heap
-/// allocation to ensure the process is locked down before potential
-/// adversaries can influence its state. Steps include:
+/// Call after native command-helper dispatch and before agent initialization
+/// or thread spawning. Helpers retain the command launcher's admitted
+/// environment; the agent process applies these defenses before bootstrap:
 /// - disabling core dumps
 /// - disabling ptrace attach on Linux and macOS
 /// - removing dangerous environment variables such as LD_PRELOAD and DYLD_*

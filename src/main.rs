@@ -83,7 +83,19 @@ enum BootstrapOutcome {
 
 #[cfg_attr(feature = "profiling", hotpath::main)]
 fn main() -> std::process::ExitCode {
-    // Apply process hardening before any other operations.
+    // Preserve the command launcher's admitted environment. Agent-specific
+    // hardening below must not strip explicit overrides from managed commands.
+    #[cfg(unix)]
+    match vtcode_bash_runner::process_owner::maybe_run_owned_command() {
+        Ok(false) => {}
+        Ok(true) => return std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("owned command startup failed: {error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
+
+    // Apply agent process hardening before other agent initialization.
     // This disables core dumps, caps RLIMIT_STACK (defense-in-depth complement
     // to Rust's built-in stack clash protection — see rustc exploit-mitigations
     // docs), removes dangerous env vars, and prevents ptrace attach.
