@@ -39,6 +39,7 @@ The table below maps the primary subcommands to their purpose; detailed sections
 | `vtcode cleanup-snapshots`                                             | Prune old snapshots with a retention limit                          |
 | `vtcode update`                                                        | Check for and install binary updates from GitHub Releases           |
 | `vtcode man`                                                           | Generate or display man pages                                       |
+| `vtcode man --all-pages --output man/man1`                             | Write the main page and all visible command pages to a directory    |
 
 For a local MCP connection that exposes Companion coding tasks, use
 `vtcode webmcp stdio --companion` with an explicitly selected workspace. The

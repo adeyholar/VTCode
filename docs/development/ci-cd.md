@@ -43,14 +43,77 @@ The project uses several GitHub Actions workflows to ensure code quality and aut
 - Manual `workflow_dispatch` with release tag input
 - Dispatched from `scripts/release.sh` Step 3.5 via `gh workflow run`
 
+**Daily release budget:** `scripts/release.sh` checks GitHub before builds, generated-file
+updates, version bumps, or tags. A successful or active release build created on the same
+UTC day stops a new release; batch remaining changes for the next day. Failed and cancelled
+builds allow retries. API failures stop the release rather than silently spending more CI.
+Use `./scripts/release.sh --patch --force-ci` for an urgent additional release.
+`--skip-release` resumes and `--skip-binaries` releases do not spend new build budget
+unless combined with `--ci-only`. Dry runs describe the check without calling GitHub.
+This is a release-script guard, not a scheduler or atomic server-side quota: concurrent
+invocations can race, and direct manual workflow dispatch remains an explicit bypass.
+The full required platform matrix is preserved; intermediate versions are not published
+with missing binaries. The September 18–October 17, 2026 history suggests about 31 runner-minutes
+saved per day if maintainers batch the observed 48 builds into 26 daily builds, using
+the two successful post-optimization runs' average of 41.7 runner-minutes per build.
+
 **Jobs:**
 
-- **Gen man pages**: Builds `man/` once via `xtask`, shares via `man-pages` artifact
-- **Build Linux**: Compiles `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-gnu`
-  binaries (`needs: [gen-man]`, `fail-fast: true`, `timeout 45m`)
+- **Build GNU Linux**: Builds `x86_64-unknown-linux-gnu`, runs that binary's
+  `man --all-pages --output man/man1`, and uploads its release archive plus the shared `man-pages` artifact.
+  This removes the separate `xtask` development-profile build for current tags. Rebuilding older tags
+  without `man --all-pages` falls back to `xtask`; generation failures do not trigger that fallback.
+- **Build cross Linux**: Compiles `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-gnu`
+  (`needs: [build-linux-gnu]`, `fail-fast: true`, `timeout 45m`). Cross uses its container toolchains;
+  no host Zig installation is needed. Waiting for GNU Linux can increase elapsed workflow time even
+  while total runner-minutes decrease.
 - **Build Windows**: Compiles `x86_64-pc-windows-msvc` binary (`--jobs 4`, `timeout 45m`)
 - **Upload Artifacts**: Stores compiled binaries + extension-stripped `.sha256` sidecars for release
   (`retention-days: 2`, `compression-level: 0` — archives already compressed)
+
+**Compiler-cache pilot:** the dispatch/reusable-workflow input `compiler_cache_pilot` defaults to
+`false`. Set it to `true` to install sccache for native GNU Linux and Windows, with incremental
+compilation disabled and cache statistics recorded. Cross-container builds are deliberately excluded.
+Compare repeated runs of the same tag, target, toolchain, and build profile against the default;
+include cache setup, restore/save, compilation, and linking in the comparison. Do not enable it by
+default until net runner-minutes improve. sccache cannot cache Rust invocations that invoke the
+system linker, including binary linking; see the [sccache Rust limitations](https://github.com/mozilla/sccache/blob/main/docs/Rust.md).
+No hosted speedup is established by the local regression tests.
+
+```bash
+gh workflow run build-linux-windows.yml --field tag=<tag> --field compiler_cache_pilot=true
+```
+
+### Man-page generation reference
+
+| Command | Output |
+| --- | --- |
+| `vtcode man` | Main page on stdout |
+| `vtcode man chat --output chat.1` | One command page in a file |
+| `vtcode man --all-pages --output man/man1` | Main page and every visible top-level command page in a directory |
+
+`--all-pages` requires `--output` and conflicts with a single command name. Generation uses the same
+compiled clap command tree as `--help`; there is no separately maintained command list. Filesystem
+errors propagate to the caller. Existing files with matching names are overwritten; other files
+in the directory are retained, so use a fresh staging directory when packaging.
+
+### Selecting affected CI checks
+
+`ci.yml` selects Rust and dependency checks before heavy jobs start. Documentation-only changes
+keep lightweight invariant/security/Markdown checks and skip Rust compilation. Embedded source and
+fixture directories, scripts, Cargo/configuration files, and the embedded config-field reference
+still select Rust checks. License/dependency jobs select their manifests, lockfile, notice inputs,
+and workflow changes. Scheduled and manual runs select the full existing check set.
+The `changes` job has read-only pull-request permission for fork-safe path discovery.
+
+CI, coverage, and tool-eval concurrency groups include the event and branch/PR, allowing successive
+pushes to cancel obsolete runs without cancelling separate manual or scheduled checks. These
+definitions do not re-enable workflows disabled in GitHub. Lightweight contract tests run with
+`python3 scripts/tests/test_ci_load.py`; daily-budget tests run with
+`python3 scripts/tests/test_release_ci_budget.py`.
+
+Selective musl/ARM64/Windows omission is an alternative to daily batching and is not enabled:
+the release publisher and legacy updater bridge require complete platform coverage by default.
 
 **Required release target matrix** (enforced by `scripts/release.sh`):
 
@@ -430,7 +493,7 @@ and the [June 2026 changelog](https://github.blog/changelog/2026-06-25-actions-s
 - Do not parallelize steps that share one output file (e.g. two harnesses `tee`ing to the same log)
   or that both invoke `cargo` on the same workspace (e.g. `cargo build` + `cargo tree`).
 
-Current uses: `webmcp.yml` typecheck + test, `ci.yml` `large-files` (3 python checks),
+Current uses: `webmcp.yml` typecheck + test, `ci.yml` `large-files` (5 Python checks),
 `zen-governance` (3 baselines), `lint-markdown` (2 selector tests + lint), and independent Rust setup tasks.
 
 In `ci.yml`, Clippy and scheduled cross-platform checks restore Cargo caches alongside sccache setup. The Ubuntu test

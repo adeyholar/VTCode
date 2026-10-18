@@ -1,5 +1,5 @@
 use crate::startup::StartupContext;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use vtcode_core::cli::args::{Cli, Commands, ExecSubcommand};
 use vtcode_core::mcp::cli::handle_mcp_command;
 
@@ -211,8 +211,13 @@ pub(crate) async fn dispatch_command(args: &Cli, startup: &StartupContext, comma
             let options = benchmark::BenchmarkCommandOptions { task_file, inline_task: task, output, max_tasks };
             benchmark::handle_benchmark_command(core_cfg, cfg, options, full_auto_requested).await?;
         }
-        Commands::Man { command, output } => {
-            man::handle_man_command(command, output).await?;
+        Commands::Man { command, output, all_pages } => {
+            if all_pages {
+                let directory = output.context("--all-pages requires an output directory")?;
+                man::handle_all_man_pages(&directory)?;
+            } else {
+                man::handle_man_command(command, output).await?;
+            }
         }
         Commands::BenchAllocator(args) => {
             handle_bench_allocator_command(args).await?;

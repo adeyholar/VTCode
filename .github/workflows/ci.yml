@@ -20,6 +20,7 @@ on:
       - "**.ts"
       - "**.md" # Still run on markdown changes since we have markdown linting
       - "scripts/**"
+      - "THIRD-PARTY-NOTICES"
       - "!.github/dependabot.yml" # Exclude dependabot changes
       - "!.gitignore"
       - "!.vtcodegitignore"
@@ -38,6 +39,7 @@ on:
       - "**.ts"
       - "**.md" # Still run on markdown changes since we have markdown linting
       - "scripts/**"
+      - "THIRD-PARTY-NOTICES"
       - "!.github/dependabot.yml" # Exclude dependabot changes
       - "!.gitignore"
       - "!.vtcodegitignore"
@@ -56,11 +58,56 @@ defaults:
 # ensure that the workflow is only triggered once per PR,  subsequent pushes to the PR will cancel
 # and restart the workflow. See https://docs.github.com/en/actions/using-jobs/using-concurrency
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Make obvious and fast tests to run first, to catch issues as early as possible
 jobs:
+  changes:
+    name: Select affected checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust == 'true' }}
+      dependencies: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.dependencies == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - id: filter
+        if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'crates/**'
+              - 'tests/**'
+              - 'benches/**'
+              - 'scripts/**'
+              - '.cargo/**'
+              - '.github/**'
+              - '**/*.rs'
+              - '**/*.toml'
+              - '**/*.lock'
+              - '**/*.json'
+              - '**/*.yaml'
+              - '**/*.yml'
+              - 'docs/config/CONFIG_FIELD_REFERENCE.md'
+            dependencies:
+              - '**/Cargo.toml'
+              - 'Cargo.lock'
+              - 'about.toml'
+              - 'THIRD-PARTY-NOTICES'
+              - 'scripts/generate-notices.sh'
+              - 'scripts/templates/third-party-*'
+              - '.github/workflows/ci.yml'
+
   workflow-security:
     name: Workflow Security Policy
     runs-on: ubuntu-latest
@@ -93,6 +140,10 @@ jobs:
             run: python3 scripts/check_markdown_location.py
           - name: Check core docs link integrity
             run: python3 scripts/check_docs_links.py
+          - name: Test CI load contracts
+            run: python3 scripts/tests/test_ci_load.py
+          - name: Test daily release CI budget
+            run: python3 scripts/tests/test_release_ci_budget.py
 
   zen-governance:
     name: Zen Governance (Warn)
@@ -130,6 +181,8 @@ jobs:
 
   # Lint the formatting of the codebase.
   formatting:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: Check Formatting
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -167,6 +220,8 @@ jobs:
   # Verify THIRD-PARTY-NOTICES is in sync with Cargo.lock.
   # See <https://github.com/EmbarkStudios/cargo-about>
   license-notices:
+    needs: changes
+    if: needs.changes.outputs.dependencies == 'true'
     name: Check License Notices
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -187,6 +242,8 @@ jobs:
 
   # Run cargo clippy.
   lint-clippy:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: Check Clippy
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -219,7 +276,8 @@ jobs:
   # See docs/guides/cargo-unmaintained.md for more information.
   unmaintained:
     name: Check Unmaintained Dependencies
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    needs: changes
+    if: ${{ needs.changes.outputs.dependencies == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -240,7 +298,8 @@ jobs:
 
   dependency-audit:
     name: Check RustSec Advisories
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    needs: changes
+    if: ${{ needs.changes.outputs.dependencies == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -336,7 +395,8 @@ jobs:
 
   check-windows:
     name: Check Windows (warm cache)
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
@@ -385,6 +445,8 @@ jobs:
           -p vtcode-core -p vtcode-commons -E 'test(terminal_setup) | test(terminal_detection) | test(memory_envelope::persistence_tests) | test(private_file_writer)'
 
   test:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: "Cargo nextest"
     runs-on: "ubuntu-latest"
     timeout-minutes: 20
@@ -440,6 +502,8 @@ jobs:
           -E 'binary(/^pty_tests$/) | binary(/^pipe_tests$/) | (binary(/^vtcode$/) & test(inline_events::tests))'
 
   msrv:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: MSRV Check (1.98.1)
     runs-on: ubuntu-latest
     timeout-minutes: 20

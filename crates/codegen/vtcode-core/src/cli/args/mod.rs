@@ -715,7 +715,10 @@ pub enum Commands {
     Man {
         /// Command name to generate man page for (optional)
         command: Option<String>,
-        /// Output file path to save man page
+        /// Generate the main page and every visible command page
+        #[arg(long, conflicts_with = "command", requires = "output")]
+        all_pages: bool,
+        /// Output file, or output directory when --all-pages is specified
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -1175,5 +1178,19 @@ mod tests {
         let result = Cli::try_parse_from(["vtcode", "config", "reset", "--global", "--project"]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn man_all_pages_requires_directory_and_rejects_single_command() {
+        let cli = Cli::try_parse_from(["vtcode", "man", "--all-pages", "--output", "man/man1"])
+            .expect("all pages with an output directory");
+        assert!(!cli.all, "man-page generation must not enable session selection");
+        assert!(matches!(cli.command, Some(Commands::Man { all_pages: true, command: None, output: Some(_) })));
+        assert!(Cli::try_parse_from(["vtcode", "man", "--all-pages"]).is_err());
+        assert!(Cli::try_parse_from(["vtcode", "man", "chat", "--all-pages", "--output", "man"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["vtcode", "man", "chat"]).expect("single page").command,
+            Some(Commands::Man { all_pages: false, .. })
+        ));
     }
 }
