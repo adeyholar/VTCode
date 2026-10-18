@@ -231,7 +231,6 @@ pub(crate) async fn initialize_session_ui(
         settings_sender,
         handle.clone(),
         config.clone(),
-        vt_cfg.cloned(),
         ctrl_c_state.clone(),
         ctrl_c_notify.clone(),
         settings_snapshot.clone(),

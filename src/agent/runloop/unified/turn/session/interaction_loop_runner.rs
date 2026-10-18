@@ -150,6 +150,13 @@ pub(super) async fn run_interaction_loop_impl(
                         }
                     }
                     workspace_config_reloaded = true;
+                    // Refresh the busy-picker snapshot too: a picker opened
+                    // after the reload must see current custom providers,
+                    // provider order, auth routes, and `service_tier`.
+                    crate::agent::runloop::unified::session_settings::publish_vt_cfg(
+                        ctx.settings_snapshot,
+                        ctx.vt_cfg.as_ref(),
+                    );
                 }
             }
         }

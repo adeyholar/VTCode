@@ -103,10 +103,12 @@ pub(crate) async fn initialize_session_shell(
     let ctrl_c_notify = Arc::new(Notify::new());
     // Seeded from the initial config; refreshed by the interaction loop so the
     // busy-turn settings task never opens a picker with stale current values.
+    // `vt_cfg` rides along and is refreshed on live config reload only.
     let settings_snapshot = crate::agent::runloop::unified::session_settings::shared_settings_snapshot(
         config.provider.clone(),
         config.model.clone(),
         config.reasoning_effort,
+        vt_cfg,
     );
     let input_activity_counter = Arc::new(AtomicU64::new(0));
     let pty_counter = Arc::new(AtomicUsize::new(0));

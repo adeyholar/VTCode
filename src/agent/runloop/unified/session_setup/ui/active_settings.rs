@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use tokio::sync::{Notify, mpsc};
-use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_ui::tui::app::{InlineEvent, InlineHandle, TransientEvent, TransientSubmission};
 
 use crate::agent::runloop::model_picker::{ModelPickerProgress, ModelPickerStart, ModelPickerState};
 use crate::agent::runloop::unified::session_settings::{
-    SessionSettingsControl, SharedSettingsSnapshot, publish_settings_if_changed, read_settings_snapshot,
+    SessionSettingsControl, SettingsSnapshot, SharedSettingsSnapshot, publish_settings_if_changed,
+    read_settings_snapshot,
 };
 use crate::agent::runloop::unified::state::CtrlCState;
 
@@ -21,7 +21,6 @@ pub(super) async fn run(
     settings: mpsc::UnboundedSender<SessionSettingsControl>,
     handle: InlineHandle,
     config: AgentConfig,
-    vt_cfg: Option<VTCodeConfig>,
     ctrl_c_state: Arc<CtrlCState>,
     ctrl_c_notify: Arc<Notify>,
     settings_snapshot: SharedSettingsSnapshot,
@@ -49,18 +48,19 @@ pub(super) async fn run(
                         );
                     }
                     // Read the shared snapshot at open time: it carries any
-                    // idle `/model` change applied by the interaction loop, so
-                    // the picker opens with current values rather than the
-                    // spawn-time seed.
-                    let current = read_settings_snapshot(&settings_snapshot);
+                    // idle `/model` change applied by the interaction loop, and
+                    // the live config refreshed on reload, so the picker opens
+                    // with current values rather than the spawn-time seed.
+                    let SettingsSnapshot { provider, model, effort, vt_cfg } =
+                        read_settings_snapshot(&settings_snapshot);
                     match ModelPickerState::new(
                         &mut renderer,
-                        vt_cfg.clone(),
-                        current.effort,
+                        vt_cfg.as_deref().cloned(),
+                        effort,
                         vt_cfg.as_ref().and_then(|cfg| cfg.provider.openai.service_tier),
                         Some(config.workspace.clone()),
-                        current.provider,
-                        current.model,
+                        provider,
+                        model,
                         Some(Arc::clone(&ctrl_c_state)),
                         Some(Arc::clone(&ctrl_c_notify)),
                     )
