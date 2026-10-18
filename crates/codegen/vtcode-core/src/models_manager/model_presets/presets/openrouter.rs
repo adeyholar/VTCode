@@ -1,6 +1,9 @@
 //! openrouter_presets — provider preset definitions for openrouter.
 
-use super::super::{ModelPreset, ReasoningEffortPreset};
+use super::super::ModelPreset;
+use super::reasoning_ladder_low_medium_high;
+use super::reasoning_ladder_low_medium_high_verbose;
+use super::reasoning_preset;
 use crate::config::models::Provider;
 use crate::config::types::ReasoningEffortLevel;
 pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
@@ -13,22 +16,10 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
             supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::XHigh,
-                    description: "Maximum".to_string(),
-                },
+                reasoning_preset(ReasoningEffortLevel::Low, "Fast"),
+                reasoning_preset(ReasoningEffortLevel::Medium, "Balanced"),
+                reasoning_preset(ReasoningEffortLevel::High, "Deep"),
+                reasoning_preset(ReasoningEffortLevel::XHigh, "Maximum"),
             ],
             is_default: false,
             upgrade: None,
@@ -44,22 +35,10 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::High,
             supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::XHigh,
-                    description: "Maximum".to_string(),
-                },
+                reasoning_preset(ReasoningEffortLevel::Low, "Fast"),
+                reasoning_preset(ReasoningEffortLevel::Medium, "Balanced"),
+                reasoning_preset(ReasoningEffortLevel::High, "Deep"),
+                reasoning_preset(ReasoningEffortLevel::XHigh, "Maximum"),
             ],
             is_default: false,
             upgrade: None,
@@ -76,18 +55,9 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::High,
             supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Max,
-                    description: "Maximum thinking".to_string(),
-                },
+                reasoning_preset(ReasoningEffortLevel::Low, "Fast"),
+                reasoning_preset(ReasoningEffortLevel::High, "Balanced"),
+                reasoning_preset(ReasoningEffortLevel::Max, "Maximum thinking"),
             ],
             is_default: false,
             upgrade: None,
@@ -102,10 +72,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Kimi K3 2.8T parameter flagship with 1M context, native vision, and always-on deep reasoning via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Max,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Max,
-                description: "Maximum (only supported level)".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Max, "Maximum (only supported level)")],
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -120,20 +87,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Tencent Hy3 high-efficiency MoE model with configurable reasoning via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep".to_string(),
-                },
-            ],
+            supported_reasoning_efforts: reasoning_ladder_low_medium_high(),
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -148,22 +102,10 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::High,
             supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep (default)".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::XHigh,
-                    description: "Maximum depth".to_string(),
-                },
+                reasoning_preset(ReasoningEffortLevel::Low, "Fast"),
+                reasoning_preset(ReasoningEffortLevel::Medium, "Balanced"),
+                reasoning_preset(ReasoningEffortLevel::High, "Deep (default)"),
+                reasoning_preset(ReasoningEffortLevel::XHigh, "Maximum depth"),
             ],
             is_default: false,
             upgrade: None,
@@ -179,22 +121,10 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::High,
             supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep (default)".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::XHigh,
-                    description: "Maximum depth".to_string(),
-                },
+                reasoning_preset(ReasoningEffortLevel::Low, "Fast"),
+                reasoning_preset(ReasoningEffortLevel::Medium, "Balanced"),
+                reasoning_preset(ReasoningEffortLevel::High, "Deep (default)"),
+                reasoning_preset(ReasoningEffortLevel::XHigh, "Maximum depth"),
             ],
             is_default: false,
             upgrade: None,
@@ -209,10 +139,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Xiaomi MiMo-V2.6-Pro flagship agentic model for complex software engineering via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Medium, "Balanced")],
             is_default: true,
             upgrade: None,
             show_in_picker: true,
@@ -226,10 +153,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Xiaomi MiMo-V2.6-Flash efficient high-volume agentic model via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Medium, "Balanced")],
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -243,10 +167,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Xiaomi MiMo-V2.6-Pro-UltraSpeed fastest flagship variant via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Medium, "Balanced")],
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -260,10 +181,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Poolside Laguna M.1 flagship free coding agent model via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Medium, "Balanced")],
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -277,10 +195,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Poolside Laguna S 2.1 118B MoE free coding agent model with 256K context via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Medium, "Balanced")],
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -294,10 +209,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Cost-optimized lightweight Gemini model for efficient inference via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Medium, "Balanced")],
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -311,10 +223,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Latest Gemini flash model with improved reasoning and efficiency via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            }],
+            supported_reasoning_efforts: vec![reasoning_preset(ReasoningEffortLevel::Medium, "Balanced")],
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -328,20 +237,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Flash model with 1M context and tunable thinking levels via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast responses".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced reasoning".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep reasoning".to_string(),
-                },
-            ],
+            supported_reasoning_efforts: reasoning_ladder_low_medium_high_verbose(),
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -355,20 +251,7 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             description: "Most intelligent Flash for long-horizon SWE, agents, and enterprise workflows via OpenRouter".to_string(),
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast responses".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced reasoning".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep reasoning".to_string(),
-                },
-            ],
+            supported_reasoning_efforts: reasoning_ladder_low_medium_high_verbose(),
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -384,22 +267,10 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             provider: Provider::OpenRouter,
             default_reasoning_effort: ReasoningEffortLevel::High,
             supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep (default)".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::XHigh,
-                    description: "Maximum depth".to_string(),
-                },
+                reasoning_preset(ReasoningEffortLevel::Low, "Fast"),
+                reasoning_preset(ReasoningEffortLevel::Medium, "Balanced"),
+                reasoning_preset(ReasoningEffortLevel::High, "Deep (default)"),
+                reasoning_preset(ReasoningEffortLevel::XHigh, "Maximum depth"),
             ],
             is_default: false,
             upgrade: None,

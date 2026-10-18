@@ -1,6 +1,7 @@
 //! minimax_presets — provider preset definitions for minimax.
 
-use super::super::{ModelPreset, ReasoningEffortPreset};
+use super::super::ModelPreset;
+use super::reasoning_ladder_medium_high;
 use crate::config::models::Provider;
 use crate::config::types::ReasoningEffortLevel;
 pub(crate) fn minimax_presets() -> Vec<ModelPreset> {
@@ -11,16 +12,7 @@ pub(crate) fn minimax_presets() -> Vec<ModelPreset> {
         description: "Frontier multimodal coding model with 1M context".to_string(),
         provider: Provider::Minimax,
         default_reasoning_effort: ReasoningEffortLevel::Medium,
-        supported_reasoning_efforts: vec![
-            ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::Medium,
-                description: "Balanced".to_string(),
-            },
-            ReasoningEffortPreset {
-                effort: ReasoningEffortLevel::High,
-                description: "Deep".to_string(),
-            },
-        ],
+        supported_reasoning_efforts: reasoning_ladder_medium_high(),
         is_default: true,
         upgrade: None,
         show_in_picker: true,

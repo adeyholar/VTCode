@@ -1,6 +1,7 @@
 //! openai_presets — provider preset definitions for openai.
 
 use super::super::{ModelPreset, ReasoningEffortPreset};
+use super::reasoning_ladder_low_medium_high;
 use super::reasoning_preset;
 use crate::config::models::Provider;
 use crate::config::types::ReasoningEffortLevel;
@@ -202,20 +203,7 @@ pub(crate) fn openai_presets() -> Vec<ModelPreset> {
             description: "OpenAI's open-source 20B parameter model".to_string(),
             provider: Provider::OpenAI,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep".to_string(),
-                },
-            ],
+            supported_reasoning_efforts: reasoning_ladder_low_medium_high(),
             is_default: false,
             upgrade: None,
             show_in_picker: true,
@@ -229,20 +217,7 @@ pub(crate) fn openai_presets() -> Vec<ModelPreset> {
             description: "OpenAI's open-source 120B parameter model with advanced reasoning".to_string(),
             provider: Provider::OpenAI,
             default_reasoning_effort: ReasoningEffortLevel::Medium,
-            supported_reasoning_efforts: vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Low,
-                    description: "Fast".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::Medium,
-                    description: "Balanced".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffortLevel::High,
-                    description: "Deep".to_string(),
-                },
-            ],
+            supported_reasoning_efforts: reasoning_ladder_low_medium_high(),
             is_default: false,
             upgrade: None,
             show_in_picker: true,
