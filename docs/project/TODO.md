@@ -17,7 +17,3 @@ gui
 --
 
 computer use
-
----
-
-https://developers.openai.com/api/docs/guides/decisions-voice
