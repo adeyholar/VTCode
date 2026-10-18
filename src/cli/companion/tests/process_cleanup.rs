@@ -9,6 +9,15 @@ fn fixture_with_owned_child(invalid_output: bool) -> (TempDir, CompanionService)
     let root = TempDir::new().unwrap();
     let native = assert_cmd::cargo::cargo_bin("vtcode");
     assert!(native.is_file(), "build the shipped vtcode binary before this test");
+    // The shipped debug binary is hundreds of megabytes, and its first exec in a
+    // test process pays a multi-second pre-`main` startup cost that has nothing to
+    // do with command lifetime. Load it once here so fixture readiness below
+    // measures the supervisor rather than that startup.
+    let warm = std::process::Command::new(&native)
+        .arg("--version")
+        .output()
+        .expect("load the shipped vtcode binary");
+    assert!(warm.status.success(), "shipped vtcode binary failed to start");
     let executable = root.path().join("fake-vtcode");
     let script = format!(
         r#"#!/usr/bin/env python3
@@ -122,10 +131,16 @@ async fn companion_supervisor_abort_closes_detached_command_ownership() {
 #[tokio::test]
 async fn companion_deadline_closes_detached_command_ownership() {
     let (root, service) = fixture_with_owned_child(false);
-    // Exercise the production deadline branch with a shorter private budget;
-    // the public service entry point retains its thirty-minute limit.
-    let started = service.start_with_timeout(input("plan"), Duration::from_secs(1)).await.unwrap();
+    // Exercise the production deadline branch with a shorter private budget; the
+    // public service entry point retains its thirty-minute limit. The budget must
+    // still outlast fixture readiness, which launches the (warmed) native binary
+    // through the ownership helper before there is a detached command to close.
+    let started = service.start_with_timeout(input("plan"), Duration::from_secs(2)).await.unwrap();
     let child = read_pid(&root, "owned-pid").await;
+    assert!(
+        kill(child, None).is_ok(),
+        "fixture published its owned command only after the deadline had already closed ownership"
+    );
     let result = terminal(&service, &started.task_id).await;
     assert_eq!(result.state, TaskState::Failed);
     assert!(result.progress.contains("task deadline exceeded"), "{}", result.progress);

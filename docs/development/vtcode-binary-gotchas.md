@@ -22,6 +22,11 @@ changing the runloop, update path, allocator, or request assembly.
   macOS its build reports `background_thread currently supports pthread only` and behaves like mimalloc. On Linux
   containers it can reclaim memory. Measure with `vtcode bench-allocator` before changing the default.
 - `load_dotenv()` must run before config load so `.env` API keys are available.
+- Debug binaries are hundreds of megabytes: the *first* exec of a fresh `target/debug/vtcode` in a process pays a
+  multi-second pre-`main` startup cost (loader work on cold pages), while later execs in that process take
+  milliseconds. Tests that race a wall-clock deadline against fixture readiness (for example
+  `cli::companion::tests::process_cleanup`) must exec the shipped binary once to warm it, otherwise the deadline
+  closes the fixture's owned command before it can publish a pid and the test fails with a bare timeout.
 - Provider noise (for example `]<]minimax[>[`) is stripped centrally in `turn::provider_noise`; stream-level harmony and
   MiniMax sanitization lives in `stream_sanitization::StreamSanitizer`. Do not re-implement it inline.
 
