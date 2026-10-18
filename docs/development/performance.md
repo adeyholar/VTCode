@@ -474,7 +474,7 @@ startup work is observable without adding work to normal launches.
   `session_setup_registry`) and re-drive the ready UI before hydration. Ratchet:
   `critical_path_avoids_registry_and_discovery`.
 - **Static-first typeable shell.** `initialize_session_shell` paints a typeable TUI (bootstrap placeholder + built-in
-  slash commands) _before_ `initialize_session_critical` builds `ToolRegistry`, discovers subagents, or constructs the
+  slash commands) *before* `initialize_session_critical` builds `ToolRegistry`, discovers subagents, or constructs the
   provider client. Keystrokes typed into the shell survive the ready re-drive (no respawn). Structural ratchet:
   `shell::tests::shell_module_avoids_heavy_init_before_paint`.
 - **Interactive first frame uses a critical/hydrate split.** `initialize_session_critical` builds the heavy session

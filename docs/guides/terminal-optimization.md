@@ -127,8 +127,10 @@ and [user keymaps](https://zed.dev/docs/key-bindings#user-keymaps).
 
 ### Core input shortcuts
 
-- `Enter` submits the draft when idle, or queues it for the next turn while a turn is running (each Enter stays its own turn).
-- `Ctrl+Enter` queues the draft for the next turn while a turn is running (batchable), or runs it immediately when idle.
+- `Enter` submits the draft when idle, or queues it for the next turn while a turn is running (each Enter
+  stays its own turn).
+- `Ctrl+Enter` queues the draft for the next turn while a turn is running (batchable), or runs it
+  immediately when idle.
 - `Ctrl+J` inserts a literal line feed.
 - `Esc` cancels the current input or closes an active modal.
 

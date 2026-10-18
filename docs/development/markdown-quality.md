@@ -19,7 +19,9 @@ avatars, disclosure sections, and keyboard labels.
 
 Narrow inline exceptions document intentional historical headings, long
 generated avatar markup, and compact instruction files with fixed line budgets.
-Fix generated output at its generator so regeneration remains lint-clean.
+The generated `CHANGELOG.md` carries a file-level `markdownlint-disable` for the
+subject-dependent rules (see [CHANGELOG_GENERATION](CHANGELOG_GENERATION.md)). Fix
+generated output at its generator so regeneration remains lint-clean.
 
 | Check | Command |
 | --- | --- |
