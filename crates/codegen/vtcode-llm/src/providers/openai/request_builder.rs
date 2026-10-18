@@ -13,10 +13,8 @@ mod responses;
 pub(crate) use chat::build_chat_request;
 pub(crate) use responses::build_responses_request;
 
-use model_policy::{is_gpt6_model, is_gpt56_model};
-
 pub(super) fn supports_prompt_cache_options(model: &str) -> bool {
-    is_gpt56_model(model) || is_gpt6_model(model)
+    vtcode_config::core::prompt_cache::supports_openai_explicit_prompt_cache(model)
 }
 
 pub(crate) struct ChatRequestContext<'a> {

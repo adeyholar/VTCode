@@ -974,7 +974,7 @@ pub(crate) async fn run_turn_loop(
         // so this request may unexpectedly re-pay full input cost.
         if let Some(threshold) = turn_processing_ctx
             .vt_cfg
-            .and_then(|cfg| cfg.prompt_cache.gap_threshold_secs(&provider_name))
+            .and_then(|cfg| cfg.prompt_cache.gap_threshold_secs_for_model(&provider_name, &active_model))
         {
             let threshold = Duration::from_secs(threshold);
             if turn_processing_ctx.session_stats.total_usage().cached_input_tokens > 0
@@ -983,7 +983,7 @@ pub(crate) async fn run_turn_loop(
                 let _ = turn_processing_ctx.renderer.line(
                     MessageStyle::Info,
                     &format!(
-                        "~{} since the last request; the provider prompt cache has likely expired, so this request may re-pay full input cost.",
+                        "~{} since the last request; the provider prompt cache may have expired, so this request may rebuild cached input.",
                         vtcode_core::llm::request_gap::format_gap(elapsed)
                     ),
                 );

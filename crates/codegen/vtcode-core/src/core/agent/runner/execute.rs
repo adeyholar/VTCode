@@ -939,7 +939,7 @@ impl AgentRunner {
                 if let Some(threshold) = self
                     .config()
                     .prompt_cache
-                    .gap_threshold_secs(self.config().agent.provider.as_str())
+                    .gap_threshold_secs_for_model(&provider_name, &turn_model)
                 {
                     let threshold = std::time::Duration::from_secs(threshold);
                     if runtime.state.stats.total_usage.cached_input_tokens > 0
@@ -947,7 +947,7 @@ impl AgentRunner {
                     {
                         let gap = crate::llm::request_gap::format_gap(elapsed);
                         let message = format!(
-                            "~{gap} since the last request; the provider prompt cache has likely expired, so this request may re-pay full input cost."
+                            "~{gap} since the last request; the provider prompt cache may have expired, so this request may rebuild cached input."
                         );
                         tracing::warn!("{message}");
                         runtime.state.push_warning(message);

@@ -43,6 +43,9 @@ pub enum AnthropicThinkingConfig {
 #[serde(rename_all = "snake_case")]
 pub enum PromptCacheProfile {
     BudgetContinuation,
+    /// Cache only stable instructions for an independent auxiliary request.
+    /// Native GPT-5.6+ uses explicit-only caching; other routes ignore this profile.
+    StablePrefix,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

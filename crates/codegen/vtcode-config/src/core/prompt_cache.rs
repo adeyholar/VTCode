@@ -4,6 +4,28 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use vtcode_commons::VtCodePaths;
 
+/// Known native models supporting explicit breakpoints and the 30-minute TTL.
+/// Reject migration-only aliases: parsing an older model as a newer replacement
+/// does not establish support for the older model's wire request.
+#[must_use]
+pub fn supports_openai_explicit_prompt_cache(model: &str) -> bool {
+    use crate::models::ModelId;
+    let Ok(model_id) = model.parse::<ModelId>() else {
+        return false;
+    };
+    (model_id.as_str() == model || model == crate::constants::models::openai::GPT_5_6)
+        && matches!(
+            model_id,
+            ModelId::GPT56Sol
+                | ModelId::GPT56Terra
+                | ModelId::GPT56Luna
+                | ModelId::GPT6Astra
+                | ModelId::GPT6Sol
+                | ModelId::GPT61Sol
+                | ModelId::GPT6Luna
+        )
+}
+
 /// Global prompt caching configuration loaded from vtcode.toml
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -110,27 +132,32 @@ impl PromptCachingConfig {
 
     /// Resolve the cache-gap warning threshold in seconds for a provider.
     ///
-    /// Returns `None` when the warning should not fire: gap warnings disabled,
-    /// caching disabled for the provider, or OpenAI configured with 24h
-    /// extended retention (where a short pause cannot expire the cache).
+    /// Returns `None` when gap warnings or provider caching are disabled.
+    /// Call the model-aware resolver when the active model is known.
     pub fn gap_threshold_secs(&self, provider_name: &str) -> Option<u64> {
+        self.gap_threshold_secs_for_model(provider_name, "")
+    }
+
+    /// Model-aware advisory threshold, not a guarantee of server-side expiry.
+    /// GPT-5.6+ uses a minimum 30-minute TTL even when legacy 24h retention is configured.
+    pub fn gap_threshold_secs_for_model(&self, provider_name: &str, model: &str) -> Option<u64> {
         if !self.gap_warning_enabled || !self.is_provider_enabled(provider_name) {
             return None;
         }
 
         let provider = provider_name.to_ascii_lowercase();
-        if provider == "openai"
-            && matches!(self.providers.openai.prompt_cache_retention, Some(PromptCacheRetention::H24))
-        {
-            return None;
-        }
-
+        let modern_openai = provider == "openai" && supports_openai_explicit_prompt_cache(model);
         if let Some(threshold) = self.gap_warning_threshold_secs {
             return Some(threshold);
         }
 
         Some(match provider.as_str() {
             "anthropic" | "minimax" => prompt_cache::ANTHROPIC_CACHE_GAP_WARNING_SECONDS,
+            "openai"
+                if modern_openai || self.providers.openai.prompt_cache_retention == Some(PromptCacheRetention::H24) =>
+            {
+                30 * 60
+            }
             "openai" => prompt_cache::OPENAI_CACHE_GAP_WARNING_SECONDS,
             _ => prompt_cache::DEFAULT_CACHE_GAP_WARNING_SECONDS,
         })
@@ -217,6 +244,11 @@ pub struct OpenAIPromptCacheSettings {
     #[serde(default = "default_true")]
     pub surface_metrics: bool,
 
+    /// Opt in to stable-instruction-only cache writes for independent native
+    /// GPT-5.6+ auxiliary requests. Interactive requests keep implicit caching.
+    #[serde(default)]
+    pub auxiliary_explicit_cache: bool,
+
     /// Strategy for generating OpenAI `prompt_cache_key`.
     /// Session-scoped keys derive one stable key per VT Code conversation.
     #[serde(default = "default_openai_prompt_cache_key_mode")]
@@ -237,6 +269,7 @@ impl Default for OpenAIPromptCacheSettings {
             min_prefix_tokens: default_openai_min_prefix_tokens(),
             idle_expiration_seconds: default_openai_idle_expiration(),
             surface_metrics: default_true(),
+            auxiliary_explicit_cache: false,
             prompt_cache_key_mode: default_openai_prompt_cache_key_mode(),
             prompt_cache_retention: None,
         }
@@ -921,6 +954,48 @@ prompt_cache_key_mode = "off"
     }
 
     #[test]
+    fn gap_threshold_uses_model_ttl_and_ignores_legacy_retention_for_modern_models() {
+        let mut cfg = PromptCachingConfig::default();
+        for retention in [
+            None,
+            Some(PromptCacheRetention::H24),
+            Some(PromptCacheRetention::InMemory),
+        ] {
+            cfg.providers.openai.prompt_cache_retention = retention;
+            for model in ["gpt-5.6-sol", "gpt-6-luna", "gpt-6.1-sol"] {
+                assert_eq!(cfg.gap_threshold_secs_for_model("openai", model), Some(1800), "{model}");
+            }
+        }
+        assert_eq!(cfg.gap_threshold_secs_for_model("openai", "gpt-5.1-mini"), Some(600));
+        assert_eq!(cfg.gap_threshold_secs_for_model("merge-gateway", "gpt-6-luna"), Some(300));
+        cfg.gap_warning_threshold_secs = Some(77);
+        assert_eq!(cfg.gap_threshold_secs_for_model("openai", "gpt-6-luna"), Some(77));
+        cfg.enabled = false;
+        assert_eq!(cfg.gap_threshold_secs_for_model("openai", "gpt-6-luna"), None);
+    }
+
+    #[test]
+    fn explicit_cache_models_reject_migration_aliases_and_auxiliary_mode_is_opt_in() {
+        for model in [
+            "gpt-5.4",
+            "gpt-5-codex",
+            "gpt",
+            "gpt-5.1-mini",
+            "openai/gpt-6-luna",
+            "gpt-6-future",
+        ] {
+            assert!(!supports_openai_explicit_prompt_cache(model), "{model}");
+        }
+        for model in ["gpt-5.6", "gpt-5.6-terra", "gpt-6-astra", "gpt-6-sol"] {
+            assert!(supports_openai_explicit_prompt_cache(model), "{model}");
+        }
+        let defaults: OpenAIPromptCacheSettings = toml::from_str("").unwrap();
+        assert!(!defaults.auxiliary_explicit_cache);
+        let configured: OpenAIPromptCacheSettings = toml::from_str("auxiliary_explicit_cache = true").unwrap();
+        assert!(configured.auxiliary_explicit_cache);
+    }
+
+    #[test]
     fn gap_threshold_respects_disable_switches() {
         let cfg = PromptCachingConfig { gap_warning_enabled: false, ..Default::default() };
         assert_eq!(cfg.gap_threshold_secs("anthropic"), None);
@@ -935,10 +1010,13 @@ prompt_cache_key_mode = "off"
     }
 
     #[test]
-    fn gap_threshold_skips_openai_with_extended_retention() {
+    fn gap_threshold_treats_extended_retention_as_an_advisory_not_a_guarantee() {
         let mut cfg = PromptCachingConfig::default();
         cfg.providers.openai.prompt_cache_retention = Some(PromptCacheRetention::H24);
-        assert_eq!(cfg.gap_threshold_secs("openai"), None);
+        assert_eq!(cfg.gap_threshold_secs("openai"), Some(1800));
+        cfg.gap_warning_threshold_secs = Some(42);
+        assert_eq!(cfg.gap_threshold_secs("openai"), Some(42));
+        cfg.gap_warning_threshold_secs = None;
 
         cfg.providers.openai.prompt_cache_retention = Some(PromptCacheRetention::InMemory);
         assert_eq!(cfg.gap_threshold_secs("openai"), Some(prompt_cache::OPENAI_CACHE_GAP_WARNING_SECONDS));

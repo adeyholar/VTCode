@@ -776,9 +776,9 @@ impl OpenAIProvider {
         response_json: Value,
         model: String,
     ) -> Result<provider::LLMResponse, provider::LLMError> {
-        let include_cached_prompt_tokens = self.prompt_cache_enabled && self.prompt_cache_settings.surface_metrics;
-        let response =
-            response_parser::parse_chat_response(response_json, model.clone(), include_cached_prompt_tokens)?;
+        // Server caching can occur even when local hints or diagnostics are off.
+        // Billing usage must not depend on those optional controls.
+        let response = response_parser::parse_chat_response(response_json, model.clone(), true)?;
         Ok(Self::normalize_reasoning_output(&model, response))
     }
 
@@ -787,8 +787,7 @@ impl OpenAIProvider {
         response_json: Value,
         model: String,
     ) -> Result<provider::LLMResponse, provider::LLMError> {
-        let include_metrics = self.prompt_cache_enabled && self.prompt_cache_settings.surface_metrics;
-        let response = parse_responses_completion(response_json, model.clone(), include_metrics)?;
+        let response = parse_responses_completion(response_json, model.clone(), true)?;
         Ok(Self::normalize_reasoning_output(&model, response))
     }
 }

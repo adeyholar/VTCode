@@ -365,10 +365,15 @@ fn create_chat_event_stream(
                             .into_llm_error("OpenAI")
                     })?;
 
-                    if let Some(usage_val) = payload.get_mut("usage")
-                        && let Ok(u) = serde_json::from_value::<provider::Usage>(std::mem::take(usage_val)) {
-                            aggregator.set_usage(u);
+                    if let Some(usage_val) = payload.get_mut("usage") {
+                        let cached_prompt_tokens = parse_cached_prompt_tokens_from_usage(usage_val, true);
+                        let cache_creation_tokens = parse_cache_write_tokens_from_usage(usage_val, true);
+                        if let Ok(mut usage) = serde_json::from_value::<provider::Usage>(std::mem::take(usage_val)) {
+                            usage.cached_prompt_tokens = cached_prompt_tokens.or(usage.cached_prompt_tokens);
+                            usage.cache_creation_tokens = cache_creation_tokens.or(usage.cache_creation_tokens);
+                            aggregator.set_usage(usage);
                         }
+                    }
 
                     if let Some(choices) = payload.get("choices").and_then(|v| v.as_array())
                         && let Some(choice) = choices.first() {

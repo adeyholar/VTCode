@@ -23,6 +23,8 @@ use vtcode_config::core::{
     OpenAIServiceTier, PromptCacheRetention,
 };
 use vtcode_config::{OpenAIAuthConfig, auth::OpenAIChatGptSessionRefresher};
+
+mod cache_usage;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -959,7 +961,7 @@ async fn api_key_responses_stream_sends_metadata_and_preserves_usage() {
     assert_eq!(usage.prompt_tokens, 21);
     assert_eq!(usage.completion_tokens, 6);
     assert_eq!(usage.total_tokens, 27);
-    assert_eq!(usage.cached_prompt_tokens, None);
+    assert_eq!(usage.cached_prompt_tokens, Some(8));
 
     let captured = captured.lock().expect("not poisoned").clone().expect("request captured");
     assert_eq!(captured.get("beta").and_then(Value::as_str), Some("responses=v1"));
@@ -3051,7 +3053,7 @@ use vtcode_config::core::PromptCachingConfig;
 #[test]
 fn responses_payload_includes_prompt_cache_retention_for_native_openai() {
     let mut pc = PromptCachingConfig::default();
-    pc.providers.openai.prompt_cache_retention = Some(PromptCacheRetention::H24);
+    pc.providers.openai.prompt_cache_retention = Some(PromptCacheRetention::InMemory);
     let provider = OpenAIProvider::from_config(
         Some("key".to_owned()),
         None,
@@ -3065,8 +3067,8 @@ fn responses_payload_includes_prompt_cache_retention_for_native_openai() {
     );
     // Responses API model (non-GPT-5.6: uses the legacy `prompt_cache_retention`
     // field; GPT-5.6+ instead emits `prompt_cache_options.ttl`).
-    let payload = responses_payload_for(models::openai::GPT_5_1, &provider);
-    assert_eq!(payload.get("prompt_cache_retention").and_then(Value::as_str), Some("24h"));
+    let payload = responses_payload_for(models::openai::GPT_5_1_MINI, &provider);
+    assert_eq!(payload.get("prompt_cache_retention").and_then(Value::as_str), Some("in_memory"));
     // Chat Completions model - should NOT have it
     let chat_payload = chat_payload_for(models::openai::GPT_5, &provider);
     assert_absent(&chat_payload, "prompt_cache_retention");

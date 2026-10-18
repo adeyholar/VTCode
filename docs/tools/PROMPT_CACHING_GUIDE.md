@@ -33,14 +33,21 @@ global `enabled` flag and the provider-level `enabled` flag are `true`.
 [prompt_cache.providers.openai]
 enabled = true
 surface_metrics = true
+auxiliary_explicit_cache = false # opt-in experiment on supported native models
 prompt_cache_key_mode = "session" # session | off
 ```
 
-- `enabled` — controls VT Code's explicit cache hints and metrics together with the global flag. Disabling either
-  flag omits OpenAI cache keys, retention options, and explicit breakpoints. OpenAI's automatic server caching can
-  still occur; the local switch cannot disable it.
-- `surface_metrics` — exposes provider usage counters and enables comparisons against the latest successful
-  foreground response on supported native Responses models.
+- `enabled` — controls VT Code's explicit cache hints and comparison diagnostics together with the global flag.
+  Disabling either flag omits OpenAI cache keys, retention options, and explicit breakpoints. OpenAI's automatic
+  server caching can still occur; the local switch cannot disable it.
+- `surface_metrics` — enables optional comparisons against the latest successful foreground response on supported
+  native Responses models. Provider-reported cache-read and cache-write usage is always retained for accounting,
+  including when this setting or caching is disabled. Missing counters remain unknown rather than reported zeros
+  in provider usage; cost estimates without those counters cannot establish actual cache savings.
+- `auxiliary_explicit_cache` — opt-in explicit-only caching for independent auxiliary requests on native GPT-5.6/GPT-6
+  Responses routes. Only stable developer instructions receive a breakpoint; disposable history and runtime context
+  stay outside cache writes. Interactive requests retain implicit caching. Default: `false`; compare total cost before
+  enabling it, since retries may reuse less of an auxiliary suffix. Other routes ignore this setting.
 - `min_prefix_tokens` and `idle_expiration_seconds` are accepted legacy settings; the OpenAI provider does not use
   them to request caching or set server expiry. GPT-5.6 and later require at least 1,024 visible input tokens in a
   reusable prefix. Short prompts need no padding; measure total cost before adding context.
@@ -62,6 +69,9 @@ prompt_cache_key_mode = "session" # session | off
 These rules follow the [OpenAI prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching).
 Cache writes, reads, and uncached input are different billing categories; a cache miss does not mean all input was
 charged at the uncached rate. Compaction can reduce total input cost despite a lower hit rate.
+
+For local reporting, experimental comparisons, and known limitations, see
+[prompt-cache measurement](../development/prompt-cache-measurement.md).
 
 ### OpenAI cache comparison diagnostics
 

@@ -340,6 +340,39 @@ fn gpt56_request(messages: Vec<provider::Message>) -> provider::LLMRequest {
     }
 }
 
+#[test]
+fn stable_prefix_profile_writes_only_instructions_on_supported_native_routes() {
+    for model in [models::openai::GPT_5_6_LUNA, models::openai::GPT_6_LUNA] {
+        let mut request = gpt56_request(vec![provider::Message::user("Disposable suffix A".into())]);
+        request.model = model.into();
+        request.system_prompt = Some(system_with_dynamics().into());
+        request.prompt_cache_profile = Some(provider::PromptCacheProfile::StablePrefix);
+        let ctx = cache_ctx();
+        let first = build_responses_request(&request, &ctx).unwrap();
+        request.messages = vec![provider::Message::user("Disposable suffix B".into())].into();
+        let second = build_responses_request(&request, &ctx).unwrap();
+        assert_eq!(first.pointer("/prompt_cache_options/mode"), Some(&json!("explicit")));
+        assert_eq!(count_explicit_breakpoints(&first), 1);
+        assert_eq!(first["input"][0], second["input"][0]);
+        assert_ne!(first["input"][1], second["input"][1]);
+        let mut compat = cache_ctx();
+        compat.include_explicit_cache_breakpoints = false;
+        let payload = build_responses_request(&request, &compat).unwrap();
+        assert!(payload.pointer("/prompt_cache_options/mode").is_none());
+        assert_eq!(count_explicit_breakpoints(&payload), 0);
+        request.prompt_cache_profile = None;
+        let interactive = build_responses_request(&request, &ctx).unwrap();
+        assert!(interactive.pointer("/prompt_cache_options/mode").is_none());
+    }
+    let mut legacy = gpt56_request(vec![provider::Message::user("Suffix".into())]);
+    legacy.model = models::openai::GPT_5_1_MINI.into();
+    legacy.system_prompt = Some("Stable instructions".into());
+    legacy.prompt_cache_profile = Some(provider::PromptCacheProfile::StablePrefix);
+    let payload = build_responses_request(&legacy, &cache_ctx()).unwrap();
+    assert!(payload.get("prompt_cache_options").is_none());
+    assert_eq!(count_explicit_breakpoints(&payload), 0);
+}
+
 fn count_explicit_breakpoints(payload: &Value) -> usize {
     payload
         .get("input")

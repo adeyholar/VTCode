@@ -11,7 +11,9 @@ use futures::StreamExt;
 use hashbrown::{HashMap, HashSet};
 use serde_json::{Value, json};
 
-use super::{StreamAggregator, generate_tool_call_id, parse_cached_prompt_tokens_from_usage};
+use super::{
+    StreamAggregator, generate_tool_call_id, parse_cache_write_tokens_from_usage, parse_cached_prompt_tokens_from_usage,
+};
 
 // Retained shared Responses stream processor.
 // Rig 0.40 can consume SSE, but VTCode needs a provider-agnostic
@@ -498,7 +500,7 @@ fn parse_responses_usage(
         completion_tokens: usage_u32_from_keys(usage_value, RESPONSES_COMPLETION_TOKEN_KEYS),
         total_tokens: usage_u32_from_keys(usage_value, &["total_tokens"]),
         cached_prompt_tokens,
-        cache_creation_tokens: None,
+        cache_creation_tokens: parse_cache_write_tokens_from_usage(usage_value, include_cached_prompt_metrics),
         cache_read_tokens: None,
         iterations: None,
     })

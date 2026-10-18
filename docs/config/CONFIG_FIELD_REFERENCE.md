@@ -617,12 +617,13 @@ python3 scripts/generate_config_field_reference.py
 | `prompt_cache.providers.gemini.min_prefix_tokens` | `integer` | no | `1024` | - |
 | `prompt_cache.providers.gemini.mode` | `string` | no | `"implicit"` | Gemini prompt caching mode selection |
 | `prompt_cache.providers.moonshot.enabled` | `boolean` | no | `true` | - |
+| `prompt_cache.providers.openai.auxiliary_explicit_cache` | `boolean` | no | `false` | Opt in to stable-instruction-only cache writes for independent auxiliary requests on supported native OpenAI models. Interactive caching is unchanged. See [measurement guide](../development/prompt-cache-measurement.md). |
 | `prompt_cache.providers.openai.enabled` | `boolean` | no | `true` | - |
 | `prompt_cache.providers.openai.idle_expiration_seconds` | `integer` | no | `3600` | - |
 | `prompt_cache.providers.openai.min_prefix_tokens` | `integer` | no | `1024` | - |
 | `prompt_cache.providers.openai.prompt_cache_key_mode` | `string` | no | `"session"` | Strategy for generating OpenAI `prompt_cache_key`. Session-scoped keys derive one stable key per VT Code conversation. |
 | `prompt_cache.providers.openai.prompt_cache_retention` | `PromptCacheRetention \| null` | no | `null` | Optional prompt cache retention policy to pass directly into OpenAI Responses API. Supported values are "in_memory" and "24h". If set, VT Code will include `prompt_cache_retention` in the request body to extend the model-side prompt caching window or request the explicit in-memory policy. |
-| `prompt_cache.providers.openai.surface_metrics` | `boolean` | no | `true` | - |
+| `prompt_cache.providers.openai.surface_metrics` | `boolean` | no | `true` | Enable optional cache comparison diagnostics; billing counters are always retained. |
 | `prompt_cache.providers.openrouter.enabled` | `boolean` | no | `true` | - |
 | `prompt_cache.providers.openrouter.propagate_provider_capabilities` | `boolean` | no | `true` | Propagate provider cache instructions automatically |
 | `prompt_cache.providers.openrouter.report_savings` | `boolean` | no | `true` | Surface cache savings reported by OpenRouter |

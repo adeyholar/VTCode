@@ -290,6 +290,13 @@ below based on the topic area.
   - **User Questions**: "What can you tell me about Prompt and Model Evaluation?", "How does Comparison procedure
     work?", "How does Outcomes and measurements work?"
 
+- **File**: `docs/development/prompt-cache-measurement.md`
+  - **Content**: Prompt-cache measurement
+  - **Topics**: Available observations, Read-only report, Compare policies after paid testing is authorized, Retention
+    and deferred optimizations
+  - **User Questions**: "What can you tell me about Prompt-cache measurement?", "How does Available observations work?",
+    "How does Read-only report work?"
+
 - **File**: `docs/development/release-changelog-ownership.md`
   - **Content**: Release changelog ownership
   - **User Questions**: "What can you tell me about Release changelog ownership?"

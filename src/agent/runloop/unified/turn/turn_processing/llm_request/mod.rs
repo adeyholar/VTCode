@@ -760,8 +760,17 @@ async fn execute_llm_request_with_options_impl(
         #[derive(serde::Serialize)]
         struct PromptCacheMetricsRecord<'a> {
             kind: &'static str,
+            scope: &'static str,
             turn: usize,
+            run_id: &'a str,
+            turn_id: &'a str,
+            provider: &'a str,
             model: &'a str,
+            requested_model: &'a str,
+            input_tokens: u64,
+            cache_read_tokens_reported: Option<u32>,
+            cache_write_tokens_reported: Option<u32>,
+            elapsed_ms: u128,
             prompt_tokens: u32,
             completion_tokens: u32,
             total_tokens: u32,
@@ -776,10 +785,21 @@ async fn execute_llm_request_with_options_impl(
         let cache_read_tokens = usage.cache_read_tokens_or_fallback();
         let cache_creation_tokens = usage.cache_creation_tokens_or_zero();
         let cache_hit_ratio = metrics::prompt_cache_hit_ratio(ctx.provider_client.name(), usage);
+        let reported_cache_usage = metrics::ReportedCacheUsage::from_usage(usage);
         let record = PromptCacheMetricsRecord {
             kind: "prompt_cache_metrics",
+            scope: "foreground",
             turn: step_count,
-            model: &active_model,
+            run_id: &ctx.harness_state.run_id.0,
+            turn_id: &ctx.harness_state.turn_id.0,
+            provider: ctx.provider_client.name(),
+            model: &response.model,
+            requested_model: &active_model,
+            input_tokens: vtcode_core::llm::usage_cost::normalized_turn_usage(ctx.provider_client.name(), usage)
+                .input_tokens,
+            cache_read_tokens_reported: reported_cache_usage.read_tokens,
+            cache_write_tokens_reported: reported_cache_usage.write_tokens,
+            elapsed_ms: request_timer.elapsed().as_millis(),
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
             total_tokens: usage.total_tokens,

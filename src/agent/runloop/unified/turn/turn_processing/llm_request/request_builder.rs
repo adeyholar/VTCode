@@ -29,8 +29,8 @@ use vtcode_core::utils::ansi::MessageStyle;
 
 use super::context_management::resolve_context_management;
 use super::metrics::{
-    TokenBudgetBreakdown, ToolCatalogCacheMetrics, emit_token_budget_breakdown, emit_tool_catalog_cache_metrics,
-    estimate_message_history_tokens, estimate_tool_schema_tokens,
+    TokenBudgetBreakdown, ToolCatalogCacheMetrics, emit_history_projection_metrics, emit_token_budget_breakdown,
+    emit_tool_catalog_cache_metrics, estimate_message_history_tokens, estimate_tool_schema_tokens,
 };
 use super::prompt_assembly::{
     PromptAssemblyInput, assemble_prompt, recovery_mode_directive, render_primary_agent_runtime_context,
@@ -378,7 +378,7 @@ pub(super) async fn build_turn_request(
                 tokens as usize
             }),
         );
-        normalized_history = vtcode_core::core::agent::state::clear_old_tool_results_with_recent_batches(
+        let cleared_history = vtcode_core::core::agent::state::clear_old_tool_results_with_recent_batches(
             &normalized_history,
             trigger_tokens,
             clearing.keep_tool_uses,
@@ -386,6 +386,15 @@ pub(super) async fn build_turn_request(
             clearing.clear_at_least_tokens,
             clearing.clear_tool_inputs,
         );
+        emit_history_projection_metrics(
+            ctx,
+            step_count,
+            request_model,
+            &normalized_history,
+            &cleared_history,
+            trigger_tokens,
+        );
+        normalized_history = cleared_history;
     }
     ctx.tool_registry.set_inspection_mode(
         ctx.vt_cfg

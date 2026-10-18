@@ -686,6 +686,77 @@ async fn seed_connected_continuation_cache(
 }
 
 #[tokio::test]
+async fn websocket_cache_usage_survives_disabled_controls() {
+    for enabled in [false, true] {
+        for surface_metrics in [false, true] {
+            for entrypoint in ["generate", "legacy", "normalized"] {
+                let output = if entrypoint == "generate" {
+                    json!([{"type": "message", "content": [{"type": "output_text", "text": "accounted"}]}])
+                } else {
+                    json!([])
+                };
+                let (base_url, recorded, server) =
+                    spawn_scripted_websocket_server(vec![vec![ScriptedReply::Events(vec![
+                        json!({
+                        "type": "response.output_text.delta", "delta": "accounted",
+                        "item_id": "msg_usage", "output_index": 0, "content_index": 0, "sequence_number": 1
+                        }),
+                        json!({
+                            "type": "response.completed", "response": {
+                            "id": "resp_cache_usage", "output": output,
+                                "usage": {"input_tokens": 200, "output_tokens": 19, "total_tokens": 219,
+                                    "input_tokens_details": {"cached_tokens": 73, "cache_write_tokens": 41}}
+                            }
+                        }),
+                    ])]])
+                    .await
+                    .expect("local WebSocket fixture");
+                let mut provider = websocket_test_provider(base_url);
+                provider.prompt_cache_enabled = enabled;
+                provider.prompt_cache_settings.surface_metrics = surface_metrics;
+                let request = websocket_test_request();
+                seed_connected_continuation_cache(&provider, &request, "resp_seed", false).await;
+                let completion = async {
+                    match entrypoint {
+                        "generate" => provider.generate(request).await.unwrap(),
+                        "legacy" => {
+                            let mut stream = provider.stream(request).await.unwrap();
+                            loop {
+                                if let crate::provider::LLMStreamEvent::Completed { response } =
+                                    stream.next().await.expect("completion").unwrap()
+                                {
+                                    break *response;
+                                }
+                            }
+                        }
+                        _ => {
+                            let mut stream = provider.stream_normalized(request).await.unwrap();
+                            loop {
+                                if let crate::provider::NormalizedStreamEvent::Done { response } =
+                                    stream.next().await.expect("completion").unwrap()
+                                {
+                                    break *response;
+                                }
+                            }
+                        }
+                    }
+                };
+                let response = tokio::time::timeout(std::time::Duration::from_secs(3), completion)
+                    .await
+                    .expect("bounded local completion");
+                assert_eq!(response.content.as_deref(), Some("accounted"));
+                let usage = response.usage.expect("billing usage");
+                assert_eq!(usage.prompt_tokens, 200);
+                assert_eq!(usage.cached_prompt_tokens, Some(73), "{entrypoint}/{enabled}/{surface_metrics}");
+                assert_eq!(usage.cache_creation_tokens, Some(41));
+                server.await.expect("fixture completed");
+                assert_eq!(recorded.lock().unwrap().len(), 1, "one WebSocket generation, no HTTP fallback");
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn websocket_auxiliary_http_success_and_timeout_preserve_primary_continuation() {
     use wiremock::{
         Mock, MockServer, ResponseTemplate,

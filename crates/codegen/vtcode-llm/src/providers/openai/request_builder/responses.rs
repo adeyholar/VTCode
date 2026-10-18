@@ -7,10 +7,10 @@
 //! payloads) is verbatim, and `build_responses_request` is re-exported from
 //! the parent.
 
-use super::history::build_responses_item_history;
+use super::history::{build_responses_item_history, uses_stable_prefix_cache};
 use super::model_policy::{
-    allows_sampling_parameters, default_reasoning_effort_for_model, default_text_verbosity_for_model, is_gpt6_model,
-    is_gpt56_model, supports_text_verbosity,
+    allows_sampling_parameters, default_reasoning_effort_for_model, default_text_verbosity_for_model,
+    supports_text_verbosity,
 };
 use super::{ResponsesRequestContext, trimmed_non_empty};
 use crate::error_display;
@@ -196,7 +196,7 @@ fn build_responses_request_from_history(
     // default GPT-5.6-family Responses requests to "30m" to document caching
     // intent explicitly instead of relying on the implicit default alone.
     let cache_ttl = cache_ttl.or_else(|| {
-        ((is_gpt56_model(&request.model) || is_gpt6_model(&request.model))
+        (super::supports_prompt_cache_options(&request.model)
             && ctx.include_prompt_cache_retention
             && ctx.is_responses_api_model)
             .then_some(DEFAULT_GPT56_PROMPT_CACHE_TTL)
@@ -214,6 +214,10 @@ fn build_responses_request_from_history(
     }
 
     merge_typed_responses_parameters(&mut openai_request, typed_parameters);
+
+    if uses_stable_prefix_cache(request, ctx) {
+        openai_request["prompt_cache_options"]["mode"] = json!("explicit");
+    }
 
     let mut include_values = Vec::new();
     if let Some(include_fields) = request.responses_include.as_deref().or(ctx.default_responses_include) {

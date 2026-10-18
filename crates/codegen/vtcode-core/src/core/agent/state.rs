@@ -594,6 +594,7 @@ pub fn clear_old_tool_results_with_recent_batches(
             .fold(0u64, u64::saturating_add),
         cleared_result_count,
         protected_batch_count = retained_batches.len(),
+        first_changed_message_index = messages.iter().zip(&out).position(|(before, after)| before != after),
         "local tool-result clearing projection"
     );
     out
