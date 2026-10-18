@@ -1509,13 +1509,22 @@ mod tests {
         let manager =
             create_async_mcp_manager(Some(&cfg), Some(&active), Path::new("/tmp")).expect("manager should exist");
         let manager_config = manager.config();
-        let provider_names = manager_config
+        // `session_mcp_config` appends providers discovered from the user's home
+        // plugin root (`~/.agents/plugins`), which is machine-dependent. Subtract
+        // exactly that environment-dependent set so the assertion stays hermetic
+        // while still checking the primary-agent merge result in order.
+        let plugin_provider_names = discover_plugin_mcp_providers(Path::new("/tmp"))
+            .into_iter()
+            .map(|provider| provider.name)
+            .collect::<std::collections::HashSet<_>>();
+        let merged_provider_names = manager_config
             .providers
             .iter()
             .map(|provider| provider.name.as_str())
+            .filter(|name| !plugin_provider_names.contains(*name))
             .collect::<Vec<_>>();
 
-        assert_eq!(provider_names, vec!["global", "local"]);
+        assert_eq!(merged_provider_names, vec!["global", "local"]);
         assert!(!matches!(manager.get_status().await, McpInitStatus::Disabled));
     }
 
