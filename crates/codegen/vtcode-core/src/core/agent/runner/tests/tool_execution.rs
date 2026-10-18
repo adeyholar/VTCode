@@ -3,6 +3,142 @@
     reason = "Intentional compatibility, platform, or test-only suppression."
 )]
 use super::*;
+use crate::exec::events::ToolOutcome;
+
+/// Last model-facing tool message, parsed from the JSON string the runner
+/// pushes for a rejected call (`push_tool_error` with a `String` value).
+fn last_tool_message(runtime: &AgentRuntime) -> String {
+    let raw = runtime
+        .state
+        .messages
+        .last()
+        .map(|message| message.content.as_text().into_owned())
+        .expect("a tool message must be recorded");
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("structured tool message");
+    parsed.as_str().expect("string tool message").to_string()
+}
+
+fn tool_invocation_outcome(events: &[ThreadEvent], tool_call_id: &str) -> Option<ToolOutcome> {
+    events.iter().find_map(|event| match event {
+        ThreadEvent::ItemCompleted(ItemCompletedEvent { item }) => match &item.details {
+            ThreadItemDetails::ToolInvocation(details) if details.tool_call_id.as_deref() == Some(tool_call_id) => {
+                details.outcome
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn error_item_messages(events: &[ThreadEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            ThreadEvent::ItemCompleted(ItemCompletedEvent { item }) => match &item.details {
+                ThreadItemDetails::Error(error) => Some(error.message.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Register `tool_call_id`'s invocation item the way a streamed turn does, then
+/// run admission so the registered rejection branch (which records the outcome)
+/// is the one under test rather than the unregistered `tool_rejected` fallback.
+async fn admit_one_tool_call(
+    runner: &mut AgentRunner,
+    runtime: &mut AgentRuntime,
+    session_id: &str,
+    tool_name: &str,
+    args: serde_json::Value,
+) -> Vec<ThreadEvent> {
+    let provider = QueuedProvider::new(vec![tool_call_response(tool_name, args)]);
+    let mut provider_box: Box<dyn LLMProvider> = Box::new(provider);
+    let request = LLMRequest {
+        model: "gpt-5-codex".to_string(),
+        ..Default::default()
+    };
+    let turn = runtime
+        .run_turn_once(&mut provider_box, request, None)
+        .await
+        .expect("turn should succeed");
+    let tool_calls = turn.response.tool_calls.expect("tool call response");
+
+    let mut recorder = ExecEventRecorder::new(session_id, None, None);
+    recorder.record_thread_events(runtime.take_emitted_events());
+    runner
+        .execute_tool_call_batches(tool_calls, runtime, &mut recorder, "[single]", false, false)
+        .await
+        .expect("tool execution should finish");
+    recorder.into_events()
+}
+
+#[tokio::test]
+async fn planning_denial_reports_policy_denial_not_invalid_arguments() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "thread-planning-denied")).await;
+    runner.enable_full_auto(&[tools::EXEC_COMMAND.to_string()]).await;
+    // Mirror the audited anomaly: a mutating command denied by the planning gate.
+    runner.tool_registry.enable_planning();
+    assert!(
+        !runner
+            .tool_registry
+            .is_planning_active_allowed(tools::EXEC_COMMAND, &json!({"cmd": "cargo build"}))
+    );
+
+    let mut runtime =
+        AgentRuntime::new(AgentSessionState::new("session-planning-denied".to_string(), 16, 4, 128_000), None, None);
+
+    let events = admit_one_tool_call(
+        &mut runner,
+        &mut runtime,
+        "thread-planning-denied",
+        tools::EXEC_COMMAND,
+        json!({"cmd": "cargo build"}),
+    )
+    .await;
+
+    let tool_error = last_tool_message(&runtime);
+    assert!(tool_error.contains("tool denied by planning workflow"), "{tool_error}");
+    // The gate's own remediation guidance must survive to the model.
+    assert!(tool_error.contains("blocked during planning"), "{tool_error}");
+    assert!(!tool_error.contains("Invalid arguments"), "{tool_error}");
+
+    assert_eq!(
+        tool_invocation_outcome(&events, "call-1"),
+        Some(ToolOutcome::HookDenied),
+        "a policy denial must not be recorded as a malformed-call outcome"
+    );
+
+    let summaries = error_item_messages(&events);
+    let denial_summary = summaries
+        .iter()
+        .find(|message| message.starts_with("Tool 'exec_command' denied by policy:"))
+        .unwrap_or_else(|| panic!("expected a policy-denial summary event, got {summaries:?}"));
+    assert!(!denial_summary.contains('\n'), "event summary must stay single-line: {denial_summary}");
+}
+
+#[tokio::test]
+async fn malformed_arguments_still_report_invalid_tool() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "thread-invalid-args")).await;
+    runner.enable_full_auto(&[tools::APPLY_PATCH.to_string()]).await;
+    // Planning is inactive: this is a genuine argument failure, not a policy stop.
+    assert!(!runner.tool_registry.is_planning_active());
+
+    let mut runtime =
+        AgentRuntime::new(AgentSessionState::new("session-invalid-args".to_string(), 16, 4, 128_000), None, None);
+
+    let events =
+        admit_one_tool_call(&mut runner, &mut runtime, "thread-invalid-args", tools::APPLY_PATCH, json!({})).await;
+
+    let tool_error = last_tool_message(&runtime);
+    assert!(tool_error.contains("Invalid arguments for tool 'apply_patch'"), "{tool_error}");
+    assert!(!tool_error.contains("denied by planning workflow"), "{tool_error}");
+
+    assert_eq!(tool_invocation_outcome(&events, "call-1"), Some(ToolOutcome::InvalidTool));
+}
 
 #[tokio::test]
 async fn denied_tool_call_emits_one_failed_output_for_runtime_invocation() {

@@ -3,7 +3,7 @@ use super::constants::{LOOP_THROTTLE_BASE_MS, LOOP_THROTTLE_MAX_MS};
 use super::tool_access::PreparedToolExecution;
 use super::tool_execution_guard::ToolExecutionGuard;
 use super::tool_rejection::{
-    emit_failed_tool_outputs_for_completed_invocations, reject_denied_tool, reject_invalid_args,
+    emit_failed_tool_outputs_for_completed_invocations, reject_denied_tool, reject_invalid_args, reject_policy_denied,
 };
 use super::tool_types::{PreparedRunnerToolBatch, PreparedRunnerToolCall, RunnerCallAdmission, ToolCallItemRef};
 use crate::core::agent::events::{ExecEventRecorder, tool_invocation_completed_event, tool_output_payload_from_value};
@@ -15,6 +15,7 @@ use crate::exec::events::ToolCallStatus;
 use crate::exec::events::ToolOutcome;
 use crate::exec::events::tool_outcome_from_status;
 use crate::llm::provider::ToolCall;
+use crate::tools::error_messages::agent_execution;
 use crate::tools::registry::{ToolErrorType, ToolExecutionError};
 use anyhow::Result;
 use std::collections::VecDeque;
@@ -385,17 +386,36 @@ impl AgentRunner {
         let prepared = match self.admit_tool_call(&requested_name, args, &mut runtime.state) {
             Ok(prepared) => prepared,
             Err(err) => {
-                reject_invalid_args(
-                    runtime,
-                    event_recorder,
-                    agent_prefix,
-                    &requested_name,
-                    call.id.as_str(),
-                    None,
-                    &err,
-                    is_gemini,
-                    "Tool admission failed",
-                );
+                // A policy gate (planning workflow, command security) denies the
+                // call during admission. That is a policy stop, not a malformed
+                // call: classify it with the shared classifier so the model gets
+                // the gate's own remediation guidance instead of an
+                // `Invalid arguments` error it would retry unchanged.
+                if agent_execution::preflight_policy_correction(&format!("{err:#}")).is_some() {
+                    reject_policy_denied(
+                        runtime,
+                        event_recorder,
+                        agent_prefix,
+                        &requested_name,
+                        call.id.as_str(),
+                        None,
+                        &err,
+                        is_gemini,
+                        self.quiet,
+                    );
+                } else {
+                    reject_invalid_args(
+                        runtime,
+                        event_recorder,
+                        agent_prefix,
+                        &requested_name,
+                        call.id.as_str(),
+                        None,
+                        &err,
+                        is_gemini,
+                        "Tool admission failed",
+                    );
+                }
                 return Ok(RunnerCallAdmission::Rejected);
             }
         };
