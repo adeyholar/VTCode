@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 
+## 0.179.4 - 2026-10-18
+
+### Highlights
+#### Bug Fixes
+
+- Pick CI run by version so artifact downloads match (96e890cd) 
+### Other Changes
 ## 0.179.3 - 2026-10-18
 
 ### Highlights
