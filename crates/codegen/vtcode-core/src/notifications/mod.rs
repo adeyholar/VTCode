@@ -412,7 +412,7 @@ impl NotificationManager {
     }
 
     fn normalize_message(&self, message: &str) -> String {
-        message.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase()
+        vtcode_commons::formatting::collapse_whitespace(message).to_ascii_lowercase()
     }
 
     /// Format a notification message based on the event

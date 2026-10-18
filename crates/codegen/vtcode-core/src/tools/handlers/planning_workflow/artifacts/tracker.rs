@@ -118,7 +118,7 @@ pub fn generate_tracker_markdown_from_plan(plan_markdown: &str) -> Option<String
         if main.is_empty() {
             continue;
         }
-        let description_key = main.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+        let description_key = vtcode_commons::formatting::collapse_whitespace(main).to_ascii_lowercase();
         if !seen_descriptions.insert(description_key) {
             continue;
         }

@@ -347,7 +347,7 @@ const PLAN_PREVIEW_ESTIMATED_CONTENT_WIDTH: usize = 76;
 /// Collapse internal whitespace so a plan entry stays on one raw modal line.
 /// Wrapping (not truncation) handles narrow widths downstream.
 fn collapse_plan_line(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    vtcode_commons::formatting::collapse_whitespace(text)
 }
 
 /// Estimate wrapped visual rows for a single raw modal line at the

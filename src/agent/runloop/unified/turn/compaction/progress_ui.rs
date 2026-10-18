@@ -110,7 +110,7 @@ pub(crate) fn format_compaction_failed(elapsed: Duration, error: &anyhow::Error)
     let cause = error.root_cause().to_string();
     let cause = cause.split_once(". Body:").map_or(cause.as_str(), |(summary, _)| summary);
     let safe = vtcode_commons::sanitizer::sanitize_provider_diagnostic(cause.as_bytes());
-    let single_line = safe.split_whitespace().collect::<Vec<_>>().join(" ");
+    let single_line = vtcode_commons::formatting::collapse_whitespace(&safe);
     let mut summary: String = single_line.chars().take(512).collect();
     if single_line.chars().count() > 512 {
         summary.push_str("...");

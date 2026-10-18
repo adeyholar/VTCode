@@ -1103,7 +1103,7 @@ fn item_facts(details: &ThreadItemDetails) -> Vec<String> {
 }
 
 fn normalize_eviction_fact(value: &str) -> String {
-    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = vtcode_commons::formatting::collapse_whitespace(value);
     if normalized.len() <= MAX_EVICTION_GROUNDED_FACT_BYTES {
         return normalized;
     }

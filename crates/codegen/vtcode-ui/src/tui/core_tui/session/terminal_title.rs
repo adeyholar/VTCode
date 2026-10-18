@@ -344,7 +344,7 @@ fn truncate_title(title: &str) -> String {
 }
 
 fn normalize_title_part(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase()
+    vtcode_commons::formatting::collapse_whitespace(value).to_ascii_lowercase()
 }
 
 #[cfg(test)]

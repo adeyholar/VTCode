@@ -347,7 +347,7 @@ fn build_terminal_title_preview(
             _ => None,
         };
         if let Some((text, spinner_part)) = candidate {
-            let key = text.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+            let key = vtcode_commons::formatting::collapse_whitespace(&text).to_ascii_lowercase();
             if !key.is_empty() && seen.insert(key) {
                 parts.push((text, spinner_part));
             }
