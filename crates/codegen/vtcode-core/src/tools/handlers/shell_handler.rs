@@ -18,7 +18,7 @@ use super::tool_handler::{
 };
 use crate::config::constants::tools;
 use crate::tools::output_limits::OUTPUT_PREVIEW_CHARS_PER_TOKEN;
-use crate::tools::shell::{ShellOutput as CoreShellOutput, ShellRunner};
+use crate::tools::shell::{ShellOutput as CoreShellOutput, ShellRunner, SystemExecutor};
 use crate::tools::validation::commands;
 
 /// Default timeout for shell commands (30 seconds).
@@ -32,6 +32,15 @@ const MAX_SHELL_TIMEOUT_MS: u64 = 300_000;
 struct ResolvedShellCall {
     params: ShellToolCallParams,
     max_output_tokens: usize,
+}
+
+/// Resolve the environment for one launch.
+///
+/// The caller-supplied map (or the process environment) is reduced to the shared
+/// sandbox allowlist, so neither launch branch can hand a child unfiltered secrets.
+fn sanitized_launch_env(env: Option<HashMap<String, String>>, allowed_paths: &[&Path]) -> HashMap<String, String> {
+    let current_env = env.unwrap_or_else(|| std::env::vars().collect());
+    crate::sandboxing::build_sanitized_env(&current_env, true, false, "shell-handler", allowed_paths)
 }
 
 /// Handler for shell command execution.
@@ -118,15 +127,7 @@ impl ShellHandler {
             command.args(args).current_dir(&canonical_cwd);
             vtcode_commons::fs::bound_file::set_command_working_directory(command.as_std_mut(), &directory)
                 .map_err(|error| ToolCallError::Internal(error.into()))?;
-            let current_env = env.unwrap_or_else(|| std::env::vars().collect());
-            let sanitized_env = crate::sandboxing::build_sanitized_env(
-                &current_env,
-                true,
-                false,
-                "shell-handler",
-                &[canonical_cwd.as_path()],
-            );
-            command.env_clear().envs(sanitized_env);
+            command.env_clear().envs(sanitized_launch_env(env, &[canonical_cwd.as_path()]));
             let output = tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
                 .await
                 .map_err(|_error| ToolCallError::Timeout(timeout_ms))?
@@ -139,7 +140,12 @@ impl ShellHandler {
         } else {
             let command = params.command.first().map(String::as_str).unwrap_or_default();
             commands::validate_shell_script(command).map_err(ToolCallError::Internal)?;
-            let runner = ShellRunner::new(cwd.to_path_buf());
+            // Script launches share the argv branch's environment policy: the runner
+            // would otherwise launch the shell with the inherited process environment.
+            let runner = ShellRunner::with_executor(
+                cwd.to_path_buf(),
+                SystemExecutor::with_env(sanitized_launch_env(env, &[cwd])),
+            );
             tokio::time::timeout(Duration::from_millis(timeout_ms), runner.exec(command))
                 .await
                 .map_err(|_error| ToolCallError::Timeout(timeout_ms))?
@@ -357,6 +363,48 @@ mod tests {
             }
         }
         assert_eq!(std::fs::read_to_string(root.path().join("nested/sample.txt")).unwrap(), "nested-only\n");
+    }
+
+    /// Both launch branches must resolve the caller-supplied environment through the
+    /// shared allowlist. Before this was pinned, the script branch ignored `env`
+    /// entirely and the child inherited the full process environment.
+    #[tokio::test]
+    async fn both_launch_branches_apply_the_sanitized_environment_policy() {
+        let handler = ShellHandler::new();
+        let root = tempfile::tempdir().unwrap();
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string()));
+        env.insert("HOME".to_string(), "/vtcode-shell-handler-marker-home".to_string());
+        env.insert("VTCODE_TEST_SECRET".to_string(), "leaked-secret-value".to_string());
+
+        let argv_call = ShellToolCallParams {
+            command: vec!["printenv".to_string(), "HOME".to_string()],
+            workdir: None,
+            timeout_ms: Some(10_000),
+            sandbox_permissions: None,
+            justification: None,
+        };
+        let argv_output = handler
+            .execute_command(&argv_call, root.path(), Some(env.clone()))
+            .await
+            .unwrap();
+        assert_eq!(argv_output.exit_code, 0, "{argv_output:?}");
+        assert_eq!(argv_output.stdout.trim(), "/vtcode-shell-handler-marker-home");
+
+        let script_call = ShellToolCallParams {
+            command: vec!["echo \"home=$HOME secret=$VTCODE_TEST_SECRET\"".to_string()],
+            workdir: None,
+            timeout_ms: Some(10_000),
+            sandbox_permissions: None,
+            justification: None,
+        };
+        let script_output = handler.execute_command(&script_call, root.path(), Some(env)).await.unwrap();
+        assert_eq!(script_output.exit_code, 0, "{script_output:?}");
+        assert_eq!(
+            script_output.stdout.trim(),
+            "home=/vtcode-shell-handler-marker-home secret=",
+            "script launches must see the allowlisted environment, never the process one"
+        );
     }
 
     #[test]
