@@ -633,16 +633,21 @@ pub(super) async fn run_session_iteration(state: SessionLoopState<'_>) -> Result
             harness_try!(controller.set_matrix_persistence(persistence).await);
         }
         let interrupt_state = std::sync::Arc::clone(&ctrl_c_state);
-        Some(MatrixInterruptGuard(tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                if interrupt_state.is_cancel_requested() || interrupt_state.is_exit_requested() {
-                    if let Err(error) = controller.cancel_matrix().await {
-                        tracing::warn!(%error, "matrix interruption persistence failed");
+        // Abort the interrupt poller when this scope ends.
+        let interrupt_guard = vtcode_commons::TaskGuard::with_label(
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    if interrupt_state.is_cancel_requested() || interrupt_state.is_exit_requested() {
+                        if let Err(error) = controller.cancel_matrix().await {
+                            tracing::warn!(%error, "matrix interruption persistence failed");
+                        }
                     }
                 }
-            }
-        })))
+            }),
+            "matrix-interrupt",
+        );
+        Some(interrupt_guard)
     } else {
         None
     };

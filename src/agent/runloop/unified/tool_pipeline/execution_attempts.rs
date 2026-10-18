@@ -289,9 +289,9 @@ async fn run_single_tool_attempt(
     progress_reporter.set_progress(20).await;
 
     let _progress_update_guard = {
-        use crate::agent::runloop::unified::progress::{ProgressUpdateGuard, spawn_elapsed_time_updater};
+        use crate::agent::runloop::unified::progress::spawn_elapsed_time_updater;
         let handle = spawn_elapsed_time_updater(progress_reporter.clone(), name.to_string(), 500);
-        ProgressUpdateGuard::new(handle)
+        vtcode_commons::TaskGuard::with_label(handle, "tool-progress-update")
     };
 
     let status = loop {

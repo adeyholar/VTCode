@@ -1,10 +1,3 @@
-struct MatrixInterruptGuard(tokio::task::JoinHandle<()>);
-impl Drop for MatrixInterruptGuard {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 use std::collections::VecDeque;
 use std::ops::ControlFlow;
 use std::time::Instant;
