@@ -5,6 +5,63 @@ All notable changes to vtcode will be documented in this file.
 <!-- markdownlint-disable MD012 MD013 MD024 MD033 -->
 <!-- Rules relaxed for this generated file only: MD012 (a full regeneration leaves one blank line at end-of-file), MD013 (commit subjects are unbounded so entries can exceed 120 columns), MD024 (two tags can normalize to the same version heading), MD033 (commit subjects may contain `<Type>` spellings). -->
 
+## 0.179.5 - 2026-10-18
+
+### Highlights
+
+#### Bug Fixes
+
+- Resolve skill dir from either SKILL.md path or directory (ff0c5178)
+- Bound bundle extraction against oversized archives (923de24f)
+- Keep busy settings picker in sync via shared snapshot (4c683f45)
+- Make generated CHANGELOG lint-clean (626cd2d2)
+- Refresh busy picker config on live reload (64273aa0)
+- Report planning denials as policy denials (caa9d371)
+- Gate the companion owner socket on provenance (43c580d0)
+- Dedupe OpenAI capability lists and repair stale service-tier test (eaf5debf)
+- Isolate plugin MCP discovery from the host plugin root (ccf4b4c3)
+- Stop racing the task deadline against binary startup (ed6f6c73)
+- Pin the hawk release to the workspace toolchain (630fbdd0)
+- Keep launcher pipeline hygiene in sanitized environments (65b42b4d)
+- Apply the environment allowlist on shell-script launches (734ae9e2)
+- Keep MCP stdio children on the resolved environment (285db009)
+- Honor canonical falsy values in HITL bell and notify overrides (0308dc55)
+- Use saturating arithmetic in tool retry backoff (f170c2c9)
+- Guard webhook retry backoff against overflow and make it testable (8e4e01be)
+- Clamp the pattern-detector window so a zero window cannot abort analysis (e45c4c6e)
+- Divide the filtering average by the sampled window, not a min() with zero (8960b49d)
+
+#### Documentation
+
+- Add deep Rust semantic analysis (Charon) guide (bd91a4aa)
+- Fix markdown lint nits across guides (d467dbd5)
+
+### Other Changes
+
+#### Other
+
+- Improve child process cleanup and lifetime ownership (e8a622eb)
+
+#### Refactors
+
+- Split one session iteration from the unified loop (9fe3dc7f)
+- Dedupe repeated reasoning-effort presets and ladders (6ee93386)
+- Drop the dead safety validator and stale pro-model UX (a2440a58)
+- Drop two unreferenced ui helpers (cd1e330b)
+- Drop unreferenced skill verification/harness modules (2f013977)
+- Drop unreferenced agent-side helper modules (55d1a5f7)
+- Drop stale dead_code suppressions and make the rest honest (4c3c6459)
+- Delegate env-flag reads to the canonical parser (69a57a79)
+- Dedupe the keyring disable-flag literal list (226e2424)
+- Delegate whitespace collapsing to the canonical helper (cf596164)
+- Resolve the adapter session shell through the canonical resolver (c53a8b5d)
+- Replace per-crate abort-on-drop guards with the canonical TaskGuard (39d8580e)
+- Remove the never-registered Codex handler layer (893d28f6)
+
+#### Tests
+
+- Make plugin-provider assertions environment-independent (90d096ac)
+
 ## 0.179.4 - 2026-10-18
 
 ### Highlights
