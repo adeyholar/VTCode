@@ -26,6 +26,8 @@ const MAX_TASKS: usize = 64;
 const MAX_CHANGES: usize = 128;
 const TASK_TIMEOUT: Duration = Duration::from_secs(1800);
 
+mod command_evidence;
+
 struct TaskRecord {
     snapshot: TaskSnapshot,
     cancellation: CancellationToken,
@@ -233,6 +235,7 @@ impl CompanionTasks for CompanionService {
             changes: Vec::new(),
             unified_diff: String::new(),
             evidence_truncated: false,
+            command_results: Vec::new(),
             verification: TaskVerification::Unverified,
             verification_command: None,
             verification_exit_code: None,
@@ -384,6 +387,7 @@ impl Drop for ProcessGroup {
 
 #[derive(Default)]
 struct EventProjection {
+    commands: command_evidence::CommandEvidence,
     completion: Option<ThreadCompletionSubtype>,
     failed: bool,
     failure_reason: Option<String>,
@@ -429,6 +433,7 @@ impl EventProjection {
     }
 
     fn observe(&mut self, snapshot: &mut TaskSnapshot, event: ThreadEvent) {
+        self.commands.observe(snapshot, &event);
         snapshot.progress = match &event {
             ThreadEvent::ThreadStarted(_) => "runtime session started",
             ThreadEvent::TurnStarted(_) => "agent turn running",

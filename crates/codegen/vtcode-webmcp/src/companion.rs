@@ -63,6 +63,44 @@ pub enum TaskVerification {
     Failed,
 }
 
+/// Stable identities carried by an observed canonical command result.
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CommandEventReference {
+    /// Canonical thread identity from thread.started, when observed.
+    pub thread_id: Option<String>,
+    /// Runtime task identity, distinct from the service task ID.
+    pub runtime_task_id: Option<String>,
+    /// Canonical actor identity, when supplied.
+    pub actor_id: Option<String>,
+    /// Canonical turn identity, when supplied.
+    pub turn_id: Option<String>,
+    /// Canonical item identity within that context.
+    pub item_id: String,
+}
+
+/// Historical command observation, never a semantic assertion of task correctness.
+/// Output streams and private reasoning are intentionally excluded.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct CommandResult {
+    /// Canonical source: `tool_output` or `command_execution`.
+    pub source: String,
+    /// Reference to the canonical result item for local diagnostics.
+    pub event_ref: CommandEventReference,
+    /// Native tool-call identity, when available; not used to guess correlations.
+    pub tool_call_id: Option<String>,
+    /// Command tool name, when supplied by a matching invocation.
+    pub tool_name: Option<String>,
+    /// Recorded command text; null when a preceding invocation cannot be matched.
+    pub command: Option<String>,
+    /// Whether command text was shortened, sanitized, or separately appended argv was omitted.
+    pub command_truncated: bool,
+    /// Canonical status: `completed`, `failed`, or `in_progress`.
+    /// A completed tool call can yield a running command with a null exit code.
+    pub status: String,
+    /// Observed command exit code. Null never implies zero or terminal success.
+    pub exit_code: Option<i32>,
+}
+
 /// Bounded public projection of canonical task evidence.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct TaskSnapshot {
@@ -82,9 +120,12 @@ pub struct TaskSnapshot {
     pub unified_diff: String,
     /// Whether public evidence was omitted, withheld, or collection was incomplete.
     pub evidence_truncated: bool,
-    /// Current verification outcome.
+    /// Historical command observations in result-event order. Later mutations do
+    /// not erase them; they do not grant current-generation verification credit.
+    pub command_results: Vec<CommandResult>,
+    /// Current runtime-verifier outcome, scoped to its recorded command.
     pub verification: TaskVerification,
-    /// Most recent recorded verifier command, when available.
+    /// Most recent runtime-recorded verifier command; not every task assertion.
     pub verification_command: Option<String>,
     /// Exit code from the recorded verifier, never the task process exit.
     pub verification_exit_code: Option<i32>,

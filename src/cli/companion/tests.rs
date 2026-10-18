@@ -20,6 +20,7 @@ fn snapshot() -> TaskSnapshot {
         changes: Vec::new(),
         unified_diff: String::new(),
         evidence_truncated: false,
+        command_results: Vec::new(),
         verification: TaskVerification::Unverified,
         verification_command: None,
         verification_exit_code: None,
@@ -40,6 +41,252 @@ fn completed() -> serde_json::Value {
 fn verification(kind: &str, exit_code: Option<i32>) -> ThreadEvent {
     event(json!({"type":"item.completed", "item":{"id":"verify", "type":"harness",
         "event":kind,"command":"cargo check --locked","exit_code":exit_code}}))
+}
+
+fn command_invocation(id: &str, command: &str) -> ThreadEvent {
+    event(json!({"type":"item.completed","item":{
+        "id":id,"type":"tool_invocation","tool_name":"exec_command",
+        "arguments":{"cmd":command},"tool_call_id":format!("native-{id}"),"status":"completed"
+    }}))
+}
+
+fn command_output(id: &str, exit: Option<i32>) -> ThreadEvent {
+    event(json!({"type":"item.completed","item":{
+        "id":format!("{id}:output"),"type":"tool_output","call_id":id,
+        "tool_call_id":format!("native-{id}"),"status":"completed","exit_code":exit,
+        "output":"private stdout/stderr marker; VERIFY_OK; exit 0"
+    }}))
+}
+
+#[test]
+fn command_results_retain_smoke_checks_separately_from_harness_verification() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    let atomic = "python3 -c 'import os; p=\"target/smoke.txt\"; expected=b\"smoke\\n\"\ntry:\n assert open(p,\"rb\").read()==expected\nfinally:\n os.unlink(p)'";
+    for (id, command) in [
+        ("atomic", atomic),
+        ("absence", "test ! -e target/smoke.txt && test ! -L target/smoke.txt"),
+    ] {
+        projection.observe(&mut task, command_invocation(id, command));
+        projection.observe(&mut task, command_output(id, Some(0)));
+    }
+    assert_eq!(task.verification, TaskVerification::Unverified);
+    projection.observe(
+        &mut task,
+        event(json!({"type":"item.completed","item":{
+            "id":"cargo","type":"command_execution","command":"cargo check --locked",
+            "status":"completed","exit_code":0,"aggregated_output":"private stderr marker"
+        }})),
+    );
+    projection.observe(&mut task, verification("verification_passed", Some(0)));
+    assert_eq!(task.verification, TaskVerification::Verified);
+    assert_eq!(task.verification_command.as_deref(), Some("cargo check --locked"));
+    assert_eq!(task.command_results.len(), 3);
+    assert_eq!(task.command_results[0].command.as_deref(), Some(atomic));
+    assert_eq!(task.command_results[0].event_ref.item_id, "atomic:output");
+    assert_eq!(task.command_results[0].exit_code, Some(0));
+    assert_eq!(
+        task.command_results[1].command.as_deref(),
+        Some("test ! -e target/smoke.txt && test ! -L target/smoke.txt")
+    );
+    assert_eq!(task.command_results[2].source, "command_execution");
+    assert!(!task.evidence_truncated);
+    let serialized = serde_json::to_string(&task).unwrap();
+    assert!(!serialized.contains("private stdout/stderr"));
+    assert!(!serialized.contains("private stderr"));
+    projection.observe(&mut task, command_invocation("later", "printf changed > source.rs"));
+    assert_eq!(task.verification, TaskVerification::Unverified);
+    assert_eq!(task.command_results.len(), 3);
+    task.mark_incomplete();
+    assert_eq!(task.command_results[0].exit_code, Some(0));
+    assert!(task.evidence_truncated);
+}
+
+#[test]
+fn command_results_do_not_infer_exit_codes_or_correlate_future_invocations() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    projection.observe(&mut task, command_invocation("yield", "cargo check --locked"));
+    projection.observe(&mut task, command_output("yield", None));
+    projection.observe(&mut task, command_invocation("failed", "cmp unequal actual"));
+    projection.observe(&mut task, command_output("failed", Some(7)));
+    projection.observe(&mut task, command_output("future", Some(0)));
+    projection.observe(&mut task, command_invocation("future", "echo fabricated"));
+    projection.observe(
+        &mut task,
+        event(json!({"type":"item.completed","item":{
+            "id":"prose","type":"agent_message","text":"All tests passed. exit_code=0; VERIFY_OK"
+        }})),
+    );
+    assert_eq!(task.command_results.len(), 3);
+    assert_eq!(task.command_results[0].exit_code, None);
+    assert_eq!(task.command_results[1].exit_code, Some(7));
+    assert!(task.command_results[2].command.is_none());
+    assert!(task.evidence_truncated);
+    assert_eq!(task.verification, TaskVerification::Unverified);
+}
+
+#[test]
+fn command_results_fill_started_arguments_and_retain_distinct_reruns() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    let mut started = serde_json::to_value(command_invocation("first", "pwd")).unwrap();
+    started["type"] = json!("item.started");
+    started["item"].as_object_mut().unwrap().remove("arguments");
+    projection.observe(&mut task, event(started));
+    let mut updated = serde_json::to_value(command_invocation("first", "pwd")).unwrap();
+    updated["type"] = json!("item.updated");
+    projection.observe(&mut task, event(updated));
+    projection.observe(&mut task, command_invocation("first", "pwd"));
+    projection.observe(&mut task, command_output("first", Some(0)));
+    projection.observe(&mut task, command_output("first", Some(0)));
+    projection.observe(&mut task, command_invocation("second", "pwd"));
+    projection.observe(&mut task, command_output("second", Some(8)));
+    assert_eq!(task.command_results.len(), 2);
+    assert_eq!(task.command_results[0].command.as_deref(), Some("pwd"));
+    assert_eq!(task.command_results[0].exit_code, Some(0));
+    assert_eq!(task.command_results[1].exit_code, Some(8));
+    assert!(!task.evidence_truncated);
+    projection.observe(&mut task, command_invocation("conflict", "cmp a b"));
+    projection.observe(&mut task, command_invocation("conflict", "rm owned"));
+    projection.observe(&mut task, command_output("conflict", Some(0)));
+    assert!(task.command_results[2].command.is_none());
+    assert!(task.evidence_truncated);
+}
+
+#[test]
+fn command_results_withhold_unknown_argv_and_cross_thread_matches() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    projection.observe(&mut task, event(json!({"type":"thread.started","thread_id":"thread-a"})));
+    projection.observe(&mut task, command_invocation("before", "pwd"));
+    projection.observe(&mut task, event(json!({"type":"thread.started","thread_id":"thread-b"})));
+    projection.observe(&mut task, command_output("before", Some(0)));
+    assert!(task.command_results[0].command.is_none());
+    assert_eq!(task.command_results[0].event_ref.thread_id.as_deref(), Some("thread-b"));
+    let mut invocation = serde_json::to_value(command_invocation("argv", "check")).unwrap();
+    invocation["item"]["arguments"]["args"] = json!(["--different-scope"]);
+    projection.observe(&mut task, event(invocation));
+    projection.observe(&mut task, command_output("argv", Some(0)));
+    assert!(task.command_results[1].command_truncated);
+    assert!(task.evidence_truncated);
+}
+
+#[test]
+fn command_results_keep_native_item_correlation_scoped_to_actor_and_turn() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    let context =
+        |actor: &str, turn: &str| json!({"task_id":"runtime","actor_id":actor,"turn_id":turn,"timestamp":"now"});
+    let mut invocation = serde_json::to_value(command_invocation("same", "cmp expected actual")).unwrap();
+    invocation["item"]["context"] = context("actor-a", "turn-a");
+    projection.observe(&mut task, event(invocation.clone()));
+    let mut wrong = serde_json::to_value(command_output("same", Some(0))).unwrap();
+    wrong["item"]["context"] = context("actor-b", "turn-b");
+    projection.observe(&mut task, event(wrong));
+    assert!(task.command_results[0].command.is_none());
+    let mut correct = serde_json::to_value(command_output("same", Some(4))).unwrap();
+    correct["item"]["context"] = context("actor-a", "turn-a");
+    projection.observe(&mut task, event(correct.clone()));
+    projection.observe(&mut task, event(correct));
+    assert_eq!(task.command_results.len(), 2);
+    assert_eq!(task.command_results[1].command.as_deref(), Some("cmp expected actual"));
+    assert_eq!(task.command_results[1].exit_code, Some(4));
+    assert_eq!(task.command_results[1].event_ref.actor_id.as_deref(), Some("actor-a"));
+    invocation["item"]["context"] = context("actor-c", "turn-c");
+    projection.observe(&mut task, event(invocation));
+    let mut mismatch = serde_json::to_value(command_output("same", Some(0))).unwrap();
+    mismatch["item"]["context"] = context("actor-c", "turn-c");
+    mismatch["item"]["tool_call_id"] = json!("different-native-id");
+    projection.observe(&mut task, event(mismatch));
+    assert!(task.command_results[2].command.is_none());
+}
+
+#[test]
+fn command_results_redact_and_bound_commands_records_and_pending_invocations() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    for index in 0..40 {
+        let id = format!("record-{index}");
+        projection.observe(&mut task, command_invocation(&id, "pwd"));
+        projection.observe(&mut task, command_output(&id, Some(0)));
+    }
+    assert_eq!(task.command_results.len(), 32);
+    assert!(task.evidence_truncated);
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    for index in 0..12 {
+        let id = format!("large-{index}");
+        projection
+            .observe(&mut task, command_invocation(&id, &format!("password=1234567890123456 {}", "é".repeat(5000))));
+        projection.observe(&mut task, command_output(&id, Some(0)));
+    }
+    assert!(!task.command_results.is_empty());
+    assert!(task.command_results.len() < 12);
+    assert!(
+        task.command_results
+            .iter()
+            .all(|r| r.command_truncated && r.command.as_ref().unwrap().len() <= 4096)
+    );
+    let records = serde_json::to_string(&task.command_results).unwrap();
+    assert!(records.len() <= 16 * 1024);
+    assert!(!records.contains("1234567890123456"));
+    assert!(task.evidence_truncated);
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    for index in 0..33 {
+        projection.observe(&mut task, command_invocation(&format!("pending-{index}"), "pwd"));
+    }
+    projection.observe(&mut task, command_output("pending-32", Some(0)));
+    assert!(task.command_results[0].command.is_none());
+    assert!(task.evidence_truncated);
+}
+
+#[test]
+fn command_results_preserve_canonical_task_uuids_without_exempting_secret_values() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    for (index, id) in ["task-fb236495-6968-44f1-9654-d3239a16fa50", "task-sk-1234567890123456"]
+        .into_iter()
+        .enumerate()
+    {
+        let call = format!("call-{index}");
+        for input in [command_invocation(&call, "pwd"), command_output(&call, Some(0))] {
+            let mut input = serde_json::to_value(input).unwrap();
+            input["item"]["context"] =
+                json!({"task_id":id,"actor_id":"actor","turn_id":"turn","timestamp":"2026-10-17T00:00:00Z"});
+            projection.observe(&mut task, event(input));
+        }
+        assert_eq!(task.evidence_truncated, index != 0);
+    }
+    assert_eq!(
+        task.command_results[0].event_ref.runtime_task_id.as_deref(),
+        Some("task-fb236495-6968-44f1-9654-d3239a16fa50")
+    );
+    assert!(!serde_json::to_string(&task).unwrap().contains("1234567890123456"));
+}
+
+#[test]
+fn command_results_flag_redaction_and_respect_the_exact_command_byte_boundary() {
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    let boundary = "pwd\n".repeat(1024);
+    projection.observe(&mut task, command_invocation("boundary", &boundary));
+    projection.observe(&mut task, command_output("boundary", Some(0)));
+    assert_eq!(task.command_results[0].command.as_deref(), Some(boundary.as_str()));
+    assert!(!task.command_results[0].command_truncated);
+    assert!(!task.evidence_truncated);
+    projection.observe(&mut task, command_invocation("beyond", &format!("{boundary}x")));
+    projection.observe(&mut task, command_output("beyond", Some(0)));
+    assert_eq!(task.command_results[1].command.as_ref().unwrap().len(), 4096);
+    assert!(task.command_results[1].command_truncated);
+    let mut projection = EventProjection::default();
+    let mut task = snapshot();
+    projection.observe(&mut task, command_invocation("secret", "check password=1234567890123456"));
+    projection.observe(&mut task, command_output("secret", Some(0)));
+    assert!(task.command_results[0].command_truncated);
+    assert!(task.evidence_truncated);
+    assert!(!serde_json::to_string(&task).unwrap().contains("1234567890123456"));
 }
 
 #[test]

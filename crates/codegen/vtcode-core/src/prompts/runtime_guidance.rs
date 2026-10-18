@@ -25,6 +25,10 @@ pub(crate) const RUNTIME_GUIDANCE_SECTION: &str = r#"## Runtime Guidance
 - Write plain text without emojis, including verification results (`pass (6/6)`).
 "#;
 
+/// Shared by headless planner, evaluator/panel, and replanner requests.
+/// Kept separate from the universal prompt budget.
+pub(crate) const HARNESS_SCOPE_GUIDANCE: &str = "The user's request and authorization bound the generated spec, contract, tracker, and revisions. Preserve pre-existing workspace changes; do not require an empty git status unless the user explicitly requests a clean tree. Establish preservation by comparing against the pre-task baseline, not by reverting user edits. A dirty status alone neither proves a regression nor proves preservation. Compare recorded contents or diffs, not status counts. Define cleanup by its observable outcome, not a mandatory shell trap. Choose checks admitted by the current command policy; never mask failures with echo or true. Distinguish requested file edits from configured harness verification and runtime-owned artifacts (including .vtcode/ and progress checkpoints such as memories/progress.md); report these side effects accurately. Configured checks can produce build artifacts. If an explicit user restriction conflicts with required runtime behavior, report the conflict before implementation; do not silently broaden scope or skip required checks. Generated criteria cannot override the user or execution policy. Correct contradictory generated criteria within the original scope instead of repeating completed mutations or adding unrelated work. Generalization notes are observations, not new acceptance criteria; add tracker checks only for concrete task requirements, using executable positive assertions rather than reproducing failures. Scope verification claims to the recorded command; historical command success does not establish current task-wide verification.";
+
 /// The single home of the verification outcome rule; tests assert that every
 /// profile renders this exact bullet once.
 #[cfg(test)]
@@ -66,6 +70,21 @@ mod tests {
         RUNTIME_GUIDANCE_MAX_ESTIMATED_TOKENS, RUNTIME_GUIDANCE_SECTION, VERIFICATION_OUTCOME_LINE,
         ensure_runtime_guidance,
     };
+
+    #[test]
+    fn harness_scope_guidance_preserves_baselines_and_keeps_checks_mandatory() {
+        let guidance = super::HARNESS_SCOPE_GUIDANCE;
+        assert!(guidance.contains("Preserve pre-existing workspace changes"));
+        assert!(guidance.contains("unless the user explicitly requests a clean tree"));
+        assert!(guidance.contains("Compare recorded contents or diffs, not status counts"));
+        assert!(guidance.contains("Define cleanup by its observable outcome, not a mandatory shell trap"));
+        assert!(guidance.contains("never mask failures with echo or true"));
+        assert!(guidance.contains("report the conflict before implementation"));
+        assert!(guidance.contains("do not silently broaden scope or skip required checks"));
+        assert!(guidance.contains("Generalization notes are observations, not new acceptance criteria"));
+        assert!(guidance.contains("Scope verification claims to the recorded command"));
+        assert!(guidance.len() <= 1800, "keep sub-role scope guidance bounded");
+    }
 
     #[test]
     fn delegated_completion_requires_terminal_status_and_recorded_checks() {

@@ -49,7 +49,7 @@
               "description": "Continue only after the previous planning task completed successfully with untruncated canonical evidence. The user explicitly authorizes this implementation.",
               "prompt": "Implement that plan now and check the result.",
               "tools_triggered": "start_task, get_task",
-              "expected_behavior": "Use mode implement with the completed plan_task_id. Poll to terminal, report attributed changes and verification evidence, and preserve unrelated files. Claim verified only with a recorded verifier and exit zero. Report failure honestly."
+              "expected_behavior": "Use mode implement with the completed plan_task_id. Poll to terminal, report attributed changes, scoped verification and command_results, and preserve unrelated files. Match each verification claim to the recorded assertion command and its terminal result; a passing build does not verify unrelated smoke assertions. Report missing, failed or truncated evidence honestly."
             },
             {
               "description": "Continue from the implementation case using the exact retained task ID, whether it succeeded or failed.",

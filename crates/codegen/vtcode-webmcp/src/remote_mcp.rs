@@ -507,7 +507,7 @@ impl RemoteMcpHandler {
     /// Return bounded, public task evidence.
     #[tool(
         name = "get_task",
-        description = "Inspect VT Code task state, attributed changes and recorded verification. Missing proof remains unverified.",
+        description = "Inspect task state, attributed changes, scoped runtime verification, and bounded historical command_results. Command exit zero does not establish unrelated task assertions. Missing proof remains unverified.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1180,6 +1180,21 @@ mod tests {
         let handler = RemoteMcpHandler::new(adapter(), Arc::new(enabled));
         let tools = handler.tool_definitions();
         assert_eq!(tools.len(), 5);
+        for name in ["start_task", "get_task"] {
+            let schema = serde_json::to_string(
+                tools
+                    .iter()
+                    .find(|tool| tool.name == name)
+                    .unwrap()
+                    .output_schema
+                    .as_ref()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert!(schema.contains("command_results"));
+            assert!(schema.contains("command_truncated"));
+            assert!(schema.contains("event_ref"));
+        }
         for name in ["start_task", "cancel_task"] {
             let tool = tools.iter().find(|tool| tool.name == name).unwrap();
             let annotations = tool.annotations.as_ref().unwrap();

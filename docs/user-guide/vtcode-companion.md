@@ -225,6 +225,24 @@ that the inspection ran; it does not assert that the contents match. After
 removing a temporary smoke-test file, confirm its absence separately. Shell-based
 create/delete operations may leave no attributed file-change event or final diff.
 
+Inspect `command_results` for the actual smoke assertion command and its exit
+code, then inspect the final absence assertion separately. The legacy
+`verification_command` may be a configured build check such as
+`cargo check --locked`; that result supports the build check only. An atomic
+script may contain several assertions in one command record. Null commands,
+null exit codes, failed results, or truncated commands leave claims unsupported.
+These records are historical observations, so later mutations can change the
+state they inspected. Output streams are intentionally excluded from the public
+list; canonical event references support local diagnostics.
+
+Preserve existing workspace edits during smoke tests; do not require a clean Git
+tree unless that is the intended task. Use a before/after baseline comparison to
+check preservation. Configured checks can create build artifacts, and the
+runtime can write `.vtcode/` metadata or `memories/progress.md`. Report these
+separately from requested edits. If your restriction forbids those runtime
+outputs too, report the conflict before implementing; do not skip required
+verification to force a successful result.
+
 Report problems through [GitHub Issues](https://github.com/vinhnx/VTCode/issues)
 with host/binary versions, task IDs, sanitized errors, and discovery results.
 Remove credentials, private source, and personal paths before sharing logs.

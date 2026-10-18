@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD013 -->
 # vtcode-core
 
-[Root AGENTS.md](../../../AGENTS.md) | Agent loop, tools, LLM, safety, UI. Headless execution must contain fallible work in an awaited async block so errors reach terminal event recording, steering restoration, and canonical persistence close; an ordinary block does not contain `?` propagation. Evaluator tool evidence stays bounded and cannot replace required checks; tracker verifiers must remain satisfiable after cleanup. See [Companion contracts](../../../docs/development/vtcode-companion.md).
+[Root AGENTS.md](../../../AGENTS.md) | Agent loop, tools, LLM, safety, UI. Headless execution must contain fallible work in an awaited async block so errors reach terminal event recording, steering restoration, and canonical persistence close; an ordinary block does not contain `?` propagation. Evaluator tool evidence stays bounded and cannot replace required checks; tracker verifiers must remain satisfiable after cleanup. Generated criteria preserve user baselines and remain subordinate to task scope; raw generalization falsifiers are evidence, never automatic tracker commands. See [Companion contracts](../../../docs/development/vtcode-companion.md).
 
 ## Module map
 

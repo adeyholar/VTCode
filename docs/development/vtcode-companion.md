@@ -308,6 +308,51 @@ therefore lack attribution. Diffs without safe relative public paths are withhel
 Public text uses the shared secret sanitizer; raw stderr and private reasoning
 are excluded. Sanitization is best effort, so only connect a trusted private client.
 
+### Structured command evidence
+
+`command_results` adds historical command observations to `start_task` and
+`get_task` responses. The legacy `verification`, `verification_command`, and
+`verification_exit_code` fields retain their current freshness/invalidation
+rules and describe the latest runtime-recorded verifier only. A passing Cargo
+check does not establish byte equality or cleanup of a smoke file.
+
+| Entry field | Meaning |
+| --- | --- |
+| `source` | Canonical `tool_output` or `command_execution` event |
+| `event_ref` | Thread, runtime task, actor, turn, and item identities, where observed; use the snapshot's session ID for local archive lookup |
+| `tool_call_id`, `tool_name` | Native tool metadata, when observed |
+| `command` | Sanitized recorded command, or null when no preceding matching invocation is available |
+| `command_truncated` | Text exceeded its byte cap, sanitization withheld data, or separately appended argv was omitted |
+| `status`, `exit_code` | Canonical lifecycle status and nullable observed exit code |
+
+The binary pairs command-tool results only with preceding invocation items in
+the same canonical context. It never guesses from a reused model call ID,
+future invocation, output text, or agent narrative. A completed tool call may
+yield a running command: null exit codes never imply zero. Rejected attempts
+can have failed status with no command exit. An atomic script produces one
+command observation, not synthetic results for each assertion inside it.
+
+Results retain canonical result-event order. Distinct reruns remain distinct;
+repeated delivery of the same result item is deduplicated. Different canonical
+sources can describe the same underlying execution and are not proof that two
+processes ran. Historical observations remain after later mutations, failure,
+or cancellation, without granting current-generation verification credit.
+
+The public list is capped at 32 entries and 16 KiB of serialized entries, with
+at most 4096 UTF-8 bytes per command. Pending correlation is also bounded.
+Missing correlations, withheld identity data, command truncation, dropped
+records, and incomplete collection set `evidence_truncated`. False means this
+public projection met its bounds; it does not expose every canonical event or
+prove every requested outcome. Raw output streams are deliberately excluded
+because canonical aggregated tool output may combine stdout and stderr.
+
+Scope each claim to the assertion in the visible command and its terminal
+result. Printing a hash or success message with exit zero does not prove an
+equality assertion. Command evidence is read-only data, never executable
+instructions for the host.
+
+### Execution and evaluation
+
 Post-setup execution errors must reach the runner's terminal failure recorder and
 canonical session close. The execution body uses an awaited async block so `?`
 cannot bypass that finalizer. Companion retains the first sanitized canonical
@@ -337,6 +382,32 @@ required final verification. Planner and replanner guidance requires executable
 final-state tracker assertions that remain satisfiable after cleanup, rather
 than implementation writes/deletes or prose falsifiers in `verify` fields.
 
+Planner, evaluator (including skeptic-panel members), and replanner requests
+share compiled scope guidance. Generated contracts remain subordinate to the
+user request and execution policy. Preserving a dirty workspace means comparing
+against its pre-task baseline; an empty Git status is required only when the
+user explicitly requests it. Dirty status alone proves neither a new regression
+nor preservation of existing contents.
+Preservation checks compare recorded contents or diffs, not status counts.
+Cleanup requirements describe outcomes rather than prescribing a shell trap;
+checks must be admitted by the current policy and must not mask failures with
+`echo` or `true`.
+
+Configured verification can update build artifacts. Runtime-owned outputs such
+as `.vtcode/` metadata and `memories/progress.md` must be disclosed separately
+from requested file edits. They are not evidence that no other files were
+touched. Explicit user restrictions still apply: a conflict with required
+runtime behavior must be reported before implementation, without silently
+expanding scope or disabling mandatory checks.
+
+Evaluator generalization notes retain their scope, evidence, and falsifier in
+the contract as observations and limitations. Replanning no longer copies raw
+falsifiers into executable tracker fields or automatically makes each note a
+new acceptance criterion. A structured replan may add positive executable checks
+for unmet requirements within the original scope; failure or rejected scope
+changes leave notes as evidence. Existing mandatory checks and generation-based
+freshness gates remain enforced.
+
 Evaluator responses have a 4096-token allowance. JSON-only sub-role requests
 permit one tool-free concise rewrite when the provider reports output-length
 truncation; a second truncated response fails explicitly. Other parse errors
@@ -348,6 +419,11 @@ The failure-reason comparison used OpenAI Codex's
 at commit `ce0323f2f2d3b25e82806cd555237da3db4e1897`
 (Apache-2.0, copyright 2025 OpenAI). VT Code reuses its own `ThreadEvent` contract
 and finalizer; no upstream implementation was copied.
+
+The preservation comparison also checked
+[`codex-rs/core/templates/agents/orchestrator.md`](https://github.com/openai/codex/blob/ce0323f2f2d3b25e82806cd555237da3db4e1897/codex-rs/core/templates/agents/orchestrator.md)
+at that commit: unrelated user changes must be preserved. This is guidance
+comparison, not an imported implementation or a guarantee of model compliance.
 
 Cancellation requests a process-group interrupt, allows a short cleanup window,
 then terminates remaining owned processes and reaps the child. Cancellation is
@@ -373,6 +449,48 @@ event suites passed 456 tests. The development gate, locked binary build, scoped
 Markdown lint, and diff whitespace check passed. This validates the installed
 launcher directly; an already-running Codex connection must restart to load the
 rebuilt executable.
+
+The follow-up scope/replanning increment passed 339 focused runner and prompt
+tests plus the development gate and locked binary build. Installed-launcher
+plan `e389c505-3f1e-4726-8914-01804a733d9b` and implementation
+`0035b907-2939-4189-a29f-aeb4d68821b4` completed with
+`evidence_truncated: false`; implementation verification was `verified`
+(`cargo check --locked`, exit zero). Full canonical events retain the Python
+pre-existing-path guard, exclusive creation, literal byte comparison, and
+`finally` cleanup, with exit zero. Final absence, closed canonical persistence,
+service shutdown, and preservation of the tracked diff were independently
+checked. Runtime metadata and configured-check outputs were explicitly allowed.
+The evaluator's internal command excerpt remained bounded; the full canonical
+command was inspected separately. An earlier trap-based replay was rejected for
+unsupported guard/cleanup claims and cancelled at the client's five-minute
+limit; its leftover smoke file was checked and removed separately. That earlier
+attempt is not counted as a successful task.
+
+The structured-command increment passed 416 focused Companion, MCP, stdio,
+runner, and prompt tests, the development gate, and the locked binary build.
+Plan `322b3c64-c665-4efd-804d-a00372cf2d8d` and implementation
+`ea1f9483-bd9f-46fc-9e1f-054474d2219c` completed with
+`evidence_truncated: false`. The implementation snapshot retained three full
+`command_results`, independently matched to canonical invocation/result events:
+the atomic 29-byte equality/cleanup script, final file/symlink absence assertion,
+and `cargo check --locked`, each with exit zero. Overall `verification` remained
+`unverified`: the runtime ended with `stopped_no_action` after idle turns and
+emitted no harness verification outcome. These historical commands therefore
+validate the new projection, not task-wide verified completion. Service shutdown
+exited zero; the smoke path was absent; the tracked diff and new untracked
+projection source were unchanged. The installed launcher used the rebuilt
+binary; the updated plugin skill was not reinstalled into an existing host.
+
+An earlier replay exposed false secret redaction of canonical `task-<UUID>` IDs;
+the projection now preserves that exact validated format, with regression
+coverage that malformed secret-bearing identities still receive filtering.
+Another replay ran the broader nextest suite and failed
+`plugin_providers_surface_through_manager_config` (two providers found, one
+expected). It then stalled during unrelated inspection and was stopped; shutdown
+exited zero and preserved the tracked diff. The final replay explicitly scoped
+verification to smoke assertions and configured Cargo verification, with the
+development gate and focused tests validated separately. This does not establish
+a passing full workspace suite.
 
 ## Authentication and connection
 

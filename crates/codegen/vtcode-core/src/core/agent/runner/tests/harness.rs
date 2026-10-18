@@ -956,6 +956,120 @@ async fn evaluator_request_includes_verification_results() {
         .map(|message| message.content.as_text().into_owned())
         .expect("planner prompt");
     assert!(!planner_prompt.contains("JSON only"));
+
+    for request in [planner_request, evaluator_request] {
+        let system = request.system_prompt.as_deref().unwrap();
+        assert!(system.contains("Preserve pre-existing workspace changes"));
+        assert!(system.contains("do not require an empty git status unless the user explicitly requests a clean tree"));
+        assert!(system.contains("A dirty status alone neither proves a regression nor proves preservation"));
+        assert!(system.contains("Configured checks can produce build artifacts"));
+        assert!(system.contains("report the conflict before implementation"));
+        assert!(system.contains("Generalization notes are observations, not new acceptance criteria"));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn smoke_lifecycle_preserves_dirty_user_file_and_verifies_after_cleanup() {
+    let temp = TempDir::new().unwrap();
+    let workspace = workspace_root(&temp);
+    assert!(
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(&workspace)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    fs::write(workspace.join("user-notes.txt"), "original\n").unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .args(["add", "user-notes.txt"])
+            .current_dir(&workspace)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let user_edit = "pre-existing user edit, preserve exactly\n";
+    fs::write(workspace.join("user-notes.txt"), user_edit).unwrap();
+    fs::write(workspace.join("expected.txt"), b"smoke literal\n").unwrap();
+    fs::create_dir(workspace.join("target")).unwrap();
+    let final_check = "test ! -e target/smoke.txt && test ! -L target/smoke.txt";
+    let mut config = VTCodeConfig::default();
+    config.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::PlanBuildEvaluate;
+    config.agent.harness.inspection.mode = vtcode_config::core::agent::InspectionMode::Off;
+    // This fixture explicitly authorizes its cleanup command; production
+    // command-policy defaults remain unchanged.
+    config.commands.deny_glob.retain(|pattern| pattern != "rm *");
+    config.commands.deny_list.retain(|command| command != "rm");
+    config.commands.allow_glob.push("rm target/smoke.txt".into());
+    config.commands.allow_list.extend(["cmp".into(), "test".into()]);
+    config.automation.full_auto.max_turns = 12;
+    let mut runner = Box::pin(make_runner(&temp, config, "dirty-smoke-lifecycle")).await;
+    runner
+        .enable_full_auto(&[tools::EXEC_COMMAND.into(), tools::TASK_TRACKER.into()])
+        .await;
+    let mut provider = RoleQueuedProvider::new();
+    provider
+        .planner(json_response(planner_response_json(final_check)))
+        .build(tool_call_response(tools::EXEC_COMMAND, json!({"cmd":"git status --porcelain"})))
+        .build(tool_call_response(
+            tools::EXEC_COMMAND,
+            json!({"cmd":"printf 'smoke literal\\n' > target/smoke.txt"}),
+        ))
+        .build(tool_call_response(tools::EXEC_COMMAND, json!({"cmd":"cmp expected.txt target/smoke.txt"})))
+        .build(tool_call_response(tools::EXEC_COMMAND, json!({"cmd":"rm target/smoke.txt"})))
+        .build(tool_call_response(tools::TASK_TRACKER, json!({"action":"update","index":1,"status":"completed"})))
+        .build(text_response("The task is complete."))
+        .evaluator(json_response(evaluator_response_json("pass", "Final absence verified; user edit preserved.", 0)));
+    let recorded = provider.clone();
+    runner.provider_client = Box::new(provider);
+    let result = Box::pin(runner.execute_task(
+        &task("Create, compare, and remove smoke file; preserve existing user edits", "dirty-smoke"),
+        &[],
+    ))
+    .await
+    .unwrap();
+    assert_eq!(result.outcome, TaskOutcome::Success, "warnings: {:?}", result.warnings);
+    assert!(!runner.tool_registry.completion_verification_pending());
+    assert_eq!(fs::read_to_string(workspace.join("user-notes.txt")).unwrap(), user_edit);
+    assert_eq!(fs::read(workspace.join("expected.txt")).unwrap(), b"smoke literal\n");
+    assert!(fs::symlink_metadata(workspace.join("target/smoke.txt")).is_err());
+    let command_exits: Vec<_> = result
+        .thread_events
+        .iter()
+        .filter_map(|event| {
+            if let ThreadEvent::ItemCompleted(event) = event
+                && let ThreadItemDetails::ToolOutput(output) = &event.item.details
+            {
+                output.exit_code
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        command_exits,
+        vec![0, 0, 0, 0],
+        "status, creation, exact comparison, and removal must actually pass"
+    );
+    let requests = recorded.recorded_requests();
+    let evaluator = requests
+        .iter()
+        .find(|request| harness_role_of(request) == HarnessRole::Evaluator)
+        .unwrap();
+    let prompt = evaluator.messages[0].content.as_text();
+    assert!(prompt.contains("user-notes.txt"));
+    assert!(prompt.contains(&format!("[PASS] {final_check} (exit 0)")));
+    assert!(
+        evaluator
+            .system_prompt
+            .as_deref()
+            .unwrap()
+            .contains("comparing against the pre-task baseline")
+    );
 }
 
 #[tokio::test]
@@ -1010,7 +1124,7 @@ async fn evaluator_length_recovery_retries_only_the_tool_free_response_once() {
 }
 
 #[tokio::test]
-async fn evaluator_notes_render_and_replan_adds_falsifier_tracker_steps() {
+async fn evaluator_notes_remain_evidence_and_replan_adds_only_executable_task_checks() {
     let temp = TempDir::new().expect("tempdir");
     let workspace = workspace_root(&temp);
 
@@ -1045,7 +1159,11 @@ async fn evaluator_notes_render_and_replan_adds_falsifier_tracker_steps() {
         .replanner(json_response(json!({
             "revised_feature_list": "# Features\n\n- [x] Preserve bounded code-search scope",
             "contract_addendum": "- Preserve the supplied scope.",
-            "new_tracker_items": [],
+            "new_tracker_items": [{
+                "description": "Verify the requested bounded search result",
+                "outcome": "The task-specific check passes",
+                "verify": ["pwd"],
+            }],
             "preserved_scopes": ["Only code-search changes in this task"],
             "rationale": "Keep the observation task-scoped.",
         })))
@@ -1086,15 +1204,117 @@ async fn evaluator_notes_render_and_replan_adds_falsifier_tracker_steps() {
     assert!(replan_prompt.contains("Only code-search changes in this task"));
     assert!(replan_prompt.contains("A regression test returns a result outside the requested scope"));
     assert!(replan_request.system_prompt.as_deref().is_some_and(|prompt| {
-        prompt.contains("smallest claim the evidence supports") && !prompt.contains("arXiv")
+        prompt.contains("smallest claim the evidence supports")
+            && prompt.contains("Preserve pre-existing workspace changes")
+            && prompt.contains("Generalization notes are observations, not new acceptance criteria")
+            && !prompt.contains("Every supplied falsifier must become a verification step")
+            && !prompt.contains("arXiv")
     }));
     let tracker = fs::read_to_string(workspace.join(".vtcode/tasks/current_task.md")).expect("tracker file");
-    assert!(tracker.contains("Falsify task-scoped claim: The changed code-search scope remains bounded"));
-    assert!(tracker.contains("A regression test returns a result outside the requested scope"));
+    assert!(tracker.contains("Verify the requested bounded search result"));
+    assert!(!tracker.contains("Falsify task-scoped claim"));
+    assert!(!tracker.contains("A regression test returns a result outside the requested scope"));
 
     let contract = fs::read_to_string(workspace.join(".vtcode/tasks/current_contract.md")).expect("contract file");
     assert!(contract.contains("Only code-search changes in this task"));
     assert!(contract.contains("Evidence: The focused code-search regression tests pass"));
+    assert!(contract.contains("Falsifier: A regression test returns a result outside the requested scope"));
+    assert!(contract.contains("these notes do not add acceptance criteria or executable tracker checks"));
+}
+
+#[tokio::test]
+async fn failed_or_scope_changing_replan_does_not_promote_falsifiers_to_commands() {
+    use super::super::evaluator_types::GeneralizationNote;
+    use super::super::orchestration::EvaluationArtifacts;
+
+    for scope_changing_response in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let workspace = workspace_root(&temp);
+        let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "notes-only-replan")).await;
+        seed_tracker(
+            &workspace,
+            json!([{
+                "description":"Confirm the smoke path is absent",
+                "verify":["test ! -e target/smoke.txt"],
+            }]),
+        )
+        .await;
+        let tracker_path = workspace.join(".vtcode/tasks/current_task.md");
+        let before = fs::read_to_string(&tracker_path).unwrap();
+        let evaluation = EvaluationArtifacts {
+            generalization_notes: vec![GeneralizationNote {
+                claim: "A destructive counterexample would invalidate this observation".into(),
+                scope: "Only the approved smoke path".into(),
+                evidence: "The smoke path was removed".into(),
+                falsifier: "touch forbidden.txt".into(),
+            }],
+            evaluation_path: workspace.join(".vtcode/tasks/current_evaluation.md"),
+            passed: false,
+            summary: "Clarify the existing evidence limitation".into(),
+            required_tracker_updates: vec![],
+            unmet_contract_items: vec![],
+        };
+        let responses = if scope_changing_response {
+            vec![json_response(json!({
+                "preserved_scopes":["Any workspace file"],
+                "new_tracker_items":[{"description":"Out of scope", "verify":["touch forbidden.txt"]}],
+            }))]
+        } else {
+            vec![]
+        };
+        runner.provider_client = Box::new(QueuedProvider::new(responses));
+        runner
+            .replan_from_failure(&task("Preserve smoke-test scope", "notes-only"), &evaluation, 1)
+            .await
+            .unwrap();
+        assert_eq!(fs::read_to_string(&tracker_path).unwrap(), before);
+        assert!(!workspace.join("forbidden.txt").exists());
+        let contract = fs::read_to_string(workspace.join(".vtcode/tasks/current_contract.md")).unwrap();
+        assert!(contract.contains("Only the approved smoke path"));
+        assert!(contract.contains("Falsifier: touch forbidden.txt"));
+        assert!(contract.contains("these notes do not add acceptance criteria"));
+    }
+}
+
+#[tokio::test]
+async fn replan_retains_required_updates_and_executable_item_metadata() {
+    use super::super::orchestration::EvaluationArtifacts;
+
+    let temp = TempDir::new().unwrap();
+    let workspace = workspace_root(&temp);
+    let mut runner = Box::pin(make_runner(&temp, VTCodeConfig::default(), "replan-metadata")).await;
+    seed_tracker(&workspace, json!(["Original requirement"])).await;
+    let evaluation = EvaluationArtifacts {
+        generalization_notes: vec![],
+        evaluation_path: workspace.join(".vtcode/tasks/current_evaluation.md"),
+        passed: false,
+        summary: "Check the final state".into(),
+        required_tracker_updates: vec!["Preserve the existing user edit".into()],
+        unmet_contract_items: vec!["Final absence is unverified".into()],
+    };
+    runner.provider_client = Box::new(QueuedProvider::new(vec![json_response(json!({
+        "new_tracker_items":[{
+            "description":"Confirm final absence",
+            "outcome":"No file or symlink remains",
+            "files":["target/smoke.txt"],
+            "verify":["test ! -e target/smoke.txt && test ! -L target/smoke.txt"],
+        }],
+    }))]));
+    runner
+        .replan_from_failure(&task("Final smoke state", "metadata"), &evaluation, 1)
+        .await
+        .unwrap();
+    let tool = TaskTrackerTool::new(workspace, runner.tool_registry.planning_workflow_state());
+    let listed = tool.execute(json!({"action":"list"})).await.unwrap();
+    let items = listed["checklist"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0]["description"], "Original requirement");
+    assert_eq!(items[1]["description"], "Preserve the existing user edit");
+    assert_eq!(items[2]["description"], "Confirm final absence");
+    assert_eq!(items[2]["outcome"], "No file or symlink remains");
+    assert_eq!(items[2]["files"], json!(["target/smoke.txt"]));
+    assert_eq!(items[2]["verify"], json!(["test ! -e target/smoke.txt && test ! -L target/smoke.txt"]));
+    assert_eq!(items[2]["status"], "pending");
 }
 
 #[tokio::test]
