@@ -367,16 +367,43 @@ impl AgentSessionState {
         self.add_user_message_with_intent(text, None);
     }
 
+    /// Add a harness-generated `User`-role notice (recovery nudge, tracker
+    /// continuation, evaluator retry).
+    ///
+    /// The role must stay `User` so the provider treats it as steering, but the
+    /// message is tagged synthetic so reverse history can skip it.
+    pub fn add_synthetic_user_message(&mut self, text: String) {
+        let metadata = self.user_message_metadata(&text, None, true);
+        self.push_user_message(text, metadata);
+    }
+
     /// Add a user message and optionally tag it with the steering intent that
     /// produced it. The tag survives message serialization for recovery.
     pub fn add_user_message_with_intent(&mut self, text: String, intent_id: Option<String>) {
+        let metadata = self.user_message_metadata(&text, intent_id, false);
+        self.push_user_message(text, metadata);
+    }
+
+    fn user_message_metadata(
+        &self,
+        text: &str,
+        intent_id: Option<String>,
+        synthetic: bool,
+    ) -> crate::core::message_metadata::MessageMetadata {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let tokens = text.len().saturating_div(4); // rough estimate: ~4 chars per token
-        let metadata = crate::core::message_metadata::MessageMetadata::user_input(now, tokens);
-        let metadata = match intent_id {
+        let metadata = if synthetic {
+            crate::core::message_metadata::MessageMetadata::harness_notice(now, tokens)
+        } else {
+            crate::core::message_metadata::MessageMetadata::user_input(now, tokens)
+        };
+        match intent_id {
             Some(id) => metadata.with_intent_id(id),
             None => metadata,
-        };
+        }
+    }
+
+    fn push_user_message(&mut self, text: String, metadata: crate::core::message_metadata::MessageMetadata) {
         self.conversation.push(Content::user_text(text.as_str()));
         let msg = Message::user(text).with_metadata(metadata);
         // Role overhead (~4 tokens) + content tokens
@@ -799,6 +826,37 @@ mod tests {
         }
         let expected_serialized = serde_json::to_string(&payload).unwrap();
         assert_eq!(state.messages[0], Message::tool_response("call_1".to_string(), expected_serialized));
+    }
+
+    #[test]
+    fn harness_notices_are_tagged_synthetic_while_user_messages_are_not() {
+        let mut state = AgentSessionState::new("session".to_string(), 4, 4, 16_000);
+        state.add_user_message("fix the flaky test".to_string());
+        state.add_synthetic_user_message("It looks like you're repeating the same response.".to_string());
+        state.add_user_message_with_intent("steer: stop after this".to_string(), Some("intent-1".to_string()));
+
+        let sources: Vec<Option<&str>> = state
+            .messages
+            .iter()
+            .map(|message| message.metadata.as_ref().and_then(|metadata| metadata.source()))
+            .collect();
+        assert_eq!(sources, vec![Some("user_input"), Some("synthetic"), Some("user_input")]);
+        assert!(
+            state.messages[1]
+                .metadata
+                .as_ref()
+                .is_some_and(vtcode_commons::message_metadata::MessageMetadata::is_synthetic)
+        );
+        // Tags survive archive round-trips so reverse history can filter them.
+        let archived: Vec<crate::utils::session_archive::SessionMessage> =
+            state.messages.iter().map(Into::into).collect();
+        assert!(
+            archived[1]
+                .metadata
+                .as_deref()
+                .is_some_and(vtcode_commons::message_metadata::MessageMetadata::is_synthetic)
+        );
+        assert!(archived[0].metadata.as_deref().is_some_and(|m| !m.is_synthetic()));
     }
 
     #[test]

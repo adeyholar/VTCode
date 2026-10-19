@@ -10,6 +10,9 @@ use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
 
 pub use prep::ExecCommandKind;
 pub(crate) use prep::resolve_exec_command;
+pub(crate) use run::{
+    EXEC_TASK_INSTRUCTIONS_DRY_RUN_PREFIX, EXEC_TASK_INSTRUCTIONS_PREFIX, REVIEW_TASK_INSTRUCTIONS_PREFIX,
+};
 
 #[derive(Debug, Clone)]
 pub struct ExecCommandOptions {

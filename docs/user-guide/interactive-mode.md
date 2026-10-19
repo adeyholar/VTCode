@@ -403,11 +403,17 @@ a new directory session.
 
 ### Reverse Search with `Ctrl+R`
 
-1. Press `Ctrl+R` to start the reverse history search.
+1. Press `Ctrl+R` to start the reverse history search. If the composer already holds text, the picker opens
+   pre-filtered to that text so you can jump straight to a matching entry (Esc restores the draft unchanged).
 2. Type a query to highlight matching entries.
 3. Press `Ctrl+R` again to cycle through older matches.
 4. Accept the current match with `Tab`, `Esc`, or `Enter` to execute immediately.
 5. Cancel the search with `Ctrl+C` or `Backspace` on an empty query.
+
+The picker lists only prompts you actually typed. It also surfaces prompts from recent sessions, but
+harness-generated `User`-role turns (exec/review task frames, recovery nudges, tracker and planning
+continuations, approved-plan handoffs) and stored enrichment wrappers are filtered out, so submitting a
+result replays your original text rather than harness phrasing.
 
 ## Background Bash Commands
 

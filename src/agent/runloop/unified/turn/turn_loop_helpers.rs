@@ -685,7 +685,13 @@ fn push_steered_user_message(working_history: &mut Vec<uni::Message>, intent_id:
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs());
     let tokens = input.len().saturating_div(4);
-    let metadata = vtcode_commons::message_metadata::MessageMetadata::user_input(now, tokens).with_intent_id(intent_id);
+    // Harness-queued steering stays synthetic so archived history never offers
+    // it as user-typed text.
+    let metadata = if is_internal_harness_follow_up(input) {
+        vtcode_commons::message_metadata::MessageMetadata::harness_notice(now, tokens).with_intent_id(intent_id)
+    } else {
+        vtcode_commons::message_metadata::MessageMetadata::user_input(now, tokens).with_intent_id(intent_id)
+    };
     working_history.push(uni::Message::user(input.to_string()).with_metadata(metadata));
 }
 

@@ -354,7 +354,7 @@ impl AgentRunner {
                 Ok(true)
             }
             EvaluatorGateOutcome::Continue { prompt } => {
-                session_state.add_user_message(prompt);
+                session_state.add_synthetic_user_message(prompt);
                 Ok(false)
             }
             EvaluatorGateOutcome::Exhausted { reason } => {
@@ -432,7 +432,7 @@ impl AgentRunner {
             }
             CompletionAssessment::Continue { reason, prompt } => {
                 self.emit_continuation_started(event_recorder, reason);
-                runtime.state.add_user_message(prompt);
+                runtime.state.add_synthetic_user_message(prompt);
                 Ok(AssessmentResolution::ForceContinue)
             }
             // Handled by the caller, which has access to the continuation
@@ -629,6 +629,13 @@ impl AgentRunner {
                     // Collect new messages first to avoid borrow conflict:
                     // conversation is immutably borrowed in the loop, but
                     // adjust_token_count/push need &mut state.
+                    // Previous assistant turns are replayed as `model`, every
+                    // later conversation entry is harness-injected steering, so
+                    // tag it synthetic instead of user-typed.
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or(0);
                     let new_messages: Vec<Message> = runtime.state.conversation
                         [runtime.state.last_processed_message_idx..]
                         .iter()
@@ -644,7 +651,12 @@ impl AgentRunner {
                             }
                             match content.role.as_str() {
                                 "model" => Message::assistant(text),
-                                _ => Message::user(text),
+                                _ => {
+                                    let tokens = text.len().saturating_div(4);
+                                    Message::user(text).with_metadata(
+                                        crate::core::message_metadata::MessageMetadata::harness_notice(now, tokens),
+                                    )
+                                }
                             }
                         })
                         .collect();
@@ -657,7 +669,7 @@ impl AgentRunner {
                 let planning_synthesis_turn = self.tool_registry.is_planning_active()
                     && (planning_synthesis_required || turn + 1 == self.max_turns);
                 if planning_synthesis_turn {
-                    runtime.state.add_user_message(
+                    runtime.state.add_synthetic_user_message(
                         "This is the final planning turn within the configured budget. Return a concise, complete plan now using only evidence already collected. Fit the entire plan within the response token limit; shorten detail rather than repeating a truncated draft. Make no tool calls. State missing evidence explicitly; do not claim implementation or verification.".to_string(),
                     );
                 }
@@ -977,7 +989,7 @@ impl AgentRunner {
                         agent_prefix,
                         style("[STAGNATION WARNING]").yellow().bold(),
                     ));
-                    runtime.state.add_user_message(nudge.into());
+                    runtime.state.add_synthetic_user_message(nudge.into());
                 }
                 if !refused
                     && supports_responses_chaining(
@@ -1196,7 +1208,7 @@ impl AgentRunner {
                                  tools, break the task into smaller steps, or provide a \
                                  direct answer based on what you have already learned."
                             );
-                            runtime.state.add_user_message(replan_msg);
+                            runtime.state.add_synthetic_user_message(replan_msg);
                             // Skip dispatching blocked tool calls — let the LLM re-plan
                             effective_tool_calls = None;
                             forced_continuation = true;
@@ -1212,7 +1224,7 @@ impl AgentRunner {
                                  Could you provide guidance on how to proceed? \
                                  What approach should I use instead?"
                             );
-                            runtime.state.add_user_message(user_msg);
+                            runtime.state.add_synthetic_user_message(user_msg);
                             should_write_blocked_handoff = true;
                             runtime.state.outcome = TaskOutcome::escalated(summary, "multi_tool".to_string());
                             break;
@@ -1270,7 +1282,7 @@ impl AgentRunner {
                                 "matrix stopped without a durable result; reconcile owned cleanup before continuation"
                             );
                             runtime.state.is_completed = false;
-                            runtime.state.add_user_message(format!(
+                            runtime.state.add_synthetic_user_message(format!(
                                 "Durable matrix results: {}. Report outcomes from this snapshot; matrix success requires Succeeded. Other states require a coordinator decision.",
                                 serde_json::to_string(&settled)?
                             ));
@@ -1486,7 +1498,7 @@ impl AgentRunner {
                                             style("[TRACKER CONTINUE]").yellow().bold(),
                                             reason
                                         ));
-                                        runtime.state.add_user_message(prompt);
+                                        runtime.state.add_synthetic_user_message(prompt);
                                         forced_continuation = true;
                                     }
                                 }
@@ -1557,7 +1569,7 @@ impl AgentRunner {
                         if matches!(runtime.state.outcome, TaskOutcome::Cancelled) {
                             break;
                         }
-                        runtime.state.add_user_message(format!(
+                        runtime.state.add_synthetic_user_message(format!(
                             "Durable matrix results: {}. Report success only for Succeeded; other states require a coordinator decision.",
                             serde_json::to_string(&settled)?
                         ));
@@ -1615,7 +1627,7 @@ impl AgentRunner {
                             &mut event_recorder,
                             warning_message.clone(),
                         );
-                        runtime.state.add_user_message(warning_message);
+                        runtime.state.add_synthetic_user_message(warning_message);
                         runtime.state.mark_tool_loop_limit_hit();
                         break;
                     }
@@ -1644,7 +1656,7 @@ impl AgentRunner {
                                 &mut event_recorder,
                                 warning_message.clone(),
                             );
-                            runtime.state.add_user_message(warning_message);
+                            runtime.state.add_synthetic_user_message(warning_message);
                             runtime.state.outcome = TaskOutcome::StoppedNoAction;
                             break;
                         }
