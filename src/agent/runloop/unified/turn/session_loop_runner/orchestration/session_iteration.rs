@@ -859,6 +859,7 @@ pub(super) async fn run_session_iteration(state: SessionLoopState<'_>) -> Result
                 }
             }
 
+            pending_background_completions.observe_terminal_exec_results(&tool_registry);
             let background_continuation_requested = pending_background_completions.should_schedule_continuation(
                 !queued_inputs.is_empty() || !session.events.is_empty(),
                 runtime.has_pending_follow_up_inputs(),

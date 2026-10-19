@@ -633,3 +633,19 @@ The subagent layer now supports loop-engineering primitives:
   (Ok/TokenLimitReached/CostLimitReached/StepLimitReached).
 
 See [Loop Engineering](../loop-engineering.md) for the full design.
+
+## Completion and recovery quick reference
+
+| Observed state | Runtime behavior |
+| --- | --- |
+| Current-generation local checks pass | Reuse the evidence and accept the final answer once. |
+| Remote evidence unavailable | Disclose the limitation; a build does not prove remote rendering. |
+| Rate-limited fetch origin | At most two attempts per user request; wait at most five seconds within deadline. |
+| Tool policy denies execution | Stop immediately; never suggest Python or shell bypasses. |
+| Exec terminal result already returned | Retain canonical/UI completion, suppress autonomous continuation. |
+| Unobserved background result | Deliver to active work through existing continuation handling. |
+| Required local check still missing | Preserve bounded recovery, then blocked handoff if exhausted. |
+| Internal continuation | Retain request budgets, original goal, and existing few-shot examples. |
+
+See [completion verification](../development/completion-verification.md) for evidence,
+approval, timer-accounting, and retry boundaries.

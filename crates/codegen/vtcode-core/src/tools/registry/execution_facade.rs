@@ -57,7 +57,17 @@ impl ToolRegistry {
         &self,
         request: ToolExecutionRequest,
     ) -> impl Future<Output = ToolExecutionOutcome> + '_ {
-        self.execute_tool_request_internal(request)
+        self.execute_tool_request_internal(request, None)
+    }
+
+    /// Execute with the caller's remaining wall-clock budget. Retry waits must
+    /// fit this deadline; the caller still owns cancellation and timeout delivery.
+    pub fn execute_public_tool_request_with_deadline(
+        &self,
+        request: ToolExecutionRequest,
+        deadline: Instant,
+    ) -> impl Future<Output = ToolExecutionOutcome> + '_ {
+        self.execute_tool_request_internal(request, Some(deadline))
     }
 
     pub async fn execute_prepared_public_tool_request(
@@ -65,13 +75,24 @@ impl ToolRegistry {
         prepared: &PreparedToolCall,
         policy: ExecutionPolicySnapshot,
     ) -> ToolExecutionOutcome {
+        self.execute_prepared_public_tool_request_until(prepared, policy, None).await
+    }
+
+    /// Keep the caller's outer deadline available to retry admission as well as
+    /// timeout enforcement. Prepared calls still require fresh safety admission.
+    pub(crate) async fn execute_prepared_public_tool_request_until(
+        &self,
+        prepared: &PreparedToolCall,
+        policy: ExecutionPolicySnapshot,
+        deadline: Option<Instant>,
+    ) -> ToolExecutionOutcome {
         let request = ToolExecutionRequest::new(prepared.canonical_name.clone(), prepared.effective_args.clone())
             .with_policy(
                 policy
                     .with_prevalidated(prepared.already_preflighted)
                     .with_safety_prevalidated(false),
             );
-        self.execute_tool_request_internal(request).await
+        self.execute_tool_request_internal(request, deadline).await
     }
 
     async fn should_skip_loop_detection_for_exec_continuation(&self, tool_name: &str, args: &Value) -> bool {
@@ -812,7 +833,20 @@ impl ToolRegistry {
                 .context("tool denied by full-auto allowlist"));
         }
 
-        let skip_policy_prompt = self.policy_gateway.take_preapproved(&tool_name).await;
+        let policy_revision = self.policy_gateway.revision();
+        let current_policy = self.policy_gateway.get_tool_policy(&tool_name).await;
+        let retry_approved = super::execution_attempts::RETRY_APPROVAL
+            .try_with(|slot| {
+                slot.borrow().as_ref().is_some_and(|approval| {
+                    std::sync::Arc::ptr_eq(&approval.policy_gateway, &self.policy_gateway)
+                        && approval.tool_name == tool_name
+                        && approval.args == *args
+                        && approval.policy_revision == policy_revision
+                        && approval.policy == current_policy
+                })
+            })
+            .unwrap_or(false);
+        let skip_policy_prompt = retry_approved || self.policy_gateway.take_preapproved(&tool_name).await;
 
         let decision = if skip_policy_prompt {
             ToolExecutionDecision::Allowed
@@ -847,6 +881,15 @@ impl ToolRegistry {
             return Err(anyhow!("{error_msg}").context("tool denied by policy"));
         }
 
+        let _ = super::execution_attempts::RETRY_APPROVAL.try_with(|slot| {
+            *slot.borrow_mut() = Some(super::execution_attempts::RetryApproval {
+                tool_name: tool_name.to_string(),
+                args: args.clone(),
+                policy_revision,
+                policy_gateway: self.policy_gateway.clone(),
+                policy: current_policy,
+            });
+        });
         let gateway = self.policy_gateway.clone();
         let constrained_result = gateway.apply_policy_constraints(&tool_name, args).await;
         let mut args = match constrained_result {

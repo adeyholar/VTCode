@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
@@ -107,6 +107,7 @@ pub(super) struct ToolPolicyGateway {
     full_auto_catalogue_lifecycle: Arc<Mutex<()>>,
     #[cfg(test)]
     full_auto_catalogue_test_hooks: Arc<PolicyCatalogueTestHooks>,
+    revision: Arc<AtomicU64>,
     enforce_safe_mode_prompts: AtomicBool,
 }
 
@@ -120,12 +121,16 @@ impl Clone for ToolPolicyGateway {
             full_auto_catalogue_lifecycle: Arc::clone(&self.full_auto_catalogue_lifecycle),
             #[cfg(test)]
             full_auto_catalogue_test_hooks: Arc::clone(&self.full_auto_catalogue_test_hooks),
+            revision: Arc::clone(&self.revision),
             enforce_safe_mode_prompts: AtomicBool::new(self.enforce_safe_mode_prompts.load(Ordering::Relaxed)),
         }
     }
 }
 
 impl ToolPolicyGateway {
+    pub(super) fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
     fn from_policy_manager(tool_policy: Option<ToolPolicyManager>) -> Self {
         Self {
             tool_policy: Arc::new(Mutex::new(tool_policy)),
@@ -135,6 +140,7 @@ impl ToolPolicyGateway {
             full_auto_catalogue_lifecycle: Arc::new(Mutex::new(())),
             #[cfg(test)]
             full_auto_catalogue_test_hooks: Arc::new(PolicyCatalogueTestHooks::default()),
+            revision: Arc::default(),
             enforce_safe_mode_prompts: AtomicBool::new(false),
         }
     }
@@ -161,6 +167,7 @@ impl ToolPolicyGateway {
     }
 
     pub fn set_enforce_safe_mode_prompts(&self, enabled: bool) {
+        self.revision.fetch_add(1, Ordering::AcqRel);
         self.enforce_safe_mode_prompts.store(enabled, Ordering::Relaxed);
     }
 
@@ -256,10 +263,12 @@ impl ToolPolicyGateway {
     }
 
     pub async fn set_policy_manager(&self, manager: ToolPolicyManager) {
+        self.revision.fetch_add(1, Ordering::AcqRel);
         *self.tool_policy.lock().await = Some(manager);
     }
 
     pub async fn set_tool_policy(&self, tool_name: &str, policy: ToolPolicy) -> Result<()> {
+        self.revision.fetch_add(1, Ordering::AcqRel);
         let canonical = canonical_tool_name(tool_name);
         if let Some(ref mut manager) = *self.tool_policy.lock().await {
             manager.set_policy(canonical, policy).await

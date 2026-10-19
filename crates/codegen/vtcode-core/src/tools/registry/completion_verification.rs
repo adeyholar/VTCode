@@ -205,6 +205,31 @@ fn mutation_targets_are_exempt(name: &str, args: &Value, output: &Value) -> bool
 }
 
 impl ToolRegistry {
+    /// True when current-generation evidence satisfies every local obligation.
+    pub fn has_current_completion_verification(&self) -> bool {
+        let state = self.harness_context.completion_verification.lock();
+        let checks_passed = if state.required_commands.is_empty() {
+            state
+                .evidence
+                .back()
+                .is_some_and(|entry| entry.generation == state.generation && entry.exit_code == Some(0))
+        } else {
+            state.required_commands.iter().all(|command| state.command_passed(command))
+        };
+        !state.pending()
+            && checks_passed
+            && !state
+                .evidence
+                .iter()
+                .any(|entry| entry.generation == state.generation && entry.session_id.is_some())
+    }
+
+    /// Drain terminal command results already returned by exec tools. Notification
+    /// consumers retain these identities, independently of compactable history.
+    pub fn take_observed_terminal_exec_results(&self) -> Vec<String> {
+        self.harness_context.terminal_exec_results.lock().drain().collect()
+    }
+
     /// Reconstruct mutation debt once from restored history; historical checks are not runtime verdicts.
     pub fn restore_completion_verification_from_history(&self, history: &[crate::llm::provider::Message]) {
         use crate::llm::provider::MessageRole;
@@ -419,6 +444,15 @@ impl ToolRegistry {
         args: &Value,
         result: &anyhow::Result<Value>,
     ) {
+        if let Ok(output) = result
+            && output.get("exit_code").and_then(Value::as_i64).is_some()
+            && output.get("error").is_none()
+            && output.get("cancelled").and_then(Value::as_bool) != Some(true)
+            && let Some(session_id) =
+                command_args::session_id_text(output).or_else(|| command_args::session_id_text(args))
+        {
+            self.harness_context.terminal_exec_results.lock().insert(session_id.to_owned());
+        }
         let mut state = self.harness_context.completion_verification.lock();
         if let Some(session_id) = command_args::session_id_text(args)
             && state.pending_mutation_sessions.contains(session_id)

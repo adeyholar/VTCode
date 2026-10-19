@@ -266,6 +266,8 @@ pub(super) async fn run_interaction_loop_impl(
         let inline_action = poll_inline_loop_action(ctx.session, ctx.ctrl_c_notify, resources).await?;
         sync_mcp_approval_policy_for_context(ctx);
 
+        ctx.pending_background_completions
+            .observe_terminal_exec_results(ctx.tool_registry);
         if matches!(&inline_action, InlineLoopAction::Continue) {
             let completion_drain = drain_background_completions(
                 ctx.background_completion_receiver.as_mut(),

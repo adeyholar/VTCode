@@ -173,3 +173,53 @@ spurious debt during README-only work and activated a reversed required check.
 The deterministic replay preserves generation zero and does not rewrite that
 requirement. Code-debt coverage separately ensures the same inspection preserves
 current passing evidence, while adversarial glob and write variants retain debt.
+
+## External evidence and terminal completion
+
+Finish local work once its current-generation checks satisfy all remaining local
+obligations. Reuse passing checks when producing the final response; internal
+recovery summaries do not require another build. Disclose unavailable external
+evidence in that response. A successful Rust build establishes no claim about a
+remote image rendering correctly. Genuine missing mandatory checks still use the
+existing bounded recovery and blocked handoff.
+
+`web_fetch` retains HTTP status, recovery guidance, and `Retry-After` in the
+model-visible error. Within one genuine user request, a rate-limited origin gets
+at most two attempts, including internal continuations and concurrent calls.
+Transport admission counts actual sends, including redirect targets, after policy
+and URL security checks. Denied calls consume no network attempt. HTTP failures
+retain the effective response origin, so redirect aliases share its budget.
+Header acquisition is serialized across origins because redirect admission is
+synchronous; body reads and retry waits release that permit. Accounting remains
+independent per origin. A retry wait must fit five seconds and the remaining
+invocation deadline. Terminal retry rejections survive later invocations;
+cancellation releases the permit and wait without erasing Retry-After. Only fresh
+user requests reset this accounting. Policy denials terminate immediately and must not
+be bypassed with Python or shell commands.
+
+Tool approval remains scoped to the immutable invocation and its execution
+scope. An unchanged retry can reuse approval; separate calls, changed arguments,
+changed policy, and sandbox escalation retain their existing checks. The private
+approval state does not propagate into spawned tasks.
+
+Terminal results returned by `exec_command` or `write_stdin` are retained outside
+compactable history. Their later background notifications still produce canonical
+`ThreadEvent` and UI status, but cannot reopen work. Both notification/result
+orders are handled, and duplicate notices remain consumed. Unobserved background
+results still request continuation. Internal recovery also reuses the original
+few-shot context without inserting another example block into canonical history.
+
+Mutation accounting recognizes literal `sleep 30` commands and the Python timer shape
+`python3 -c 'import time; time.sleep(0.1)'` (or `python`) with a finite nonnegative
+numeric literal. Other Python, extra statements, environment assignments, and
+output redirects remain conservative. This exception grants no execution permission.
+
+These boundaries were compared with OpenAI Codex, Apache-2.0, copyright 2025 OpenAI,
+at commit `89461ea6833832b0551ce24ee32205824d5c108d`:
+[`codex-rs/core/src/tools/orchestrator.rs`](https://github.com/openai/codex/blob/89461ea6833832b0551ce24ee32205824d5c108d/codex-rs/core/src/tools/orchestrator.rs)
+scopes approval to execution authority, while
+[`codex-rs/core/src/session/turn.rs`](https://github.com/openai/codex/blob/89461ea6833832b0551ce24ee32205824d5c108d/codex-rs/core/src/session/turn.rs)
+separates model follow-up from pending input. These are design comparisons, not
+claims of identical retry guarantees or copied implementations. The final-response
+termination model is also described in OpenAI's
+[agent-loop explanation](https://openai.com/index/unrolling-the-codex-agent-loop/).

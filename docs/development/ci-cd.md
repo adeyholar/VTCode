@@ -27,6 +27,14 @@ with missing binaries. The September 18–October 17, 2026 history suggests abou
 saved per day if maintainers batch the observed 48 builds into 26 daily builds, using
 the two successful post-optimization runs' average of 41.7 runner-minutes per build.
 
+**Rust toolchain:** all three Rust setup steps explicitly select the version in
+`rust-toolchain.toml`, currently 1.98.1. The [pinned setup action](https://github.com/dtolnay/rust-toolchain/blob/29eef336d9b2848a0b548edc03f92a220660cdb8/action.yml#L12)
+otherwise defaults to floating `stable`; pinning its commit alone does not pin the compiler.
+Update the workflow inputs alongside the canonical toolchain version.
+`cargo nextest run --locked -p vtcode --test toolchain_pins_test` checks active
+`.yml`/`.yaml` workflow Rust setup steps, including missing inputs and drift,
+without assuming an old CI filename. Explicit nightly checks remain separate.
+
 **Jobs:**
 
 - **Build GNU Linux**: Builds `x86_64-unknown-linux-gnu`, runs that binary's

@@ -1099,3 +1099,49 @@ async fn declared_source_repair_cannot_clear_completion_verification() {
     registry.observe_completion_verifier(id, &args, &Ok(json!({"exit_code":0})));
     assert!(!registry.completion_verification_pending());
 }
+
+#[tokio::test]
+async fn required_local_obligations_reuse_both_passes_and_reject_stale_evidence() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+    registry.set_required_completion_verifiers(vec!["rustc --version".into(), "rustc --help".into()]);
+    assert!(!registry.completion_verification_pending());
+    registry.restore_completion_verification_debt();
+    assert!(registry.completion_verification_pending());
+    let first = serde_json::json!({"cmd":"rustc --version"});
+    let launch = registry.begin_completion_verifier(&first);
+    registry.observe_completion_verifier(launch, &first, &Ok(serde_json::json!({"exit_code":0})));
+    assert!(registry.completion_verification_pending());
+    assert!(!registry.has_current_completion_verification());
+    let second = serde_json::json!({"cmd":"rustc --help"});
+    let launch = registry.begin_completion_verifier(&second);
+    registry.observe_completion_verifier(launch, &second, &Ok(serde_json::json!({"exit_code":0})));
+    assert!(!registry.completion_verification_pending());
+    assert!(registry.has_current_completion_verification());
+    registry.observe_completion_mutation(
+        tools::WRITE_FILE,
+        &json!({"path":"src/lib.rs"}),
+        &json!({"success":true,"modified_files":["src/lib.rs"]}),
+    );
+    assert!(!registry.has_current_completion_verification(), "new mutation makes the previous checks stale");
+}
+
+#[tokio::test]
+async fn docs_only_failed_or_running_checker_is_not_hidden_by_an_earlier_pass() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(temp.path().to_path_buf()).await;
+    let first = json!({"cmd":"rustc --version"});
+    let launch = registry.begin_completion_verifier(&first);
+    registry.observe_completion_verifier(launch, &first, &Ok(json!({"exit_code":0})));
+    assert!(registry.has_current_completion_verification());
+    let second = json!({"cmd":"rustc --help"});
+    let launch = registry.begin_completion_verifier(&second);
+    registry.observe_completion_verifier(launch, &second, &Ok(json!({"session_id":"new-checker"})));
+    assert!(!registry.has_current_completion_verification());
+    registry.observe_completion_verifier(
+        None,
+        &json!({"action":"wait","session_id":"new-checker"}),
+        &Ok(json!({"exit_code":1})),
+    );
+    assert!(!registry.has_current_completion_verification());
+}

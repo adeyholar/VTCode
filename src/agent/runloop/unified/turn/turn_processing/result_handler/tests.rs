@@ -2194,3 +2194,49 @@ async fn invalid_and_no_match_required_grep_bound_repeated_completion_summaries(
         );
     }
 }
+
+#[tokio::test]
+async fn passing_local_check_accepts_external_limitation_without_another_recovery() {
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    let mut tracker = LoopTracker::new();
+    tracker.mark_verification_pending();
+    let mut modified = BTreeSet::new();
+    let outcome = {
+        let mut ctx = backing.turn_processing_context();
+        ctx.tool_registry.allow_all_tools().await.unwrap();
+        let result = ctx
+            .tool_registry
+            .execute_tool("exec_command", serde_json::json!({"cmd":"rustc --version"}))
+            .await
+            .unwrap();
+        assert_eq!(result["exit_code"], 0);
+        assert!(ctx.tool_registry.has_current_completion_verification());
+        handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::TextResponse {
+                text: "Updated README. Local check passed; remote image rendering remains unverified after HTTP 429."
+                    .into(),
+                reasoning: vec![],
+                reasoning_details: None,
+                proposed_plan: None,
+            },
+            response_streamed: false,
+            step_count: 1,
+            repeated_tool_attempts: &mut tracker,
+            turn_modified_files: &mut modified,
+            max_tool_loops: 8,
+            tool_repeat_limit: 3,
+        })
+        .await
+        .unwrap()
+    };
+    assert!(matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Completed { .. })));
+    assert!(!tracker.verification_is_pending());
+    let ctx = backing.turn_processing_context();
+    assert!(!ctx.working_history.iter().any(|message| {
+        message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| calls.iter().any(|call| call.id == super::helpers::HARNESS_AUTO_VERIFY_CALL_ID))
+    }));
+}

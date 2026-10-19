@@ -938,6 +938,23 @@ pub fn classify_shell_activity(tool_name: &str, args: &Value) -> ShellActivity {
     }
 }
 
+fn is_literal_timer(words: &[String]) -> bool {
+    let seconds = match words {
+        [program, seconds] if program == "sleep" => Some(seconds.as_str()),
+        [program, flag, code] if matches!(program.as_str(), "python" | "python3") && flag == "-c" => code
+            .strip_prefix("import time; time.sleep(")
+            .and_then(|code| code.strip_suffix(')')),
+        _ => None,
+    };
+    seconds.is_some_and(|seconds| {
+        !seconds.is_empty()
+            && seconds.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.')
+            && seconds
+                .parse::<f64>()
+                .is_ok_and(|seconds| seconds.is_finite() && seconds >= 0.0)
+    })
+}
+
 /// Whether an exec result creates workspace mutation debt. This is accounting
 /// only: permission and admission still use the stricter static classifiers.
 /// Unknown syntax or commands retain debt; changed-file evidence always wins.
@@ -1032,7 +1049,9 @@ fn nonmutating_shell_node(node: tree_sitter::Node<'_>, source: &str) -> bool {
                 }
             }
             if crate::tools::command_args::has_unsafe_readonly_options(&words)
-                || (!is_verification_invocation(&words) && !command_words_are_readonly(&words))
+                || (!is_verification_invocation(&words)
+                    && !command_words_are_readonly(&words)
+                    && !is_literal_timer(&words))
             {
                 return false;
             }
@@ -1115,6 +1134,35 @@ mod tests {
 
     fn exec_command(command: &str) -> Value {
         json!({"cmd": command})
+    }
+
+    #[test]
+    fn literal_timers_do_not_create_mutation_debt_but_arbitrary_python_does() {
+        let output = serde_json::json!({"exit_code":0});
+        for command in [
+            "python3 -c 'import time; time.sleep(0.01)'",
+            "python -c 'import time; time.sleep(5)'",
+            "sleep 30",
+            "sleep 120",
+            "sleep 0.01",
+        ] {
+            assert!(!exec_mutation_should_incur_debt(command, &output), "{command}");
+            assert!(exec_mutation_should_incur_debt(command, &serde_json::json!({"modified_files":["src/lib.rs"]})));
+        }
+        for command in [
+            "python3 -c 'import time; time.sleep(1); open(\"x\",\"w\")'",
+            "python3 -c 'import time; time.sleep(float(\"nan\"))'",
+            "python3 -c 'print(1)'",
+            "python3 timer.py",
+            "sleep $DELAY",
+            "sleep 1 > timer.log",
+            "sleep -1",
+            "python3 -c 'import time; time.sleep(-1)'",
+            "PYTHONSTARTUP=script.py python3 -c 'import time; time.sleep(1)'",
+            "python3 -c 'import time; time.sleep(1)' > timer.log",
+        ] {
+            assert!(exec_mutation_should_incur_debt(command, &output), "{command}");
+        }
     }
 
     #[test]

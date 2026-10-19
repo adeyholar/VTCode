@@ -595,3 +595,85 @@ async fn steer_stop_closes_open_tool_calls_with_failed_output_items() {
     let call_item_id = completed_tool_invocation_item_id(&events, &tool_call_id).expect("completed invocation");
     assert_eq!(completed_tool_output_count(&events, &tool_call_id, ToolCallStatus::Failed, &call_item_id), 1);
 }
+
+#[tokio::test]
+async fn headless_fetch_retries_use_the_remaining_tool_deadline() {
+    use crate::tools::registry::{ToolExecutionError, ToolRegistration};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TransientFetch(Arc<AtomicUsize>);
+    #[async_trait]
+    impl Tool for TransientFetch {
+        async fn execute(&self, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+            let budget = crate::tools::web_fetch::request_budget::RequestBudget::current();
+            let _transport = match &budget {
+                Some(budget) => Some(budget.lock_transport().await?),
+                None => None,
+            };
+            let url = url::Url::parse(args["url"].as_str().unwrap())?;
+            if let Some(budget) = &budget
+                && let Err(error) = budget.admit(&url)
+            {
+                return Ok(error.to_json_value());
+            }
+            let call = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+            if call == 1 {
+                let output = json!({"error":"HTTP request failed with status: 429", "http_status":429,
+                    "retry_after_ms":1100, "next_action":"Disclose unavailable external evidence."});
+                Ok(budget.as_ref().map_or_else(
+                    || output.clone(),
+                    |budget| {
+                        budget
+                            .observe(&url, ToolExecutionError::from_tool_output(&output).unwrap())
+                            .to_json_value()
+                    },
+                ))
+            } else {
+                Ok(json!({"preview":"retrieved", "call":call}))
+            }
+        }
+        fn name(&self) -> &str {
+            tools::WEB_FETCH
+        }
+        fn description(&self) -> &str {
+            "Controlled transient fetch without network access"
+        }
+    }
+
+    for wall_clock_secs in [1, 3, 0, u64::MAX] {
+        let temp = TempDir::new().unwrap();
+        let mut config = VTCodeConfig::default();
+        config.agent.harness.max_tool_wall_clock_secs = wall_clock_secs;
+        config.agent.harness.max_tool_retries = 1;
+        let runner = make_runner(&temp, config, "headless-fetch-deadline").await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        runner
+            .tool_registry
+            .register_tool(ToolRegistration::from_tool_instance(
+                tools::WEB_FETCH,
+                CapabilityLevel::CodeSearch,
+                TransientFetch(calls.clone()),
+            ))
+            .await
+            .unwrap();
+        runner.tool_registry.allow_all_tools().await.unwrap();
+        let result = runner
+            .execute_tool_internal(tools::WEB_FETCH, &json!({"url":"https://example.com/page"}))
+            .await;
+        if wall_clock_secs == u64::MAX {
+            let error = result.expect_err("an unrepresentable budget must fail before dispatch, without panicking");
+            assert_eq!(error.error_type, crate::tools::registry::ToolErrorType::InvalidParameters);
+            assert!(error.message.contains("deadline range"));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        } else if wall_clock_secs == 1 {
+            let error = result.expect_err("the HTTP limitation must survive the short deadline");
+            assert_eq!(error.category, vtcode_commons::ErrorCategory::RateLimit);
+            assert_eq!(error.retry_after_ms, Some(1100));
+            assert_eq!(error.to_json_value()["error"]["http_status"], 429);
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        } else {
+            assert_eq!(result.unwrap()["preview"], "retrieved");
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+        }
+    }
+}

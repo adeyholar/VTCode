@@ -4,6 +4,26 @@ use serde_json::{Value, json};
 
 use super::classify_helpers::extract_http_status;
 
+#[derive(Debug, thiserror::Error)]
+#[error("HTTP request failed with status: {status}")]
+pub(super) struct HttpFetchFailure {
+    pub(super) status: u16,
+    pub(super) retry_after_ms: Option<u64>,
+}
+
+pub(super) fn retry_after_ms(value: &str) -> Option<u64> {
+    if let Ok(seconds) = value.trim().parse::<u64>() {
+        return Some(seconds.saturating_mul(1000));
+    }
+    let deadline = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+    Some(
+        (deadline.with_timezone(&chrono::Utc) - chrono::Utc::now())
+            .num_milliseconds()
+            .max(0)
+            .cast_unsigned(),
+    )
+}
+
 /// Build a structured error response for a failed `web_fetch` call.
 ///
 /// The error category (`http_error`, `network_error`, `policy_blocked`,
@@ -13,6 +33,12 @@ use super::classify_helpers::extract_http_status;
 /// responses but reported the hosts as "blocked" because the error format
 /// only carried a free-form message.
 pub(super) fn web_fetch_error_response(url: &str, max_bytes: usize, timeout_secs: u64, err: &anyhow::Error) -> Value {
+    if let Some(error) = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::tools::registry::ToolExecutionError>())
+    {
+        return error.to_json_value();
+    }
     let message = err.to_string();
     let (category, http_status, next_action) = classify_web_fetch_error(&message);
 
@@ -26,6 +52,11 @@ pub(super) fn web_fetch_error_response(url: &str, max_bytes: usize, timeout_secs
     });
     if let Some(status) = http_status {
         payload["http_status"] = json!(status);
+    }
+    if let Some(failure) = err.downcast_ref::<HttpFetchFailure>()
+        && let Some(delay) = failure.retry_after_ms
+    {
+        payload["retry_after_ms"] = json!(delay);
     }
     payload
 }
@@ -92,7 +123,7 @@ pub(super) fn classify_web_fetch_error(message: &str) -> (&'static str, Option<u
         return (
             "policy_blocked",
             None,
-            "The URL is on the blocklist for this tool. Use web_search to find an alternative source, or ask the user to whitelist the host via [web_fetch] allowed_domains in vtcode.toml.",
+            "The URL is denied by policy. Stop this fetch; do not bypass the denial through Python, shell commands, or another route. Report the limitation.",
         );
     }
     (
@@ -129,7 +160,7 @@ pub(super) fn http_status_to_category(status: u16) -> (&'static str, Option<u16>
         429 => (
             "http_error",
             Some(status),
-            "The host rate-limited this client. Wait a few seconds and retry, or use web_search instead.",
+            "The host rate-limited this client. At most two network attempts per origin are allowed for this request. Retry only if Retry-After fits five seconds and the remaining deadline; otherwise disclose the external limitation and finish verified local work.",
         ),
         500..=599 => (
             "http_error",

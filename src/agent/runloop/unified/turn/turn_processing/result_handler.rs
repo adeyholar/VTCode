@@ -605,6 +605,10 @@ pub(crate) async fn handle_turn_processing_result<'a>(
             }
             if !is_planning_synthesis && params.ctx.tool_registry.completion_verification_pending() {
                 params.repeated_tool_attempts.mark_verification_pending();
+            } else if params.repeated_tool_attempts.verification_is_pending()
+                && params.ctx.tool_registry.has_current_completion_verification()
+            {
+                params.repeated_tool_attempts.mark_verification_complete();
             }
             if params.repeated_tool_attempts.verification_is_pending() && !is_planning_synthesis && !tool_free_synthesis
             {

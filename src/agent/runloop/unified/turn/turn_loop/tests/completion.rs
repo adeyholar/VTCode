@@ -477,3 +477,160 @@ async fn plan_mode_auto_continue_directive_reaches_provider_without_early_exit()
         "an auto-continue directive must not publish the completed-turn fallback"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn session_shaped_external_limit_local_check_and_awaited_timer_finish_once() {
+    use crate::agent::runloop::unified::turn::background_completion::{
+        PendingBackgroundCompletions, drain_exec_session_completions,
+    };
+    use vtcode_core::config::types::CapabilityLevel;
+    use vtcode_core::tools::registry::ToolRegistration;
+    use vtcode_core::tools::traits::Tool;
+
+    struct LimitedFetch(Arc<AtomicUsize>);
+    #[async_trait::async_trait]
+    impl Tool for LimitedFetch {
+        async fn execute(&self, _: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(json!({"error":"HTTP request failed with status: 429", "http_status":429,
+                "retry_after_ms":6000, "next_action":"Report unavailable image evidence."}))
+        }
+        fn name(&self) -> &str {
+            "web_fetch"
+        }
+        fn description(&self) -> &str {
+            "Offline external limitation fixture"
+        }
+    }
+
+    struct SessionScript {
+        requests: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl uni::LLMProvider for SessionScript {
+        fn name(&self) -> &str {
+            "openai"
+        }
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+        fn supported_models(&self) -> Vec<String> {
+            vec!["noop-model".into()]
+        }
+        fn validate_request(&self, _: &uni::LLMRequest) -> Result<(), uni::LLMError> {
+            Ok(())
+        }
+        async fn generate(&self, request: uni::LLMRequest) -> Result<uni::LLMResponse, uni::LLMError> {
+            let index = self.requests.fetch_add(1, Ordering::SeqCst);
+            let call = match index {
+                0 => Some(("web_fetch", json!({"url":"https://example.com/badge.svg"}))),
+                1 => Some(("read_file", json!({"path":"README.md"}))),
+                2 => Some((
+                    "apply_patch",
+                    json!({"input":"*** Begin Patch\n*** Update File: README.md\n@@\n-# Before\n+# After\n*** End Patch"}),
+                )),
+                3 => Some(("exec_command", json!({"cmd":"./verify.sh", "yield_time_ms":1000}))),
+                4 => Some(("exec_command", json!({"cmd":"sleep 0.1", "background":true, "yield_time_ms":1}))),
+                5 => {
+                    let output = request
+                        .messages
+                        .iter()
+                        .rev()
+                        .find_map(|message| {
+                            if message.role != uni::MessageRole::Tool {
+                                return None;
+                            }
+                            serde_json::from_str::<serde_json::Value>(message.content.as_text().as_ref()).ok()
+                        })
+                        .expect("timer launch result");
+                    Some(("write_stdin", json!({"session_id":output["session_id"],"chars":"","yield_time_ms":1000})))
+                }
+                6 => None,
+                _ => panic!(
+                    "finished work reopened after {} model requests: {:?}",
+                    index,
+                    request
+                        .messages
+                        .iter()
+                        .rev()
+                        .take(6)
+                        .map(|message| (message.role, message.content.as_text().chars().take(1400).collect::<String>()))
+                        .collect::<Vec<_>>()
+                ),
+            };
+            let finish_reason = if call.is_some() {
+                uni::FinishReason::ToolCalls
+            } else {
+                uni::FinishReason::Stop
+            };
+            Ok(uni::LLMResponse {
+                content: call.is_none().then(||"Updated README; local check passed. Remote image rendering remains unverified because the host rate-limited requests.".into()),
+                tool_calls:call.map(|(name,args)|vec![uni::ToolCall::function(format!("script-{index}"),name.into(),args.to_string())]),
+                model:request.model,usage:None,finish_reason,
+                reasoning:None,reasoning_details:None,organization_id:None,request_id:None,
+                tool_references:vec![],compaction:None,
+            })
+        }
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let fetches = Arc::new(AtomicUsize::new(0));
+    let mut backing = TestTurnProcessingBacking::new(16).await;
+    let registry = backing.turn_processing_context().tool_registry.clone();
+    fs::write(registry.workspace_root().join("README.md"), "# Before\n").unwrap();
+    let checker = registry.workspace_root().join("verify.sh");
+    fs::write(&checker, "#!/bin/sh\nprintf 'checked\\n' >> checks.log\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&checker, fs::Permissions::from_mode(0o755)).unwrap();
+    registry
+        .register_tool(ToolRegistration::from_tool_instance(
+            "web_fetch",
+            CapabilityLevel::CodeSearch,
+            LimitedFetch(fetches.clone()),
+        ))
+        .await
+        .unwrap();
+    registry.allow_all_tools().await.unwrap();
+    let mut commands = registry.commands_config();
+    commands.allow_list.push("./verify.sh".into());
+    registry.apply_commands_config(&commands);
+    registry
+        .execute_tool(
+            "task_tracker",
+            json!({"action":"create","items":[{
+                "description":"Verify README", "status":"completed", "verify":["./verify.sh"]
+            }]}),
+        )
+        .await
+        .unwrap();
+    let mut completions = registry.exec_session_manager().subscribe_completion();
+    backing.set_provider(Box::new(SessionScript { requests: requests.clone() }));
+    let mut history = vec![uni::Message::user(
+        "Update README heading and run ./verify.sh. Report unavailable remote evidence and finish.".into(),
+    )];
+    let outcome = run_turn_loop(&mut history, backing.turn_loop_context()).await.unwrap();
+    assert!(matches!(outcome.result, TurnLoopResult::Completed { .. }), "{:?}", outcome.result);
+    assert_eq!(requests.load(Ordering::SeqCst), 7);
+    assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    assert_eq!(fs::read_to_string(registry.workspace_root().join("README.md")).unwrap(), "# After\n");
+    assert_eq!(fs::read_to_string(registry.workspace_root().join("checks.log")).unwrap(), "checked\n");
+    assert_eq!(
+        history
+            .iter()
+            .filter(|message| message.role == uni::MessageRole::Assistant
+                && message.content.as_text().starts_with("Updated README; local check passed."))
+            .count(),
+        1
+    );
+    let mut pending = PendingBackgroundCompletions::default();
+    pending.observe_terminal_exec_results(&registry);
+    let completion_notify = registry.exec_session_manager().completion_notify();
+    tokio::time::timeout(std::time::Duration::from_secs(2), completion_notify.notified())
+        .await
+        .unwrap();
+    let drained = drain_exec_session_completions(Some(&mut completions), &mut pending);
+    assert_eq!(drained.added, 1, "awaited background timer must retain its canonical notification");
+    assert!(!pending.should_schedule_continuation(false, false));
+    assert_eq!(requests.load(Ordering::SeqCst), 7);
+}
