@@ -300,10 +300,10 @@ pub(crate) fn should_queue_tracker_resume_continuation(
 /// auto-approves.
 ///
 /// `consecutive_empty_fallbacks` breaks the empty-turn self-loop: turns that
-/// end with the deterministic `PLANNING_COMPLETED_FALLBACK_RESPONSE` (no LLM
-/// synthesis, no tool activity) must not re-queue forever. After
-/// [`MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE`] consecutive empties the gate
-/// closes and the user must `continue` manually.
+/// end with the deterministic `PLANNING_COMPLETED_FALLBACK_RESPONSE` or an
+/// empty tool-free synthesis handoff (no LLM output, no plan) must not
+/// re-queue forever. After [`MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE`]
+/// consecutive empties the gate closes and the user must `continue` manually.
 pub(crate) const MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE: u8 = 2;
 
 /// Stable marker of the deterministic empty-turn fallback text in
@@ -313,6 +313,25 @@ pub(crate) const MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE: u8 = 2;
 pub(crate) fn is_plan_empty_fallback_text(text: &str) -> bool {
     text.contains("without a final plan synthesis")
         && text.contains("the next turn can reuse it without re-reading files")
+}
+
+/// Stable marker of the empty-synthesis handoff built by
+/// `break_planning_recovery_with_handoff` when the tool-free pass returned no
+/// content (detail `the model returned an empty synthesis response`). Matched
+/// by substring so the gate stays pure and robust to the optional budget-cause
+/// prefix. A validation-failure or tool-call-violation handoff carries a
+/// different detail, so it is not counted as an empty turn.
+pub(crate) fn is_plan_empty_synthesis_handoff_text(text: &str) -> bool {
+    text.contains("the one tool-free recovery synthesis did not produce an approval-ready plan")
+        && text.contains("the model returned an empty synthesis response")
+}
+
+/// True when a planning turn consumed a full turn without producing any plan
+/// synthesis: the deterministic fallback or an empty tool-free synthesis
+/// handoff. Both share the consecutive-empty counter so a blank model cannot
+/// re-queue the whole `cross_turn_turns` budget (session-vtcode-20261019T022628Z).
+pub(crate) fn is_plan_empty_turn_text(text: &str) -> bool {
+    is_plan_empty_fallback_text(text) || is_plan_empty_synthesis_handoff_text(text)
 }
 
 pub(crate) fn should_queue_plan_mode_auto_continue(

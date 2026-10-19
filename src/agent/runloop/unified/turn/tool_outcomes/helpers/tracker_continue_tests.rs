@@ -184,6 +184,30 @@ fn detects_plan_empty_fallback_text() {
 }
 
 #[test]
+fn detects_empty_tool_free_synthesis_handoff_text() {
+    // Production `break_planning_recovery_with_handoff` message shape for the
+    // empty case (detail in parentheses); the surrounding prose is fixed.
+    let empty_handoff = "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan (the model returned an empty synthesis response). The latest request and bounded evidence are preserved. The next attempt can reuse the tool outputs above instead of re-reading files, and should emit one complete `<proposed_plan>`.";
+    assert!(is_plan_empty_synthesis_handoff_text(empty_handoff));
+    assert!(is_plan_empty_turn_text(empty_handoff));
+    // A budget-cause prefix prepended by the handoff builder stays matched.
+    assert!(is_plan_empty_synthesis_handoff_text(&format!("turn budget exhausted. {empty_handoff}")));
+    // Only the empty detail counts. A synthesized-but-invalid draft or a
+    // tool-call violation must keep auto-continuing (still resumable), so it
+    // must not increment the empty-turn cap.
+    let invalid_draft_handoff = "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan (the synthesized draft failed validation: missing `verify:` command). The latest request and bounded evidence are preserved.";
+    assert!(!is_plan_empty_synthesis_handoff_text(invalid_draft_handoff));
+    assert!(!is_plan_empty_turn_text(invalid_draft_handoff));
+    let tool_violation_handoff = "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan (the synthesis response attempted a tool call while tools were disabled). The latest request and bounded evidence are preserved.";
+    assert!(!is_plan_empty_synthesis_handoff_text(tool_violation_handoff));
+    // The deterministic fallback is still recognized by the combined gate.
+    assert!(is_plan_empty_turn_text(
+        crate::agent::runloop::unified::turn::turn_loop::PLANNING_COMPLETED_FALLBACK_RESPONSE
+    ));
+    assert!(!is_plan_empty_turn_text(""));
+}
+
+#[test]
 fn plan_mode_recoverable_block_allow_list() {
     assert!(plan_mode_recoverable_block("turn budget exhausted"));
     assert!(plan_mode_recoverable_block("reached the safety cap"));

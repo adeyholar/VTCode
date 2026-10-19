@@ -49,11 +49,11 @@ has incomplete steps, and when a turn ends on a recoverable block — in every m
   (budget / safety-cap / tool-free recovery, including blocked-tool fuse trips, turns ending without a
   harness-visible final assistant response, and a failed tool-free synthesis that
   *did not produce an approval-ready plan*) auto-queue another planning turn (same `cross_turn_turns` budget).
-  Deterministic empty-turn fallbacks cannot self-loop: after 2 consecutive empty fallback turns the gate closes and the
-  user must `continue` manually. Ordinary completed planning turns are not auto-continued — they may be interview or
-  approval handoffs. Planning never auto-approves or auto-implements. Plan-mode and tracker auto-continue share the
-  `cross_turn_turns` episode budget; a planning episode can exhaust it for later tracker auto-continue until a genuine
-  user turn resets the episode.
+  Deterministic empty-turn fallbacks and empty tool-free synthesis handoffs cannot self-loop: after 2 consecutive
+  turns that end without any plan synthesis the gate closes and the user must `continue` manually. Ordinary completed
+  planning turns are not auto-continued — they may be interview or approval handoffs. Planning never auto-approves or
+  auto-implements. Plan-mode and tracker auto-continue share the `cross_turn_turns` episode budget; a planning episode
+  can exhaust it for later tracker auto-continue until a genuine user turn resets the episode.
 - Preflight validation: the existing per-turn failure cap first schedules tool-free synthesis, followed by at most one
   fresh corrective turn. Runtime state controls this decision, independently of assistant refusal prose. Repeating a
   rejected tool/category/argument identity ends automatic recovery immediately; reordered JSON keys and changes to

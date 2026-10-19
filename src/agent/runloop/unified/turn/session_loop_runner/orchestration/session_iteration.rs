@@ -2208,8 +2208,11 @@ pub(super) async fn run_session_iteration(state: SessionLoopState<'_>) -> Result
                 let plan_state = tool_registry.planning_workflow_state();
                 let plan_ready_for_approval = planning_active
                     && crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(&plan_state).await;
+                // Empty-turn guard also covers the empty tool-free synthesis
+                // handoff (model returned no content), not only the
+                // deterministic `PLANNING_COMPLETED_FALLBACK_RESPONSE`.
                 let final_text_is_empty_fallback =
-                    final_text.as_deref().is_some_and(tracker_continue::is_plan_empty_fallback_text);
+                    final_text.as_deref().is_some_and(tracker_continue::is_plan_empty_turn_text);
                 if final_text_is_empty_fallback {
                     session_stats.record_plan_empty_fallback();
                 } else {
