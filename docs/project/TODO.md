@@ -16,7 +16,7 @@ gui
 
 --
 
-computer use
+computer use https://developers.openai.com/api/docs/guides/tools-computer-use
 
 ---
 
