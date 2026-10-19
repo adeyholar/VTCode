@@ -138,7 +138,7 @@ pub(crate) fn apply_metadata_input(
         metadata.outcome = normalize_optional_text(Some(outcome));
     }
     if let Some(verify) = verify {
-        metadata.verify = normalize_verify_items(Some(verify));
+        metadata.verify = normalize_verify_items(verify.iter().map(String::as_str));
     }
 }
 
@@ -581,10 +581,9 @@ pub(crate) fn unwrap_verify_code_span(command: &str) -> &str {
 
 /// Normalize the executable `verify` item: trim, drop the code-span
 /// decoration, and drop empties.
-pub(crate) fn normalize_verify_items(items: Option<&[String]>) -> Vec<String> {
+pub(crate) fn normalize_verify_items<'a>(items: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     items
-        .unwrap_or(&[])
-        .iter()
+        .into_iter()
         .filter_map(|item| {
             let unwrapped = unwrap_verify_code_span(item);
             (!unwrapped.is_empty()).then(|| unwrapped.to_owned())
@@ -628,7 +627,7 @@ pub fn apply_metadata_line(metadata: &mut TaskStepMetadata, raw: &str, in_verify
             .or_else(|| trimmed.strip_prefix("* "))
             .or_else(|| trimmed.strip_prefix("+ "))
         {
-            if let Some(command) = normalize_verify_items(Some(&[command.to_owned()])).pop() {
+            if let Some(command) = normalize_verify_items([command]).pop() {
                 metadata.verify.push(command);
             }
             return true;
@@ -650,7 +649,7 @@ pub fn apply_metadata_line(metadata: &mut TaskStepMetadata, raw: &str, in_verify
         return true;
     }
     if let Some(rest) = trimmed.strip_prefix("verify:") {
-        metadata.verify = normalize_verify_items(Some(&[rest.to_string()]));
+        metadata.verify = normalize_verify_items([rest]);
         return true;
     }
 
