@@ -1145,3 +1145,39 @@ async fn docs_only_failed_or_running_checker_is_not_hidden_by_an_earlier_pass() 
     );
     assert!(!registry.has_current_completion_verification());
 }
+
+#[tokio::test]
+async fn completion_verification_unwraps_backticked_tracker_verify_commands() {
+    // Regression for session-vtcode-20261019T075619Z_862610-57915: a tracker
+    // `verify` entry persisted as a markdown code span seeded a required
+    // command whose identity carried the backticks, so the model's bare
+    // successful run never satisfied `command_passed` — while the backticked
+    // literal needed to match it was itself rejected by preflight (code spans
+    // are command substitution). The exact command then deadlocked the gate
+    // for the rest of the session.
+    let dir = tempfile::tempdir().unwrap();
+    let registry = ToolRegistry::new(dir.path().to_path_buf()).await;
+    registry.restore_completion_verification_debt();
+    registry.set_required_completion_verifiers(vec![
+        "`./scripts/update-contributors-readme.sh --dry-run`".into(),
+        "  cargo check  ".into(),
+    ]);
+    // Stored requirements are executable identities (no code spans, trimmed).
+    assert_eq!(
+        registry.missing_required_completion_verifiers(),
+        vec![
+            "./scripts/update-contributors-readme.sh --dry-run".to_string(),
+            "cargo check".to_string()
+        ]
+    );
+    // The model executes the bare command (the only form preflight admits).
+    let args = json!({"action":"run", "command":"./scripts/update-contributors-readme.sh --dry-run"});
+    let launch = registry.begin_completion_verifier(&args);
+    registry.observe_completion_verifier(launch, &args, &Ok(json!({"exit_code":0})));
+    assert!(
+        registry.completion_verifier_passed("./scripts/update-contributors-readme.sh --dry-run"),
+        "a successful bare run must satisfy the backtick-wrapped requirement"
+    );
+    assert!(registry.completion_verification_pending(), "one required check intentionally remains: cargo check");
+    assert_eq!(registry.missing_required_completion_verifiers(), vec!["cargo check"]);
+}

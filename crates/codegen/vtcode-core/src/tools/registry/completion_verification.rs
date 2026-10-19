@@ -170,6 +170,28 @@ fn executed_command_identity(command: &str) -> String {
         .to_owned()
 }
 
+/// Strip one balanced markdown code-span pair from a tracker `verify` entry.
+///
+/// Tracker steps persist `verify` as markdown (`verify: `cmd``), so the entries
+/// that seed `required_commands` can arrive wrapped in backticks while the
+/// model executes the bare command. The literal match in `command_passed`
+/// would then never succeed, the gate would demand an "exact command" that
+/// preflight itself rejects (`contains_command_substitution` rejects backtick
+/// code spans), and harness auto-verification loops on its own synthesized
+/// backticked call (session-vtcode-20261019T075619Z_862610-57915). Inner
+/// code spans (e.g. `` grep -n '`x`' f ``) never occur in the checked shapes:
+/// the scanner treats nesting as unbalanced and leaves the entry untouched.
+fn unwrap_tracker_verify_code_span(command: &str) -> &str {
+    let trimmed = command.trim();
+    if trimmed.starts_with('`') && trimmed.ends_with('`') && trimmed.len() >= 2 {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if !inner.contains('`') {
+            return inner;
+        }
+    }
+    trimmed
+}
+
 fn command_covers_required(command: &str, required: &str) -> bool {
     command == required
         || (command.contains("&&") && tool_intent::activity::shell_command_covers_required_check(command, required))
@@ -313,8 +335,21 @@ impl ToolRegistry {
 
     /// Existing tracker verification commands are mandatory, even when another check passes.
     pub(super) fn set_required_completion_verifiers(&self, commands: Vec<String>) {
+        // Store executable identities: tracker `verify` markdown wraps entries
+        // in code spans, and the stored literal is both the match key in
+        // `command_passed` and the exact command harness auto-verification
+        // re-runs — a backticked literal can never match the bare executed
+        // command and is itself rejected by preflight (code spans are command
+        // substitution), deadlocking the gate.
+        let mut normalized = Vec::with_capacity(commands.len());
+        for command in commands {
+            let command = unwrap_tracker_verify_code_span(&command).to_owned();
+            if !command.is_empty() && !normalized.contains(&command) {
+                normalized.push(command);
+            }
+        }
         let mut state = self.harness_context.completion_verification.lock();
-        state.required_commands = commands;
+        state.required_commands = normalized;
         state.prune_optional_evidence();
     }
 
