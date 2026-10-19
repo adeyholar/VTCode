@@ -5,6 +5,46 @@ All notable changes to vtcode will be documented in this file.
 <!-- markdownlint-disable MD012 MD013 MD024 MD033 -->
 <!-- Rules relaxed for this generated file only: MD012 (a full regeneration leaves one blank line at end-of-file), MD013 (commit subjects are unbounded so entries can exceed 120 columns), MD024 (two tags can normalize to the same version heading), MD033 (commit subjects may contain `<Type>` spellings). -->
 
+## 0.179.6 - 2026-10-19
+
+### Highlights
+
+#### Bug Fixes
+
+- Restrict reverse search to user-typed prompts (2f1be3ff)
+- Tag typed prompts and align picker docs (dab6d116)
+- Bound retries and terminal recovery (688816db)
+- Auto-continue planning after a failed tool-free synthesis (62fce2c4)
+- Cap repeated empty tool-free synthesis auto-continues (0f116097)
+- Unwrap code spans in required tracker checks (35420382)
+- Deduplicate nested preflight failure prefixes (dd79c5f6)
+- Canonicalize verify entries at ingestion (a6cedf79)
+- Gate verification at completion (53178c9f)
+
+#### Documentation
+
+- Refresh contributors and document the workspace crate map (b4a689f1)
+- Document the local codex checkout fallback (6cf038c9)
+
+#### Features
+
+- Add DeepSeek-V4.1-Flash-1017 to Merge Gateway and OpenRouter (fb47bc0d)
+
+### Other Changes
+
+#### CI
+
+- Remove unused workflows and harden release tag-poll (98027171)
+
+#### Performance
+
+- Skip redundant macOS bundle refresh in run-debug.sh (963fbe4a)
+
+#### Refactors
+
+- Share frozen planning recovery handoff constants (cc1cdbe8)
+- Verify ingestion accepts borrowed items without a per-line owned Vec (1e6a22ad)
+
 ## 0.179.5 - 2026-10-18
 
 ### Highlights
