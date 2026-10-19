@@ -347,6 +347,24 @@ fn archived_history_skips_exec_task_scaffolding() {
 }
 
 #[test]
+fn archived_history_trusts_user_input_for_exec_task_shape() {
+    let user = vtcode_commons::message_metadata::MessageMetadata::user_input(1_700_000_000, 4);
+    let task_frame = "Task: Exec Task\nDescription: Make a concise read-only plan for the smoke lifecycle.";
+    assert_eq!(
+        archived_prompt_content_with_metadata(task_frame, Some(&user)),
+        Some(task_frame.to_string()),
+        "trusted user input must survive the exec-task shape check"
+    );
+    // Legacy task frames carry no metadata, so the shape check still drops them.
+    assert_eq!(archived_prompt_content_with_metadata(task_frame, None), None);
+    // Legacy recovery notices were tagged user_input, so the prefix safety net
+    // still applies even when provenance says user_input.
+    let legacy_recovery =
+        "Verification failed: cargo nextest run (exit code 1). Fix the failure and run verification again.";
+    assert_eq!(archived_prompt_content_with_metadata(legacy_recovery, Some(&user)), None);
+}
+
+#[test]
 fn archived_history_keeps_user_prompts_that_mention_task() {
     // Asymmetric guard: the bare prefix is not proof of an exec task frame.
     for typed in [

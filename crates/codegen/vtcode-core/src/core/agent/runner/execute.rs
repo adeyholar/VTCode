@@ -629,9 +629,11 @@ impl AgentRunner {
                     // Collect new messages first to avoid borrow conflict:
                     // conversation is immutably borrowed in the loop, but
                     // adjust_token_count/push need &mut state.
-                    // Previous assistant turns are replayed as `model`, every
-                    // later conversation entry is harness-injected steering, so
-                    // tag it synthetic instead of user-typed.
+                    // Previous assistant turns are replayed as `model`. Every
+                    // other entry is either harness steering or a duplicate of
+                    // a user message already recorded in `state.messages`, so
+                    // tag the replay synthetic; reverse history keeps the
+                    // original user-typed copy.
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|duration| duration.as_secs())

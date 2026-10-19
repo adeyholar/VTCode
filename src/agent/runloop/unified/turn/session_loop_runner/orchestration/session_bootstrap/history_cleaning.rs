@@ -12,7 +12,7 @@ use crate::agent::runloop::unified::webmcp::{
 use crate::cli::exec::{
     EXEC_TASK_INSTRUCTIONS_DRY_RUN_PREFIX, EXEC_TASK_INSTRUCTIONS_PREFIX, REVIEW_TASK_INSTRUCTIONS_PREFIX,
 };
-use vtcode_core::core::message_metadata::MessageMetadata;
+use vtcode_commons::message_metadata::MessageMetadata;
 
 /// Stable openings of harness-authored prompts that are stored as ordinary
 /// `User`-role turns but were never typed by the user.
@@ -57,16 +57,22 @@ fn looks_like_exec_task_prompt(trimmed: &str) -> bool {
 
 /// True when an archived `User`-role message is machine-authored.
 ///
-/// Provenance is authoritative when present: only `user_input` provenance may
-/// reach reverse history, so `synthetic`, `llm_response`, `tool_result`, and
-/// `system` sources are all rejected. Metadata-free legacy archives fall back to
-/// stable prompt openings. Both paths keep the reverse-history picker limited to
-/// prompts the user actually typed.
+/// Non-`user_input` provenance (`synthetic`, `llm_response`, `tool_result`,
+/// `system`) is authoritative and rejected. `user_input` still runs the stable
+/// opening checks: legacy archives tagged some harness recovery notices as
+/// `user_input`, so the prefix list remains the safety net for them. The
+/// structural exec-task frame is skipped only for trusted `user_input`
+/// metadata, because legacy task frames carry no metadata at all.
 fn is_harness_authored_prompt(trimmed: &str, metadata: Option<&MessageMetadata>) -> bool {
-    if metadata.is_some_and(|metadata| metadata.source().is_some_and(|source| source != "user_input")) {
+    let source = metadata.and_then(MessageMetadata::source);
+    if source.is_some_and(|source| source != "user_input") {
         return true;
     }
-    looks_like_exec_task_prompt(trimmed) || HARNESS_PROMPT_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix))
+    let trusted_user_input = source == Some("user_input");
+    if !trusted_user_input && looks_like_exec_task_prompt(trimmed) {
+        return true;
+    }
+    HARNESS_PROMPT_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix))
 }
 
 /// Map one archived message body to a history-picker entry.

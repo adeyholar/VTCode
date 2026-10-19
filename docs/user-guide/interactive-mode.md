@@ -404,11 +404,11 @@ a new directory session.
 ### Reverse Search with `Ctrl+R`
 
 1. Press `Ctrl+R` to start the reverse history search. If the composer already holds text, the picker opens
-   pre-filtered to that text so you can jump straight to a matching entry (Esc restores the draft unchanged).
-2. Type a query to highlight matching entries.
-3. Press `Ctrl+R` again to cycle through older matches.
-4. Accept the current match with `Tab`, `Esc`, or `Enter` to execute immediately.
-5. Cancel the search with `Ctrl+C` or `Backspace` on an empty query.
+   pre-filtered to that text so you can jump straight to a matching entry.
+2. Type a query to highlight matching entries. `Backspace` deletes query characters.
+3. Press `Ctrl+R` or `Tab` to cycle through older matches; `Shift+Tab` cycles backward.
+4. Accept the current match with `Enter`. It fills the composer for editing; it does not submit automatically.
+5. Cancel with `Esc`, `Ctrl+C`, or `Ctrl+G` and the original draft is restored unchanged.
 
 The picker lists only prompts you actually typed. It also surfaces prompts from recent sessions, but
 harness-generated `User`-role turns (exec/review task frames, recovery nudges, tracker and planning

@@ -33,7 +33,7 @@ const EXEC_TASK_TITLE: &str = "Exec Task";
 /// Stable openings of the model-facing exec/dry-run/review task instructions,
 /// reused by reverse history so these harness prompts are never offered as user
 /// input. Each is the literal head of the corresponding `*_INSTRUCTIONS` value
-/// (see the `concat!` construction below), so the two cannot diverge.
+/// (see the `concat!` construction below); keep the two aligned when editing.
 pub(crate) const EXEC_TASK_INSTRUCTIONS_PREFIX: &str = "You are running vtcode in non-interactive exec mode.";
 pub(crate) const EXEC_TASK_INSTRUCTIONS_DRY_RUN_PREFIX: &str =
     "You are running vtcode as a non-interactive dry-run execution.";

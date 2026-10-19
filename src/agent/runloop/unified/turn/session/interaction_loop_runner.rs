@@ -715,6 +715,15 @@ pub(super) async fn run_interaction_loop_impl(
             uni::MessageContent::Text(text) => uni::Message::user(text),
             uni::MessageContent::Parts(parts) => uni::Message::user_with_parts(parts),
         };
+        // Tag the submitted prompt so archives can distinguish it from
+        // harness-injected `User`-role steering during reverse history.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let tokens = user_message.estimate_tokens();
+        let user_message =
+            user_message.with_metadata(vtcode_commons::message_metadata::MessageMetadata::user_input(now, tokens));
 
         let prompt_message_index = ctx.conversation_history.len();
         ctx.conversation_history.push(user_message);
