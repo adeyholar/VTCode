@@ -59,8 +59,6 @@ Plan, build, and review with hosted or local models, sandboxed tools, and resuma
 Use the interactive TUI or `vtcode exec` to explore a codebase, plan and review changes, and run tools. Choose a
 model and permission level; VT Code manages context, tool calls, and execution policy.
 
-<!-- markdownlint-disable MD013 -->
-
 | At a glance      | What you get                                                                         |
 | ---------------- | ------------------------------------------------------------------------------------ |
 | **Planning**     | [Plan read-only](./docs/guides/planning-workflow.md), then review turn diffs.        |
@@ -69,8 +67,6 @@ model and permission level; VT Code manages context, tool calls, and execution p
 | **Long runs**    | [Headless exec](./docs/user-guide/exec-mode.md) with compaction and resumption.      |
 | **Integrations** | [MCP](./docs/guides/mcp-integration.md), Skills, plugins, and editor bridges.        |
 | **Models**       | [Hosted or local providers](./docs/README.md#provider-index) per task.               |
-
-<!-- markdownlint-enable MD013 -->
 
 ```mermaid
 flowchart LR
@@ -232,26 +228,26 @@ Use `vtcode continue --session-id <id>` to fork an earlier session.
 
 Enable these only when you need them; none are required for the quick start.
 
-<!-- markdownlint-disable MD013 MD060 -->
+<!-- markdownlint-disable MD060 -->
 
 | Integration                                                               | What it gives you                                                                                                                                                                                                                                                                 |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [MCP](./docs/guides/mcp-integration.md)                                   | Connect external tools and data sources.                                                                                                                                                                                                                                          |
 | [Agent Skills](./docs/skills/SKILLS_GUIDE.md)                             | Load reusable prompt packages on demand.                                                                                                                                                                                                                                          |
-| [VT Code Companion (experimental)](./docs/user-guide/vtcode-companion.md) | Select a compatible VT Code binary and workspace with `vtcode companion setup`, then install the GitHub marketplace in a local Codex or ChatGPT Desktop host. ChatGPT Local Work and implementation remain experimental.                                                          |
+| [VT Code Companion (experimental)](./docs/user-guide/vtcode-companion.md) | Drive VT Code from a local Codex or ChatGPT Desktop host via `vtcode companion setup`.                                                                                                                                                                                            |
 | [Plugins](./docs/guides/agent-plugins.md)                                 | Extend the agent with plugin manifests.                                                                                                                                                                                                                                           |
 | [ACP with Zed](./docs/guides/zed-acp.md)                                  | Drive VT Code from the Zed editor.                                                                                                                                                                                                                                                |
 | [WebMCP](./docs/user-guide/webmcp.md)                                     | Pair the TUI with an authenticated browser editor via `/webmcp pair <origin>`; the hosted app ([site](https://vtcode.vinhnx.chatgpt.site/), [mirror](https://vinhnx.github.io/VTCode/)) connects through this bridge. See the [deployment reference](./docs/reference/webmcp.md). |
 | [Memcode MCP](./docs/guides/memcode-mcp.md)                               | Carry context between tasks; see the [design write-up](https://memcode.in/blogs/vt-code-memory-across-threads).                                                                                                                                                                   |
 
-<!-- markdownlint-enable MD013 -->
+<!-- markdownlint-enable MD060 -->
 
 ## Documentation
 
 Guides grouped by task. The full catalog lives in the [documentation index](./docs/INDEX.md), the
 [docs overview](./docs/README.md), and the [Wiki](https://github.com/vinhnx/VTCode/wiki):
 
-<!-- markdownlint-disable MD013 MD060 -->
+<!-- markdownlint-disable MD060 -->
 
 | Goal                 | Guides                                                                                                                                                                                                                                                                                                                                           |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -261,7 +257,7 @@ Guides grouped by task. The full catalog lives in the [documentation index](./do
 | Extend and integrate | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Memcode](./docs/guides/memcode-mcp.md)                                                                                      |
 | Develop and evaluate | [Development](./docs/development/README.md) · [Testing](./docs/development/testing.md) · [Evals](./docs/guides/eval.md) · [Architecture](./docs/ARCHITECTURE.md) · [HOVER](./docs/development/hypothesis-revision-validation.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) |
 
-<!-- markdownlint-enable MD013 -->
+<!-- markdownlint-enable MD060 -->
 
 ## Development
 
@@ -322,7 +318,7 @@ Thanks to everyone who builds, tests, and improves VT Code. For partnerships, re
 `vinhnguyen2308 [at] gmail [dot] com`; bugs and feature requests belong in
 [GitHub Issues](https://github.com/vinhnx/VTCode/issues).
 
-<details open>
+<details>
 <summary>View all contributors</summary>
 
 <!-- CONTRIBUTORS:START -->

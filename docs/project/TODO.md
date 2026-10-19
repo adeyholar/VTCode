@@ -128,3 +128,35 @@ fail-closed `pipefail`. Only terminal exit 0 clears the gate; `;`, `||`, dynamic
 qualify. /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261019T075619Z_862610-57915
 
 the agent loop is very fragile and can't not even complete or fulfill a simple prompt. check for major regression
+
+---
+
+audit and check latest session to see if any improvement or still have errors/bottleneck and repeated/wasted tool calls or context -> fix completely. /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261019T091807Z_142563-67504 it seems that self-verification loop (HOVER) causing a lot of trouble for vtcode -> investigate and deep dive and fix
+
+---
+
+maybe we should relax verification loop, it prevent vtcode from making progress efficiently and it causes hitting max tools loop limit fast and exhaust tool budget. Help me reason through this problem step by step. Review the context, challenge assumptions, explore possible solutions and trade-offs, then recommend the simplest practical approach before implementation.
+
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+Harness auto-verification: running the project verifier: `python3 scripts/check_markdown.py`
+• Ran python3 scripts/check_markdown.py · … +2 lines · Ctrl+T transcript · click to expand
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+• Ran python3 scripts/check_docs_links.py · Ctrl+T transcript · click to expand
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+• Ran ./scripts/update-contributors-readme.sh · … +7 lines · Ctrl+T transcript · click to expand
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+• Ran grep -n CONTRIBUTORS:END README.md · … +1 lines · Ctrl+T transcript · click to expand
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one
+with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain. Cap output with `
+max_output_tokens`. Pure `head`/`tail` verifier tails run standalone; static read-only filtering pipelines run with
+
+Blocker encountered: the runtime's verification-gate fuse kept re-queueing the same checks and eventually tripped
+the blocked-call limit (6 blocked calls) on a final redundant diff re-run.
+
+/Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261019T091807Z_142563-67504
