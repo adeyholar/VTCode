@@ -138,7 +138,7 @@ pub(crate) fn apply_metadata_input(
         metadata.outcome = normalize_optional_text(Some(outcome));
     }
     if let Some(verify) = verify {
-        metadata.verify = normalize_string_items(Some(verify));
+        metadata.verify = normalize_verify_items(Some(verify));
     }
 }
 
@@ -557,6 +557,41 @@ where
     }))
 }
 
+/// Strip one balanced markdown code-span pair from a `verify` entry.
+///
+/// `verify` values are shell commands, and models faithfully emit them in the
+/// code-spans the prompt examples use (`verify: [`cargo check`]`). A stored
+/// code span is never valid shell, so the decoration must not reach
+/// strings that are later compared literally or re-executed — otherwise the
+/// completion gate demands an "exact command" the executor is forbidden to
+/// type (preflight rejects code spans as command substitution).
+/// Callers choose where to apply this: producer ingestion
+/// (`apply_metadata_input`/`apply_metadata_line`) for canonical storage, or
+/// a consumer defense boundary. Markdown mirrors keep code spans.
+pub(crate) fn unwrap_verify_code_span(command: &str) -> &str {
+    let trimmed = command.trim();
+    if trimmed.starts_with('`') && trimmed.ends_with('`') && trimmed.len() >= 2 {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if !inner.contains('`') {
+            return inner;
+        }
+    }
+    trimmed
+}
+
+/// Normalize the executable `verify` item: trim, drop the code-span
+/// decoration, and drop empties.
+pub(crate) fn normalize_verify_items(items: Option<&[String]>) -> Vec<String> {
+    items
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|item| {
+            let unwrapped = unwrap_verify_code_span(item);
+            (!unwrapped.is_empty()).then(|| unwrapped.to_owned())
+        })
+        .collect()
+}
+
 pub fn normalize_string_items(items: Option<&[String]>) -> Vec<String> {
     items
         .unwrap_or(&[])
@@ -593,7 +628,7 @@ pub fn apply_metadata_line(metadata: &mut TaskStepMetadata, raw: &str, in_verify
             .or_else(|| trimmed.strip_prefix("* "))
             .or_else(|| trimmed.strip_prefix("+ "))
         {
-            if let Some(command) = normalize_optional_text(Some(command)) {
+            if let Some(command) = normalize_verify_items(Some(&[command.to_owned()])).pop() {
                 metadata.verify.push(command);
             }
             return true;
@@ -615,7 +650,7 @@ pub fn apply_metadata_line(metadata: &mut TaskStepMetadata, raw: &str, in_verify
         return true;
     }
     if let Some(rest) = trimmed.strip_prefix("verify:") {
-        metadata.verify = normalize_string_items(Some(&[rest.to_string()]));
+        metadata.verify = normalize_verify_items(Some(&[rest.to_string()]));
         return true;
     }
 
@@ -1040,6 +1075,40 @@ mod tests {
         // Inline `verify:` replaces the accumulated block.
         assert!(apply_metadata_line(&mut metadata, "  verify: make check", &mut in_verify_block));
         assert_eq!(metadata.verify, vec!["make check".to_string()]);
+    }
+
+    #[test]
+    fn verify_ingestion_strips_code_span_decoration() {
+        // Regression for session-vtcode-20261019T075619Z: models emit verify
+        // in the taught code-span form, and a stored code span is (a) never
+        // valid shell and (b) forbidden to type back at preflight, which
+        // deadlocked the completion-verification gate. Ingestion must store
+        // the executable command in every input shape.
+        let mut metadata = TaskStepMetadata::default();
+        let mut in_verify_block = false;
+        assert!(apply_metadata_line(
+            &mut metadata,
+            "  verify: `./scripts/update-contributors-readme.sh --dry-run`",
+            &mut in_verify_block
+        ));
+        assert_eq!(metadata.verify, vec!["./scripts/update-contributors-readme.sh --dry-run".to_string()]);
+        // Multi-line block entries unwrap too.
+        assert!(apply_metadata_line(&mut metadata, "  verify:", &mut in_verify_block));
+        assert!(apply_metadata_line(&mut metadata, "    - `git show --stat HEAD`", &mut in_verify_block));
+        assert_eq!(metadata.verify, vec!["git show --stat HEAD".to_string()]);
+        // Structured API input (create/update items) unwraps as well.
+        let mut structured = TaskStepMetadata::default();
+        apply_metadata_input(
+            &mut structured,
+            Some(&["README.md".to_string()]),
+            None,
+            Some(&["`cargo check --locked`".to_string()]),
+        );
+        assert_eq!(structured.verify, vec!["cargo check --locked".to_string()]);
+        // Nested/unbalanced spans are left untouched (fail-safe).
+        let mut nested = TaskStepMetadata::default();
+        apply_metadata_input(&mut nested, None, None, Some(&["`grep -n '`x`' f`".to_string()]));
+        assert_eq!(nested.verify, vec!["`grep -n '`x`' f`".to_string()]);
     }
 
     #[test]
