@@ -16,8 +16,7 @@ use crate::agent::runloop::unified::turn::context::{
 use crate::agent::runloop::unified::turn::guards::handle_turn_balancer;
 use crate::agent::runloop::unified::turn::tool_outcomes::{ToolOutcomeContext, handle_tool_calls, helpers};
 use crate::agent::runloop::unified::turn::turn_loop::{
-    MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN, PENDING_VERIFICATION_BLOCK_REASON, RECOVERY_CONTRACT_VIOLATION_REASON,
-    budget_recovery_final_response,
+    PENDING_VERIFICATION_BLOCK_REASON, RECOVERY_CONTRACT_VIOLATION_REASON, budget_recovery_final_response,
 };
 
 /// Result of processing a single turn.
@@ -94,58 +93,18 @@ fn record_assistant_tool_calls(
 
 /// Outcome of accounting for one text response while verification is pending.
 pub(crate) enum PendingVerificationTextOutcome {
-    /// Keep the turn alive (under the text cap, or a directive retry grant).
-    Continue,
     /// End the turn as verification-blocked.
     Block { reason: String },
-    /// The text cap was reached: the harness should execute `command`
-    /// itself through the normal tool pipeline instead of blocking.
+    /// Execute the missing completion check through the normal tool pipeline.
     AutoVerify { command: String },
-}
-
-/// Whether a pending-gate text response claims the work is done. A completion
-/// claim without verification is the highest-risk moment in the gate's
-/// lifecycle — the model is asserting success with no evidence — so claims
-/// jump straight to harness verification instead of spending directive
-/// rounds. Deliberately recall-biased: a false positive costs one safe,
-/// bounded verifier execution, while a false negative just falls back to the
-/// ordinary cap accounting. Mirrors the result-claim marker philosophy of
-/// `should_suppress_pre_tool_result_claim` (same vocabulary family).
-fn is_completion_claim_text(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    [
-        "is complete",
-        "is done",
-        "is finished",
-        "are complete",
-        "are done",
-        "completed",
-        "all done",
-        "good to go",
-        "ready for review",
-        "task complete",
-        "work complete",
-        "implementation complete",
-        "successfully",
-        "verified",
-        "tests pass",
-        "test passes",
-        "build passes",
-        "no errors",
-        "working correctly",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
 }
 
 impl TurnProcessingContext<'_> {
     /// Account for a text response while verification is pending.
     ///
-    /// The model response is intentionally not stored or rendered. Under the
-    /// shared per-turn cap the turn continues, then the harness runs the
-    /// verifier once or waits for an existing verifier. Directive retries are
-    /// the fallback when autonomous execution is disabled or unavailable.
-    /// Exhausted execution budgets block immediately without reminder rounds.
+    /// The answer is withheld until missing checks finish. The registry owns
+    /// freshness; failure ends this attempt and the session owns one correction.
+    /// Exhausted execution budgets block without reminder rounds.
     ///
     /// Tool-free recovery synthesis bypasses this accounting entirely (see the
     /// caller): with tools disabled no text could verify, so recovery budgets
@@ -153,76 +112,19 @@ impl TurnProcessingContext<'_> {
     pub(crate) fn handle_pending_verification_text_response(
         &mut self,
         repeated_tool_attempts: &mut helpers::LoopTracker,
-        assistant_text: &str,
+        _assistant_text: &str,
     ) -> Result<PendingVerificationTextOutcome> {
         repeated_tool_attempts.mark_verification_pending();
         if let Some(reason) = self.verification_execution_blocker(repeated_tool_attempts) {
             return Ok(PendingVerificationTextOutcome::Block { reason });
         }
-        if !repeated_tool_attempts.verification_warning_emitted {
-            // When the failed-verifier fix window is active the verifier already
-            // ran and failed; the generic "run verification" notice would be
-            // circular (it demanded verification the model already attempted
-            // while its fix attempts got no feedback). Say the verifier failed
-            // and bounded fix edits are granted instead.
-            let (warning, directive) = if repeated_tool_attempts.fix_edits_remaining > 0 {
-                (helpers::FAILED_VERIFICATION_FIX_WARNING, helpers::FAILED_VERIFICATION_FIX_DIRECTIVE)
-            } else {
-                (helpers::ANTI_BLIND_EDITING_WARNING, helpers::ANTI_BLIND_EDITING_DIRECTIVE)
-            };
-            self.renderer.line(MessageStyle::Warning, warning).unwrap_or(());
-            self.working_history.push(uni::Message::system(directive.to_string()));
-            repeated_tool_attempts.verification_warning_emitted = true;
-        }
-
-        // Completion claims skip the explanatory budget: asserting "done"
-        // without verification is the exact moment that needs evidence, not
-        // another directive round. Falls through to ordinary cap accounting
-        // when auto-verification is unavailable.
-        if is_completion_claim_text(assistant_text)
-            && let Some(command) = self.try_harness_auto_verify(repeated_tool_attempts)
-        {
-            return Ok(PendingVerificationTextOutcome::AutoVerify { command });
-        }
-
-        let response_count = self.harness_state.record_assistant_text_response();
-        if response_count < MAX_ASSISTANT_TEXT_RESPONSES_PER_TURN {
-            return Ok(PendingVerificationTextOutcome::Continue);
-        }
-
-        // Prefer one real verifier outcome to repeated model-only reminders.
+        // A tool-free answer is a completion attempt. Editing and inspection
+        // never schedule checks; run only the registry's missing verifier here.
         if let Some(command) = self.try_harness_auto_verify(repeated_tool_attempts) {
             return Ok(PendingVerificationTextOutcome::AutoVerify { command });
         }
-
-        // In-turn autonomous recovery: name the exact project verifier and
-        // grant a fresh text budget once more, instead of blocking immediately.
-        // The streak reset mirrors the failed-verifier path (a verifier outcome
-        // that grants fix-ups also resets the streak so the model can diagnose
-        // before the cap re-applies): here the "outcome" is the harness
-        // deciding the turn is still salvageable without user intervention.
-        let max_attempts = helpers::verification_in_turn_attempts(self.vt_cfg);
-        if repeated_tool_attempts.record_verification_auto_recovery_with_limit(max_attempts) {
-            let attempt = repeated_tool_attempts.verification_auto_recovery_attempts();
-            let default_verifier =
-                helpers::resolve_pending_verifier_command(self.vt_cfg, self.tool_registry, self.working_history);
-            let directive = vtcode_core::tools::tool_intent::verification_recovery_directive(
-                default_verifier.as_deref(),
-                attempt,
-                max_attempts,
-            );
-            self.renderer
-                .line(MessageStyle::Info, helpers::VERIFICATION_AUTO_RECOVERY_WARNING)
-                .unwrap_or(());
-            self.working_history.push(uni::Message::system(directive));
-            self.harness_state.reset_assistant_text_response_streak();
-            self.session_stats
-                .set_verification_snapshot(repeated_tool_attempts.verification_snapshot());
-            return Ok(PendingVerificationTextOutcome::Continue);
-        }
-
         Ok(PendingVerificationTextOutcome::Block {
-            reason: PENDING_VERIFICATION_BLOCK_REASON.to_string(),
+            reason: self.tool_registry.unverified_completion_reason(),
         })
     }
 
@@ -288,8 +190,7 @@ fn verifier_response_has_nonzero_exit(text: &str) -> bool {
         .is_some_and(|code| code != 0)
 }
 
-/// Execute the project verifier on the harness's behalf after the model
-/// exhausted its directive retries without verifying.
+/// Execute a missing check on the harness's behalf at attempted completion.
 ///
 /// The synthesized call flows through the normal [`handle_tool_calls`]
 /// pipeline — mutation guard, validation, permissions, budget, repetition
@@ -299,9 +200,8 @@ fn verifier_response_has_nonzero_exit(text: &str) -> bool {
 ///
 /// - Gate cleared → record success (drops the consecutive-failure count),
 ///   note it in history, and continue the turn.
-/// - Gate still pending → record the failure with a bounded output excerpt
-///   for the escalated handoff, note the active fix window, and continue so
-///   the model can repair from real evidence.
+/// - Gate still pending → preserve bounded failure evidence and end this
+///   completion attempt. The session owns the request's corrective pass.
 /// - Break outcome from the pipeline (exit, cancel, budget synthesis) →
 ///   bookkeep the same way, then honor it.
 /// - No tool response landed (pre-flight rejection, guard block) → do not
@@ -410,7 +310,7 @@ pub(crate) async fn execute_harness_auto_verification(
                     .record_verification_auto_failure(command.clone(), &response_text);
                 t_ctx_inner.ctx.working_history.push(uni::Message::system(format!(
                     "Harness auto-verification `{command}` did not clear the gate (consecutive failure {failures} this episode). \
-                    A bounded fix window is active: repair the reported failure, then re-run the standalone verifier."
+                    Repair the reported failure before attempting completion again."
                 )));
             }
         } else if t_ctx_inner.ctx.tool_registry.completion_verification_pending() {
@@ -435,6 +335,15 @@ pub(crate) async fn execute_harness_auto_verification(
 
     if let Some(res) = break_outcome {
         return Ok(res);
+    }
+
+    if ctx.tool_registry.completion_verification_pending()
+        && repeated_tool_attempts.pending_verifier_session_id.is_none()
+        && repeated_tool_attempts.auto_verification_executed
+    {
+        return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
+            reason: Some(ctx.tool_registry.unverified_completion_reason()),
+        }));
     }
 
     // Mirror the ToolCalls branch: run the balancer before continuing so
@@ -527,41 +436,6 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                 return Ok(res);
             }
 
-            // Tool-bearing responses reset the text cap. Repeated polls and
-            // inspections must still reach bounded self-verification.
-            let required_stalled = params.repeated_tool_attempts.record_required_verifier_progress(
-                params
-                    .ctx
-                    .tool_registry
-                    .completion_verification_pending()
-                    .then(|| params.ctx.tool_registry.next_required_completion_verifier())
-                    .flatten(),
-            );
-            if !params.ctx.is_planning_active()
-                && (params.repeated_tool_attempts.verification_is_pending()
-                    || params.ctx.tool_registry.completion_verification_pending())
-                && (required_stalled
-                    || params.repeated_tool_attempts.tracker_observations_stalled()
-                    || params.repeated_tool_attempts.consecutive_navigations >= helpers::BLIND_EDITING_THRESHOLD)
-            {
-                params.repeated_tool_attempts.mark_verification_pending();
-                if let Some(command) = params.ctx.try_harness_auto_verify(params.repeated_tool_attempts) {
-                    return execute_harness_auto_verification(
-                        params.ctx,
-                        params.repeated_tool_attempts,
-                        params.turn_modified_files,
-                        params.step_count,
-                        params.max_tool_loops,
-                        params.tool_repeat_limit,
-                        command,
-                    )
-                    .await;
-                }
-                return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked {
-                    reason: Some(params.ctx.tool_registry.unverified_completion_reason()),
-                }));
-            }
-
             let balancer_outcome = handle_turn_balancer(
                 &mut *params.ctx,
                 params.step_count,
@@ -605,9 +479,11 @@ pub(crate) async fn handle_turn_processing_result<'a>(
             }
             if !is_planning_synthesis && params.ctx.tool_registry.completion_verification_pending() {
                 params.repeated_tool_attempts.mark_verification_pending();
-            } else if params.repeated_tool_attempts.verification_is_pending()
-                && params.ctx.tool_registry.has_current_completion_verification()
+            } else if params.ctx.tool_registry.has_current_completion_verification()
+                || params.ctx.tool_registry.next_required_completion_verifier().is_none()
             {
+                // Optional checker diagnostics cannot create new obligations;
+                // retain explicit pending state when required checks remain.
                 params.repeated_tool_attempts.mark_verification_complete();
             }
             if params.repeated_tool_attempts.verification_is_pending() && !is_planning_synthesis && !tool_free_synthesis
@@ -616,7 +492,6 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                     .ctx
                     .handle_pending_verification_text_response(params.repeated_tool_attempts, &text)?
                 {
-                    PendingVerificationTextOutcome::Continue => return Ok(TurnHandlerOutcome::Continue),
                     PendingVerificationTextOutcome::Block { reason } => {
                         return Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) }));
                     }

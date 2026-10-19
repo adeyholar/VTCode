@@ -51,7 +51,7 @@ async fn verification_recovery_queues_the_required_check_after_existing_user_inp
     fixture.runtime.try_queue_follow_up_input("Existing user input".into()).unwrap();
     let mut cfg = VTCodeConfig::default();
     cfg.agent.harness.verification.default_verifier_override = Some("rustc --version".into());
-    cfg.agent.harness.verification.cross_turn_turns = 1;
+    cfg.agent.harness.verification.cross_turn_turns = 9;
 
     let VerificationBlockResult::Queued { status_line } = fixture.recover(PENDING_REASON, Some(&cfg)) else {
         panic!("the first recovery turn should be queued");
@@ -112,23 +112,26 @@ async fn verification_recovery_preserves_disabled_exhausted_and_escalated_bounda
     #[derive(Debug, PartialEq)]
     enum RecoveryBlocker {
         Disabled,
+        AutoExecuteDisabled,
         Budget,
         Preflight,
         Failures,
     }
     for blocker in [
         RecoveryBlocker::Disabled,
+        RecoveryBlocker::AutoExecuteDisabled,
         RecoveryBlocker::Budget,
         RecoveryBlocker::Preflight,
         RecoveryBlocker::Failures,
     ] {
         let mut fixture = RecoveryFixture::new().await;
         let mut cfg = VTCodeConfig::default();
-        cfg.agent.harness.verification.cross_turn_turns = 1;
+        cfg.agent.harness.verification.cross_turn_turns = 9;
         cfg.agent.harness.verification.max_consecutive_failures = 2;
         cfg.agent.harness.verification.default_verifier_override = Some("rustc --version".into());
         match blocker {
             RecoveryBlocker::Disabled => cfg.agent.harness.verification.cross_turn_turns = 0,
+            RecoveryBlocker::AutoExecuteDisabled => cfg.agent.harness.verification.auto_execute = false,
             RecoveryBlocker::Budget => assert!(fixture.stats.record_verification_auto_recovery_turn_with_limit(1)),
             RecoveryBlocker::Preflight => {
                 fixture.stats.preflight_recovery.synthesis();
@@ -183,7 +186,7 @@ async fn verification_recovery_leaves_other_blocks_and_existing_inputs_untouched
 async fn exhausted_recovery_keeps_non_escalated_exit_and_bounded_failure_evidence() {
     let mut fixture = RecoveryFixture::new().await;
     let mut cfg = VTCodeConfig::default();
-    cfg.agent.harness.verification.cross_turn_turns = 1;
+    cfg.agent.harness.verification.cross_turn_turns = 9;
     cfg.agent.harness.verification.max_consecutive_failures = 3;
     let command = "grep -n '---\\s\\+\\|' README.md";
     cfg.agent.harness.verification.default_verifier_override = Some(command.into());

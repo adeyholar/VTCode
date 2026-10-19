@@ -757,8 +757,7 @@ fn budget_verification_retry_survives_the_real_final_response_handoff_check() {
     assert!(!verification_block_allows_auto_recovery(&format!("{reason} Permission denied."), &text));
     assert!(!verification_block_allows_auto_recovery(reason, "Which verifier should I run?"));
     let mut stats = crate::agent::runloop::unified::state::SessionStats::default();
-    // This path gets two verification recovery turns, not the tracker limit of 32.
-    assert!(stats.record_verification_auto_recovery_turn_with_limit(verification_cross_turn_turns(None)));
+    // This path gets one corrective pass, independently of the tracker limit.
     assert!(stats.record_verification_auto_recovery_turn_with_limit(verification_cross_turn_turns(None)));
     assert!(!stats.record_verification_auto_recovery_turn_with_limit(verification_cross_turn_turns(None)));
     assert_eq!(stats.tracker_continuation_turns(), 0);

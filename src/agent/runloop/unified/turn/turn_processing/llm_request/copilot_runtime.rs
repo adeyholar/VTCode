@@ -58,7 +58,7 @@ use crate::agent::runloop::unified::tool_routing::{
 };
 use crate::agent::runloop::unified::turn::tool_outcomes::error_handling::tool_denial_diagnostic;
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-    LoopTracker, mutation_blocked_until_verification, update_repetition_tracker_for_registry,
+    LoopTracker, update_repetition_tracker_for_registry,
 };
 use crate::agent::runloop::unified::turn::tool_outcomes::{
     ToolFailureDiagnosis, bounded_diagnostic_field, bounded_error_evidence, bounded_output_evidence,
@@ -318,22 +318,6 @@ impl<'a> CopilotRuntimeHost<'a> {
             .pending_hook_rewritten_args
             .remove(request.tool_call_id.as_str())
             .unwrap_or(effective_arguments);
-
-        // The mutation guard runs after the hook phase so it evaluates the
-        // arguments that will actually execute: a PreToolUse rewrite could
-        // turn a read-only call into a mutating one (or vice versa).
-        if !self
-            .tool_registry
-            .is_completion_verifier_call(&canonical_tool_name, &effective_arguments)
-            && self.loop_tracker.as_deref().is_some_and(|tracker| {
-                mutation_blocked_until_verification(tracker, &canonical_tool_name, &effective_arguments)
-            })
-        {
-            return Ok(denied_tool_response(
-                &canonical_tool_name,
-                "mutating tool call blocked until verification succeeds",
-            ));
-        }
 
         self.record_tool_use(&canonical_tool_name);
 

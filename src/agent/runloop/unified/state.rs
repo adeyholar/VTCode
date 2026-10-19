@@ -77,13 +77,9 @@ pub(crate) struct SessionStats {
     /// auto-grant the maximum increment without another HITL prompt. Denials
     /// leave this false so the prompt remains available.
     tool_loop_grant_preauthorized: bool,
-    /// Bounded fix-up edits remaining while `verification_pending` is true.
-    /// Granted by a failed verifier so a broken build can be repaired across
-    /// `continue` turns; consumed by successful fix-up mutations.
-    verification_fix_remaining: u8,
     /// Bounded autonomous turns the session loop may schedule after a
     /// verification-blocked turn before requiring manual `continue`.
-    /// Reset on every `Completed` turn and on fresh execution; incremented by
+    /// Reset only by genuine fresh user requests; incremented by
     /// [`Self::record_verification_auto_recovery_turn_with_limit`]. Prevents unbounded
     /// self-retry loops on a verifier that can never pass while still letting
     /// long-running autonomous work survive transient verification misses
@@ -1056,8 +1052,8 @@ mod tests {
         assert_eq!(stats.verification_auto_recovery_turns(), MAX_VERIFICATION_AUTO_RECOVERY_TURNS);
 
         stats.reset_verification_recovery_episode();
-        assert_eq!(stats.verification_auto_recovery_turns(), 0);
-        assert!(stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
+        assert_eq!(stats.verification_auto_recovery_turns(), MAX_VERIFICATION_AUTO_RECOVERY_TURNS);
+        assert!(!stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
 
         // A fresh non-follow-up user request resets the cross-turn budget.
         assert_eq!(stats.register_follow_up_prompt("run tests and summarize"), FollowUpPromptAction::None);
@@ -1099,24 +1095,19 @@ mod tests {
     }
 
     #[test]
-    fn verification_turn_reset_on_tracker_progress_preserves_failure_escalation() {
-        use crate::agent::runloop::unified::turn::tool_outcomes::helpers::MAX_VERIFICATION_AUTO_RECOVERY_TURNS;
-
+    fn verification_recovery_is_not_replenished_by_internal_progress() {
         let mut stats = SessionStats::default();
-        // Exhaust the cross-turn budget with one consecutive failure recorded.
-        for _ in 0..MAX_VERIFICATION_AUTO_RECOVERY_TURNS {
-            assert!(stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
-        }
-        assert!(!stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
-        stats.record_verification_auto_failure("cargo check --locked".to_string(), "boom");
-
-        // Tracker progress grants a fresh turn budget for new work but must
-        // not hide a never-passing suite: failures survive.
-        stats.reset_verification_auto_recovery_turns();
+        assert!(stats.record_verification_auto_recovery_turn_with_limit(1));
+        stats.record_verification_auto_failure("cargo check".into(), "{\"exit_code\":1}");
+        stats.reset_verification_recovery_episode();
+        stats.register_follow_up_prompt(
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
+        );
+        assert_eq!(stats.verification_auto_recovery_turns(), 1);
+        assert!(!stats.record_verification_auto_recovery_turn_with_limit(1));
+        stats.register_follow_up_prompt("Please implement another request");
         assert_eq!(stats.verification_auto_recovery_turns(), 0);
-        assert_eq!(stats.verification_consecutive_failures(), 1);
-        assert!(stats.last_verification_failure().is_some());
-        assert!(stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
+        assert!(stats.record_verification_auto_recovery_turn_with_limit(1));
     }
 
     #[test]

@@ -77,12 +77,12 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
         outcome.result,
         TurnLoopResult::Blocked {
             reason: Some(ref reason)
-        } if reason == PENDING_VERIFICATION_BLOCK_REASON
+        } if reason.contains("Verification is still pending")
     ));
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        6,
-        "the gate must cap repeated unverified responses after bounded auto-recovery"
+        1,
+        "missing verification ends this completion attempt without reminders"
     );
     assert!(outcome.final_response_was_fallback);
     assert!(history.iter().any(|message| {
@@ -92,7 +92,7 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
                 .as_text()
                 .contains(crate::agent::runloop::unified::turn::tool_outcomes::helpers::ANTI_BLIND_EDITING_DIRECTIVE)
     }));
-    assert!(history.iter().any(|message| {
+    assert!(!history.iter().any(|message| {
         message.role == uni::MessageRole::System && message.content.as_text().contains("Verification recovery (")
     }));
     assert!(
@@ -278,22 +278,10 @@ async fn anti_blind_guard_stops_outer_loop_after_bounded_pending_stale_plan_paus
         outcome.result,
         TurnLoopResult::Blocked {
             reason: Some(ref reason)
-        } if reason == "Turn blocked after repeated unverified assistant responses; verification is still pending."
+        } if reason.contains("Verification is still pending")
     ));
-    // The per-turn text cap is 2, but each cap-hit consumes one bounded
-    // autonomous recovery attempt (fresh streak + project-aware directive):
-    // 2 * (1 + MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS) texts before block.
-    assert_eq!(
-        text_responses.load(Ordering::SeqCst),
-        2 * (1 + usize::from(
-            crate::agent::runloop::unified::turn::tool_outcomes::helpers::MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS
-        ))
-    );
-    assert_eq!(
-        requests.load(Ordering::SeqCst),
-        12,
-        "the provider must not receive requests beyond the auto-recovery budget"
-    );
+    assert_eq!(text_responses.load(Ordering::SeqCst), 1);
+    assert_eq!(requests.load(Ordering::SeqCst), 7, "six edits then one completion attempt");
     assert!(outcome.final_response_was_fallback);
     assert!(history.iter().any(|message| {
         message.phase == Some(uni::AssistantPhase::FinalAnswer)
@@ -481,13 +469,13 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
             outcome.result,
             TurnLoopResult::Blocked {
                 reason: Some(ref reason)
-            } if reason == PENDING_VERIFICATION_BLOCK_REASON
+            } if reason.contains("Verification is still pending")
         ),
         "expected PENDING_VERIFICATION_BLOCK_REASON, got: {:?}, steps: {:?}",
         outcome.result,
         steps.lock().expect("step trace lock").as_slice()
     );
-    assert_eq!(requests.load(Ordering::SeqCst), 16, "ten tool steps plus six bounded auto-recovery texts");
+    assert_eq!(requests.load(Ordering::SeqCst), 11, "ten tool steps then one completion attempt");
     assert_eq!(
         steps.lock().expect("step trace lock").as_slice(),
         [
@@ -501,11 +489,6 @@ async fn blocked_anti_blind_recovery_publishes_one_actionable_handoff() {
             "link_check",
             "diff_check",
             "successful_edit",
-            "unverified_text",
-            "unverified_text",
-            "unverified_text",
-            "unverified_text",
-            "unverified_text",
             "unverified_text",
         ]
     );

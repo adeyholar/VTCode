@@ -34,7 +34,8 @@ pub(super) fn handle_verification_block(
         stats.verification_consecutive_failures() >= verification_gate::verification_max_consecutive_failures(cfg);
     let max_turns = verification_gate::verification_cross_turn_turns(cfg);
     let verifier = verification_gate::resolve_pending_verifier_command(cfg, registry, &runtime.state.messages);
-    if !stats.preflight_recovery.exhausted()
+    if verification_gate::verification_auto_execute_enabled(cfg)
+        && !stats.preflight_recovery.exhausted()
         && !escalated
         && verification_gate::verification_block_allows_auto_recovery(
             base,

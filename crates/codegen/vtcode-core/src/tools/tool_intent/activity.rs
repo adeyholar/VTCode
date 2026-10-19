@@ -443,9 +443,9 @@ pub fn verifier_reference(default_verifier: Option<&str>) -> String {
 pub fn verification_recovery_directive(default_verifier: Option<&str>, attempt: u8, max_attempts: u8) -> String {
     let verifier = verifier_reference(default_verifier);
     format!(
-        "Verification recovery ({attempt}/{max_attempts}): pending edits have not been verified, so further mutations are blocked \
-        and the turn ends blocked unless a verifier exits 0. Run {verifier} with `exec_command`, standalone or as a pure `&&` chain of verifiers. \
-        {VERIFIER_SHELL_FORM_NOTE} A failed verifier grants a bounded number of fix-up edits before the next verification is required."
+        "Verification recovery ({attempt}/{max_attempts}): completion is unverified. Continue implementation and repair reported failures; edits remain available. \
+        Then run only missing checks, starting with {verifier} via `exec_command`, standalone or as a pure `&&` chain of verifiers. \
+        {VERIFIER_SHELL_FORM_NOTE} Reuse fresh passes; successful completion requires all mandatory checks."
     )
 }
 
@@ -1715,6 +1715,9 @@ mod tests {
         let directive = verification_recovery_directive(Some("go test ./..."), 1, 2);
         assert!(directive.contains("go test ./..."));
         assert!(directive.contains("1/2"));
+        assert!(directive.contains("edits remain available"));
+        assert!(directive.contains("only missing checks"));
+        assert!(!directive.contains("mutations are blocked"));
         assert!(directive.contains("max_output_tokens"));
         assert!(directive.contains(VERIFIER_SHELL_FORM_NOTE));
         assert!(directive.contains("tails run standalone"));

@@ -1757,7 +1757,6 @@ async fn concentrated_search_coaching_keeps_distinct_queries_available() {
     }
     assert_eq!(outcome_ctx.ctx.harness_state.blocked_tool_calls, 0);
     assert!(!outcome_ctx.repeated_tool_attempts.verification_is_pending());
-    assert_eq!(outcome_ctx.repeated_tool_attempts.fix_edits_remaining, 0);
 }
 
 #[cfg(unix)]
@@ -1821,7 +1820,7 @@ async fn redundant_sed_coaching_keeps_edits_and_verification_available() {
     assert_eq!(outcome_ctx.repeated_tool_attempts.low_signal_tool_calls, 1);
     assert!(!outcome_ctx.ctx.is_recovery_active());
     assert!(!outcome_ctx.repeated_tool_attempts.verification_is_pending());
-    assert_eq!(outcome_ctx.repeated_tool_attempts.fix_edits_remaining, 0);
+
     assert!(
         handle_single_tool_call(&mut outcome_ctx, "useful_edit", tool_names::APPLY_PATCH, patch)
             .await
@@ -1953,7 +1952,6 @@ async fn masked_checker_feedback_is_bounded_and_standalone_verification_continue
             assert!(output_index < notice_index, "coaching must follow the tool's evidence");
         }
         assert!(!outcome_ctx.repeated_tool_attempts.verification_is_pending());
-        assert_eq!(outcome_ctx.repeated_tool_attempts.fix_edits_remaining, 0);
     }
     std::fs::write(&checker, "print('README: checker passed')\n").unwrap();
     outcome_ctx.repeated_tool_attempts.mark_verification_pending();
@@ -2020,9 +2018,6 @@ async fn filtered_verifier_failure_grants_repair_and_success_continues_loop() {
             .join("\n");
         assert!(output.contains("README: checker output"), "{output}");
         assert!(!output.contains("unrelated output"), "filter must be preserved: {output}");
-        if pending {
-            assert_eq!(outcome_ctx.repeated_tool_attempts.fix_edits_remaining, 2);
-        }
         assert_eq!(outcome_ctx.ctx.harness_state.blocked_tool_calls, 0);
     }
     handle_single_tool_call(&mut outcome_ctx, "after_filtered_verification", tool_names::APPLY_PATCH, patch)
@@ -2445,54 +2440,110 @@ async fn control_plane_wait_survives_exhausted_tool_budget() {
 }
 
 #[tokio::test]
-async fn pending_verification_blocks_patch_before_filesystem_mutation() {
-    let mut backing = TestContextBacking::new(4).await;
+async fn pending_verification_allows_more_than_six_edits_and_repairs() {
+    let mut backing = TestContextBacking::new(30).await;
     backing.select_build_primary_agent();
-    let patch_args = json!({
-        "input": "*** Begin Patch\n*** Update File: sample.rs\n@@\n-hello\n+goodbye\n*** End Patch\n"
-    });
-    cache_tool_permission(&mut backing, tool_names::APPLY_PATCH, &patch_args, PermissionGrant::Permanent).await;
-
-    let mut repeated_tool_attempts = LoopTracker::new();
-    repeated_tool_attempts.verification_pending = true;
-    let mut turn_modified_files = BTreeSet::new();
-    let sample_file = backing.sample_file.clone();
+    let workspace = backing.sample_file.parent().unwrap().to_path_buf();
+    let code_path = workspace.join("repair.rs");
+    std::fs::write(&code_path, "0\n").unwrap();
+    backing.tool_registry.allow_all_tools().await.unwrap();
+    let mut tracker = LoopTracker::new();
+    tracker.mark_verification_pending();
+    let mut modified = BTreeSet::new();
     let mut ctx = backing.turn_processing_context();
-    let mut outcome_ctx = ToolOutcomeContext {
-        ctx: &mut ctx,
-        repeated_tool_attempts: &mut repeated_tool_attempts,
-        turn_modified_files: &mut turn_modified_files,
-    };
+    for index in 0..9 {
+        if index == 3 {
+            let mut outcome_ctx = ToolOutcomeContext {
+                ctx: &mut ctx,
+                repeated_tool_attempts: &mut tracker,
+                turn_modified_files: &mut modified,
+            };
+            handle_single_tool_call(
+                &mut outcome_ctx,
+                "failed-check",
+                tool_names::EXEC_COMMAND,
+                json!({"cmd":"rustc --invalid-flag-xyz"}),
+            )
+            .await
+            .unwrap();
+            let result = ctx
+                .working_history
+                .iter()
+                .rev()
+                .find(|message| message.tool_call_id.as_deref() == Some("failed-check"))
+                .unwrap();
+            let output: serde_json::Value = serde_json::from_str(&result.content.as_text()).unwrap();
+            assert_eq!(output["exit_code"], 1, "repair follows a real terminal failure");
+        }
+        let args = json!({"input": format!("*** Begin Patch\n*** Update File: repair.rs\n@@\n-{index}\n+{}\n*** End Patch\n", index + 1)});
+        let mut outcome_ctx = ToolOutcomeContext {
+            ctx: &mut ctx,
+            repeated_tool_attempts: &mut tracker,
+            turn_modified_files: &mut modified,
+        };
+        handle_single_tool_call(&mut outcome_ctx, &format!("edit-{index}"), tool_names::APPLY_PATCH, args)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&code_path).unwrap(), format!("{}\n", index + 1));
+    }
+    assert!(ctx.tool_registry.completion_verification_pending());
+    assert_eq!(ctx.harness_state.blocked_tool_calls, 0);
+}
 
-    let outcome = handle_single_tool_call(
-        &mut outcome_ctx,
-        "patch_while_verification_pending",
-        tool_names::APPLY_PATCH,
-        patch_args,
-    )
-    .await
-    .expect("pending verification should return a structured tool response");
-
-    assert!(outcome.is_none());
-    assert_eq!(std::fs::read_to_string(sample_file).expect("read sample file"), "hello\n");
-    assert_eq!(outcome_ctx.ctx.harness_state.consecutive_blocked_tool_calls, 1);
-    assert_eq!(outcome_ctx.ctx.harness_state.blocked_tool_calls, 1);
-    assert!(outcome_ctx.ctx.working_history.iter().any(|message| {
-        message.role == uni::MessageRole::Tool
-            && message.content.as_text().contains("anti_blind_editing_verification_required")
-    }));
-    let response = outcome_ctx
-        .ctx
-        .working_history
-        .iter()
-        .rev()
-        .find(|message| message.role == uni::MessageRole::Tool)
-        .expect("blocked tool response");
-    let content = response.content.as_text();
-    assert!(content.contains("earlier turn"));
-    assert!(content.contains("\"pending_mutations\":null"));
-    assert!(content.contains("\"pending_mutation_count_known\":false"));
-    assert!(!content.contains("0 mutating command"), "the batch arm must not display a zero count");
+#[tokio::test]
+async fn cached_heading_inspection_adopted_as_required_check_executes_fresh() {
+    for (required_contents, required_exit) in [("No heading here\n", 1), ("# Actual heading\n", 0)] {
+        let mut backing = TestContextBacking::new(20).await;
+        backing.select_build_primary_agent();
+        backing.tool_registry.allow_all_tools().await.unwrap();
+        let workspace = backing.sample_file.parent().unwrap().to_path_buf();
+        let readme = workspace.join("README.md");
+        std::fs::write(&readme, "# Cached heading\n").unwrap();
+        let command = "grep -n '^#' README.md";
+        let args = json!({"cmd":command});
+        let mut tracker = LoopTracker::new();
+        let mut modified = BTreeSet::new();
+        let mut ctx = backing.turn_processing_context();
+        for (id, required, contents, exit_code) in [
+            ("prime", false, "# Cached heading\n", 0),
+            ("required", true, required_contents, required_exit),
+        ] {
+            std::fs::write(&readme, contents).unwrap();
+            if required {
+                let adopted = ctx
+                    .tool_registry
+                    .execute_tool(
+                        tool_names::TASK_TRACKER,
+                        json!({"action":"create", "items":[{"description":"Check headings", "verify":[command]}]}),
+                    )
+                    .await
+                    .unwrap();
+                assert!(adopted.get("error").is_none(), "{adopted}");
+                ctx.tool_registry.restore_completion_verification_debt();
+            }
+            let mut outcome_ctx = ToolOutcomeContext {
+                ctx: &mut ctx,
+                repeated_tool_attempts: &mut tracker,
+                turn_modified_files: &mut modified,
+            };
+            handle_single_tool_call(&mut outcome_ctx, id, tool_names::EXEC_COMMAND, args.clone())
+                .await
+                .unwrap();
+            let response = ctx
+                .working_history
+                .iter()
+                .rev()
+                .find(|m| m.tool_call_id.as_deref() == Some(id))
+                .unwrap();
+            let output: serde_json::Value = serde_json::from_str(&response.content.as_text()).unwrap();
+            assert_eq!(output["exit_code"], exit_code, "{output}");
+            assert!(output.get("reused_recent_result").is_none(), "required checks must execute: {output}");
+            if required {
+                assert_eq!(ctx.tool_registry.completion_verifier_passed(command), exit_code == 0);
+                assert_eq!(ctx.tool_registry.completion_verification_pending(), exit_code != 0);
+            }
+        }
+    }
 }
 
 #[tokio::test]

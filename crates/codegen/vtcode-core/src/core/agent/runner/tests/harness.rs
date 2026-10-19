@@ -502,7 +502,9 @@ async fn exec_full_auto_retries_after_verification_failure() {
         .await
         .expect("task result");
 
-    assert!(matches!(result.outcome, TaskOutcome::TurnLimitReached { .. }));
+    assert!(!result.outcome.is_success());
+    assert!(result.outcome.description().contains("Unverified"));
+    assert!(result.outcome.description().contains("missing-verification-target"));
     assert!(result.turns_executed > 1);
     let events = harness_events(&result);
     assert!(events.contains(&HarnessEventKind::VerificationStarted));
@@ -1799,4 +1801,44 @@ async fn headless_completion_reuses_a_fresh_model_run_check() {
     assert_eq!(result.outcome, TaskOutcome::Success);
     assert!(!harness_events(&result).contains(&HarnessEventKind::VerificationStarted));
     assert!(workspace_root(&temp).join("main.rs").exists());
+}
+
+#[tokio::test]
+async fn headless_completion_verification_allows_one_corrective_pass_then_hands_off() {
+    let temp = TempDir::new().unwrap();
+    let mut cfg = VTCodeConfig::default();
+    cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
+    cfg.agent.harness.continuation_policy = vtcode_config::core::agent::ContinuationPolicy::Off;
+    cfg.agent.harness.verification.default_verifier_override = Some("rustc --invalid-flag-xyz".into());
+    cfg.automation.full_auto.max_turns = 8;
+    let mut runner = Box::pin(make_runner(&temp, cfg, "bounded-verification")).await;
+    runner
+        .enable_full_auto(&[tools::APPLY_PATCH.into(), tools::EXEC_COMMAND.into()])
+        .await;
+    runner.tool_registry.allow_all_tools().await.unwrap();
+    let provider = RecordingQueuedProvider::new(vec![
+        tool_call_response(
+            tools::APPLY_PATCH,
+            json!({"input":"*** Begin Patch\n*** Add File: main.rs\n+fn main() {}\n*** End Patch"}),
+        ),
+        text_response("Applied the change."),
+        text_response("The correction is complete."),
+        text_response("This third completion must never run."),
+    ]);
+    runner.provider_client = Box::new(provider.clone());
+    let result = Box::pin(runner.execute_task(&task("Bound completion verification", "exec-task"), &[]))
+        .await
+        .unwrap();
+    assert!(!result.outcome.is_success(), "{:?}", result.outcome);
+    assert_eq!(provider.recorded_requests().len(), 3, "one correction after the first completion attempt");
+    assert!(result.outcome.description().contains("rustc --invalid-flag-xyz"));
+    assert!(result.outcome.description().contains("exit code 1"));
+    assert!(
+        result
+            .outcome
+            .description()
+            .to_ascii_lowercase()
+            .contains("unrecognized option")
+    );
+    assert!(workspace_root(&temp).join("main.rs").exists(), "failed verification retains edits");
 }

@@ -404,31 +404,13 @@ pub(crate) async fn handle_turn_balancer(
     use vtcode_core::llm::provider as uni;
 
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        ANTI_BLIND_EDITING_DIRECTIVE, ANTI_BLIND_EDITING_WARNING, EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD,
-        LISTING_LOOP_TRIP_COUNT, NAVIGATION_LOOP_THRESHOLD, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD,
-        PLANNING_LISTING_LOOP_TRIP_COUNT, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
+        EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD, LISTING_LOOP_TRIP_COUNT, NAVIGATION_LOOP_THRESHOLD,
+        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_LISTING_LOOP_TRIP_COUNT,
+        PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
     };
 
     // NL2Repo-Bench checks run on every step (no backoff) since they
     // are safety guardrails, not performance optimizations.
-
-    // NL2Repo-Bench: Edit-Test Validation Loop (Anti-Blind-Editing)
-    if repeated_tool_attempts.verification_is_pending() {
-        repeated_tool_attempts.mark_verification_pending();
-        if !repeated_tool_attempts.verification_warning_emitted {
-            ctx.renderer
-                .line(MessageStyle::Warning, ANTI_BLIND_EDITING_WARNING)
-                .unwrap_or(());
-            let directive = if ctx.tool_registry.completion_verification_pending() {
-                ctx.tool_registry.unverified_completion_reason()
-            } else {
-                ANTI_BLIND_EDITING_DIRECTIVE.to_string()
-            };
-            ctx.working_history.push(uni::Message::system(directive));
-            repeated_tool_attempts.verification_warning_emitted = true;
-        }
-        return TurnHandlerOutcome::Continue;
-    }
 
     if !ctx.is_planning_active() && repeated_tool_attempts.tracker_observations_stalled() {
         if repeated_tool_attempts.tracker_observation_warning_emitted {
@@ -668,9 +650,8 @@ mod tests {
     use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
     use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        ANTI_BLIND_EDITING_DIRECTIVE, BLIND_EDITING_THRESHOLD, EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD, LoopTracker,
-        NAVIGATION_LOOP_THRESHOLD, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
-        update_repetition_tracker,
+        EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD, LoopTracker, NAVIGATION_LOOP_THRESHOLD,
+        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD, update_repetition_tracker,
     };
     use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
 
@@ -808,24 +789,6 @@ mod tests {
                 || message.content.as_text().contains("<proposed_plan>")
         }));
         assert_recovery_expires_at_fresh_turn(ctx.working_history);
-    }
-
-    #[tokio::test]
-    async fn anti_blind_warning_keeps_verification_pending_until_a_check_runs() {
-        let mut backing = TestTurnProcessingBacking::new(8).await;
-        let mut ctx = backing.turn_processing_context();
-        let mut tracker = LoopTracker::new();
-        tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
-
-        let outcome = super::handle_turn_balancer(&mut ctx, 1, &mut tracker, 8, 3).await;
-
-        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
-        assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
-        assert!(
-            ctx.working_history
-                .iter()
-                .any(|message| { message.content.as_text().contains(ANTI_BLIND_EDITING_DIRECTIVE) })
-        );
     }
 
     #[tokio::test]
@@ -1296,10 +1259,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn navigation_loop_schedules_recovery_and_progress_only_recovery_text_completes() {
+    async fn pending_verification_preserves_navigation_loop_recovery() {
         let mut backing = TestTurnProcessingBacking::new(8).await;
         let mut ctx = backing.turn_processing_context();
         let mut tracker = LoopTracker::new();
+        tracker.mark_verification_pending();
         tracker.consecutive_navigations = NAVIGATION_LOOP_THRESHOLD;
 
         let balancer_outcome = super::handle_turn_balancer(&mut ctx, 1, &mut tracker, 8, 3).await;
@@ -1583,7 +1547,6 @@ mod tests {
         }
         assert!(ctx.recovery_reason().unwrap().contains("low-signal"));
         assert!(!tracker.verification_is_pending());
-        assert_eq!(tracker.fix_edits_remaining, 0);
     }
 
     #[tokio::test]

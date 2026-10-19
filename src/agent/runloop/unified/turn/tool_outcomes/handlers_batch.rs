@@ -3,8 +3,8 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use vtcode_core::core::agent::harness_kernel::{PreparedToolBatch, PreparedToolBatchKind};
 
 use super::{
-    PreparedToolCall, ToolOutcomeContext, ValidationTransition, block_mutation_until_verification,
-    finalize_validation_result, flush_budget_synthesis_directives, validate_tool_call,
+    PreparedToolCall, ToolOutcomeContext, ValidationTransition, finalize_validation_result,
+    flush_budget_synthesis_directives, validate_tool_call,
 };
 use crate::agent::runloop::unified::progress::ProgressReporter;
 use crate::agent::runloop::unified::tool_pipeline::{
@@ -448,50 +448,11 @@ pub(crate) async fn handle_tool_call_batch_prepared<'a, 'b>(
             continue;
         };
 
-        match block_mutation_until_verification(
-            t_ctx.ctx,
-            t_ctx.repeated_tool_attempts,
-            tool_call.call_id(),
-            tool_call.tool_name(),
-            args,
-        )? {
-            super::MutationVerificationResult::Allowed => {}
-            super::MutationVerificationResult::Blocked => continue,
-            super::MutationVerificationResult::Outcome(outcome) => {
-                if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
-                    super::drain_blocked_tool_recovery_responses(t_ctx.ctx, &tool_calls[index + 1..]);
-                }
-                super::flush_blocked_tool_recovery(t_ctx.ctx);
-                return Ok(Some(outcome));
-            }
-        }
-
         let validation_result = validate_tool_call(t_ctx.ctx, tool_call.call_id(), tool_call.tool_name(), args).await?;
         match finalize_validation_result(t_ctx.ctx, tool_call.call_id(), tool_call.tool_name(), args, validation_result)
         {
             ValidationTransition::Proceed(prepared) => {
-                // A PreToolUse hook may have rewritten the arguments inside
-                // validate_tool_call; re-evaluate the mutation guard against
-                // the arguments that will actually execute.
-                match block_mutation_until_verification(
-                    t_ctx.ctx,
-                    t_ctx.repeated_tool_attempts,
-                    tool_call.call_id(),
-                    &prepared.canonical_name,
-                    &prepared.effective_args,
-                )? {
-                    super::MutationVerificationResult::Allowed => {
-                        validated_calls.push(ValidatedToolCall { tool_call, prepared });
-                    }
-                    super::MutationVerificationResult::Blocked => continue,
-                    super::MutationVerificationResult::Outcome(outcome) => {
-                        if t_ctx.ctx.harness_state.blocked_tool_recovery_pending() {
-                            super::drain_blocked_tool_recovery_responses(t_ctx.ctx, &tool_calls[index + 1..]);
-                        }
-                        super::flush_blocked_tool_recovery(t_ctx.ctx);
-                        return Ok(Some(outcome));
-                    }
-                }
+                validated_calls.push(ValidatedToolCall { tool_call, prepared });
             }
             ValidationTransition::Return(Some(outcome)) => {
                 if matches!(&outcome, TurnHandlerOutcome::Break(TurnLoopResult::Cancelled | TurnLoopResult::Exit))
@@ -650,15 +611,7 @@ async fn execute_and_handle_tool_call_inner<'a>(
     args_val: serde_json::Value,
     batch_tracker: Option<&mut crate::agent::runloop::unified::tool_pipeline::ToolBatchOutcome>,
 ) -> Result<Option<TurnHandlerOutcome>> {
-    match block_mutation_until_verification(ctx, repeated_tool_attempts, tool_call_id.as_str(), tool_name, &args_val)? {
-        super::MutationVerificationResult::Allowed => {}
-        super::MutationVerificationResult::Blocked => return Ok(None),
-        super::MutationVerificationResult::Outcome(outcome) => return Ok(Some(outcome)),
-    }
-
-    // Reset only after the final mutation guard. Permission or hook rewrites
-    // can change a call's intent after initial preflight; a rewritten mutation
-    // blocked above must not be mistaken for productive tool progress.
+    // Validated tool progress resets the assistant text-response streak.
     ctx.harness_state.reset_assistant_text_response_streak();
 
     // Show pre-execution indicator for file modification operations

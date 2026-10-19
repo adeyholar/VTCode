@@ -1,8 +1,9 @@
 # Fresh verification before successful completion
 
 Interactive and headless runs require fresh verification after successful code
-mutations, including changes below the six-edit checkpoint. The checkpoint still
-controls mutation pacing and retains its bounded repair allowance after failure.
+mutations. Verification gates successful completion only: edits, repairs, and
+inspections remain available under ordinary permissions. Edit counts and inspection
+thresholds never schedule checks or suppress ordinary repetition guards.
 Prose-only and dedicated planning writes, rejected edits, and known no-op diffs
 retain their exemptions.
 Exemptions check requested paths and the effective targets reported by file
@@ -21,7 +22,7 @@ prevents expansion into options. Character classes, bare globs, variable-based p
 substitutions, dynamic executable names, mutating options, and output-file redirects retain
 debt. This accounting exemption grants no planning or execution permission.
 Concrete changed-file evidence always creates shell mutation debt. This
-proof affects freshness and mutation pacing only; admission and permissions
+proof affects freshness only; admission and permissions
 remain unchanged.
 
 Verification evidence belongs to runtime state in the existing tool registry,
@@ -45,8 +46,9 @@ Requirements and observed checks match using the execution kernel's pipeline
 normalization, while dispatch retains the original required command for policy
 checks. Eligible declared custom checks count as verification rather than
 invalidating their own verdict as mutations; command admission remains unchanged.
-The interactive checkpoint shares this classification, including yielded custom
-checks and the bounded repair allowance after failure.
+Interactive and headless completion share this classification, including yielded
+custom checks. Mutating scripts belong in implementation steps; `verify:` entries
+must be executable assertions, separate from repairs.
 Recovery directives and blocked handoffs select the next missing tracker command
 before a configured or detected project verifier. Partial success names the next
 required check, so a passing generic build does not cause repeated recovery when
@@ -123,15 +125,17 @@ preserved. This projection never rewrites durable history.
 Verification, checker-session, and recovery suites live under
 `tool_outcomes/helpers/tests/`, sharing private parent fixtures.
 
-Interactive tool-bearing responses share bounded verification recovery: repeated
-tracker observations, six inspections, or six batches without advancing the next
-required check schedule the missing verifier through the existing tool pipeline.
-Passing unrelated checks does not reset this progress window. Real edits, changed tracker
-state, and advancement to another required command reset the progress window; a harness
-attempt leaves a bounded diagnostic/repair window after failure. Existing cancellation,
-permissions, failure limits, and execution budgets still apply. Without pending
-verification, repeated unchanged tracker polls get one tool-enabled correction;
-continued polling ends blocked rather than automatically queuing the same work.
+At attempted completion, the harness runs only missing checks and resumes owned
+running checks. A failed or unavailable result ends that completion attempt.
+The interactive session may queue one corrective pass per genuine user request;
+the headless runner likewise permits at most one corrective pass. A second
+unsuccessful attempt returns an unverified handoff with the command, status,
+bounded evidence, and blocker. Internal continuations, partial passes, tracker
+progress, and completed internal turns do not restore this allowance. Existing
+recovery settings may disable or tighten it; larger legacy values remain parseable
+but cannot expand it. Cancellation, permissions, failure limits, and execution
+budgets remain authoritative. Repeated unchanged tracker polls get one tool-enabled
+correction; continued polling ends blocked under the ordinary repetition guard.
 
 Recovery attempts count only after the follow-up queue accepts them. A full
 queue publishes no directive and preserves prior attempts and failure evidence;
@@ -223,3 +227,10 @@ separates model follow-up from pending input. These are design comparisons, not
 claims of identical retry guarantees or copied implementations. The final-response
 termination model is also described in OpenAI's
 [agent-loop explanation](https://openai.com/index/unrolling-the-codex-agent-loop/).
+
+Completion-only timing was compared with
+[`codex-rs/core/gpt_5_2_prompt.md`](https://github.com/openai/codex/blob/9dc3a1ce7ea53bb818b8dd69416d6dde70d0b680/codex-rs/core/gpt_5_2_prompt.md)
+at commit `9dc3a1ce7ea53bb818b8dd69416d6dde70d0b680` (Apache-2.0, copyright
+2025 OpenAI) and [OpenAI's harness engineering article](https://openai.com/index/harness-engineering/).
+These support validating completed work and enforcing outcome invariants. No
+upstream code was copied and no runtime speedup is claimed.

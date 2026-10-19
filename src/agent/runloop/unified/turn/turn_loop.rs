@@ -1400,13 +1400,12 @@ pub(crate) async fn run_turn_loop(
                     && is_stale_approved_plan_pause_response(text)
         );
         if stale_approved_plan_pause
-            && repeated_tool_attempts.verification_is_pending()
+            && turn_processing_ctx.tool_registry.completion_verification_pending()
             && !turn_processing_ctx.in_tool_free_recovery_synthesis()
         {
             // The stale text was discarded (never committed), so no content
             // is available for completion-claim detection; pass empty text.
             match turn_processing_ctx.handle_pending_verification_text_response(&mut repeated_tool_attempts, "")? {
-                PendingVerificationTextOutcome::Continue => continue,
                 PendingVerificationTextOutcome::Block { reason } => {
                     result = TurnLoopResult::Blocked { reason: Some(reason) };
                     break;

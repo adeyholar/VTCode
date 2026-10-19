@@ -46,7 +46,7 @@ fn tracker_observations_cannot_reset_navigation_or_verification_progress() {
     }
     assert!(tracker.tracker_observations_stalled());
     assert_eq!(tracker.consecutive_navigations, 2);
-    assert_eq!(tracker.verification_snapshot(), (true, 1));
+    assert_eq!(tracker.verification_snapshot(), (true, 0));
     let progress = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
         output: json!({"status":"updated"}),
         stdout: None,
@@ -60,7 +60,7 @@ fn tracker_observations_cannot_reset_navigation_or_verification_progress() {
         &json!({"action":"update","index":3,"status":"completed"}),
     );
     assert!(!tracker.tracker_observations_stalled());
-    assert_eq!(tracker.verification_snapshot(), (true, 1));
+    assert_eq!(tracker.verification_snapshot(), (true, 0));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn rejected_verifier_does_not_grant_repair_edits() {
             &json!({"cmd":"cargo check --locked"})
         ));
         assert!(tracker.verification_is_pending());
-        assert_eq!(tracker.fix_edits_remaining, 0);
+
         assert!(!tracker.take_verification_result_lost_notice());
         assert!(!tracker.take_verifier_failed_notice());
     }
@@ -105,7 +105,6 @@ fn running_verifier_requires_its_own_terminal_session_result() {
         update_repetition_tracker(&mut tracker, &running, tools::EXEC_COMMAND, &json!({"cmd": "cargo check --locked"}));
         assert!(tracker.verification_is_pending());
         assert_eq!(tracker.pending_verifier_session_id.as_deref(), Some("run-verifier"));
-        assert_eq!(tracker.fix_edits_remaining, 0);
 
         assert!(!tracker.take_verifier_failed_notice(), "running is not failed");
 
@@ -133,14 +132,6 @@ fn running_verifier_requires_its_own_terminal_session_result() {
         assert!(tracker.pending_verifier_session_id.is_none());
         assert_eq!(tracker.take_verifier_failed_notice(), exit_code != 0);
         assert!(!tracker.take_verifier_failed_notice(), "terminal feedback is consumed once");
-        assert_eq!(
-            tracker.fix_edits_remaining,
-            if exit_code == 0 {
-                0
-            } else {
-                FAILED_VERIFICATION_FIX_ALLOWANCE
-            }
-        );
     }
 }
 
@@ -150,14 +141,9 @@ fn session_cleanup_remains_available_while_verification_is_pending() {
     tracker.mark_verification_pending();
     for action in ["terminate", "close"] {
         let args = json!({"session_id": "run-cleanup", "action": action});
-        assert!(!mutation_blocked_until_verification(&tracker, tools::WRITE_STDIN, &args));
+
         assert!(vtcode_core::tools::tool_intent::is_turn_budget_exempt_call(tools::WRITE_STDIN, &args));
     }
-    assert!(mutation_blocked_until_verification(
-        &tracker,
-        tools::WRITE_STDIN,
-        &json!({"session_id":"run-cleanup", "chars":"touch file\n"})
-    ));
 }
 
 use super::*;
@@ -439,11 +425,6 @@ fn awk_range_inspections_do_not_trigger_anti_blind_pressure() {
 
     assert_eq!(tracker.consecutive_mutations, 0);
     assert!(!tracker.verification_is_pending());
-    assert!(!mutation_blocked_until_verification(
-        &tracker,
-        tools::EXEC_COMMAND,
-        &json!({"cmd": "awk 'NR>=297 && NR<=312' README.md"}),
-    ));
 }
 
 #[test]
@@ -469,12 +450,7 @@ fn awk_write_primitives_still_trigger_anti_blind_pressure() {
     }
 
     assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
-    assert!(tracker.verification_is_pending());
-    assert!(mutation_blocked_until_verification(
-        &tracker,
-        tools::EXEC_COMMAND,
-        &json!({"cmd": "awk '{print > \"out.txt\"}' README.md"}),
-    ));
+    assert!(!tracker.verification_is_pending(), "mutation debt belongs to the registry");
 }
 
 #[cfg(unix)]
@@ -498,6 +474,7 @@ fn logged_compound_inspection_with_unix_stderr_suppression_does_not_trigger_pres
 #[test]
 fn only_a_completed_verification_clears_pending_mutation_pressure() {
     let mut tracker = LoopTracker::new();
+    tracker.mark_verification_pending();
     let edit = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
         output: serde_json::json!({"exit_code": 0}),
         stdout: None,
@@ -547,8 +524,8 @@ fn carried_verification_checkpoint_clears_after_successful_check() {
 
 #[test]
 fn verification_snapshot_round_trips_through_session_state() {
-    let tracker = LoopTracker::with_verification_snapshot((true, FAILED_VERIFICATION_FIX_ALLOWANCE));
-    assert_eq!(tracker.verification_snapshot(), (true, FAILED_VERIFICATION_FIX_ALLOWANCE));
+    let tracker = LoopTracker::with_verification_snapshot((true, 0));
+    assert_eq!(tracker.verification_snapshot(), (true, 0));
     assert_eq!(LoopTracker::new().verification_snapshot(), (false, 0));
 }
 
@@ -569,7 +546,6 @@ fn reset_after_balancer_recovery_preserves_anti_blind_state() {
     tracker.record("code_search:{\"query\":\"Widget\"}".to_string());
     tracker.consecutive_mutations = 2;
     tracker.verification_pending = true;
-    tracker.fix_edits_remaining = FAILED_VERIFICATION_FIX_ALLOWANCE;
     tracker.verification_warning_emitted = true;
     tracker.verification_block_notice_emitted = true;
     tracker.verification_result_lost_notice_pending = true;
@@ -587,7 +563,7 @@ fn reset_after_balancer_recovery_preserves_anti_blind_state() {
     assert_eq!(tracker.consecutive_mutations, 2);
     assert!(tracker.verification_pending);
     assert!(tracker.verification_is_pending());
-    assert_eq!(tracker.fix_edits_remaining, FAILED_VERIFICATION_FIX_ALLOWANCE);
+
     assert!(tracker.verification_warning_emitted);
     assert!(tracker.verification_block_notice_emitted);
     assert!(tracker.verification_result_lost_notice_pending);
@@ -599,7 +575,7 @@ fn reset_after_balancer_recovery_preserves_anti_blind_state() {
 }
 
 #[test]
-fn balancer_recovery_cannot_postpone_the_mutation_threshold() {
+fn balancer_recovery_preserves_mutation_counts_without_arming_verification() {
     let mut tracker = LoopTracker::new();
     for _ in 0..(BLIND_EDITING_THRESHOLD - 1) {
         tracker.record_successful_mutation();
@@ -610,7 +586,7 @@ fn balancer_recovery_cannot_postpone_the_mutation_threshold() {
     tracker.record_successful_mutation();
 
     assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
-    assert!(tracker.verification_is_pending());
+    assert!(!tracker.verification_is_pending(), "the registry owns completion debt");
 }
 
 #[test]

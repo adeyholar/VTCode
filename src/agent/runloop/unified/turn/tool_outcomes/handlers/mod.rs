@@ -6,11 +6,10 @@ use vtcode_core::exec_policy::AskForApproval;
 use vtcode_core::primary_agent::primary_agent_allows_tool;
 use vtcode_core::tools::registry::ToolExecutionError;
 use vtcode_core::tools::registry::labels::tool_action_label;
-use vtcode_core::tools::tool_intent::VERIFIER_SHELL_FORM_NOTE;
 use vtcode_core::utils::ansi::MessageStyle;
 
 use super::error_handling::tool_denial_diagnostic;
-use super::helpers::{FAILED_VERIFICATION_FIX_ALLOWANCE, check_is_argument_error, mutation_blocked_until_verification};
+use super::helpers::check_is_argument_error;
 use crate::agent::runloop::unified::async_mcp_manager::approval_policy_from_human_in_the_loop;
 use crate::agent::runloop::unified::run_loop_context::full_auto_loop_grants_enabled;
 use crate::agent::runloop::unified::run_loop_context::{
@@ -574,12 +573,6 @@ pub(super) enum ValidationTransition {
     Return(Option<TurnHandlerOutcome>),
 }
 
-pub(crate) enum MutationVerificationResult {
-    Allowed,
-    Blocked,
-    Outcome(TurnHandlerOutcome),
-}
-
 pub(super) fn finalize_validation_result(
     ctx: &mut TurnProcessingContext<'_>,
     tool_call_id: &str,
@@ -770,13 +763,6 @@ async fn handle_tool_call_inner<'a, 'b, 'tool>(
     use crate::agent::runloop::unified::run_loop_context::TurnPhase;
     t_ctx.ctx.set_phase(TurnPhase::ExecutingTools);
 
-    match block_mutation_until_verification(t_ctx.ctx, t_ctx.repeated_tool_attempts, tool_call_id, tool_name, args_val)?
-    {
-        MutationVerificationResult::Allowed => {}
-        MutationVerificationResult::Blocked => return Ok(None),
-        MutationVerificationResult::Outcome(outcome) => return Ok(Some(outcome)),
-    }
-
     // 1. Validate (Circuit Breaker, Rate Limit, Loop Detection, Safety, Permission)
     let validation_result = validate_tool_call(t_ctx.ctx, tool_call_id, tool_name, args_val).await?;
     let prepared = match finalize_validation_result(t_ctx.ctx, tool_call_id, tool_name, args_val, validation_result) {
@@ -785,21 +771,6 @@ async fn handle_tool_call_inner<'a, 'b, 'tool>(
             return Ok(outcome);
         }
     };
-
-    // A PreToolUse hook may have rewritten the arguments inside validate_tool_call;
-    // re-evaluate the mutation guard against the arguments that will actually
-    // execute, so a rewrite cannot turn a read-only call into an unguarded mutation.
-    match block_mutation_until_verification(
-        t_ctx.ctx,
-        t_ctx.repeated_tool_attempts,
-        tool_call_id,
-        &prepared.canonical_name,
-        &prepared.effective_args,
-    )? {
-        MutationVerificationResult::Allowed => {}
-        MutationVerificationResult::Blocked => return Ok(None),
-        MutationVerificationResult::Outcome(outcome) => return Ok(Some(outcome)),
-    }
 
     if let Some(signature) = shell_run_signature(&prepared.canonical_name, &prepared.effective_args) {
         t_ctx.ctx.harness_state.record_admitted_shell_command(signature);
@@ -822,131 +793,6 @@ async fn handle_tool_call_inner<'a, 'b, 'tool>(
     }
 
     Ok(None)
-}
-
-/// Model-facing rejection for a mutation attempted while the
-/// anti-blind-editing gate is pending. Shared by the guard-response and the
-/// direct-rejection paths so both carry the same gate description.
-fn verification_required_payload(
-    tool_name: &str,
-    pending_mutations: Option<usize>,
-    fix_edits_remaining: u8,
-    message: &str,
-) -> serde_json::Value {
-    serde_json::json!({
-        "success": false,
-        "blocked": true,
-        "tool_name": tool_name,
-        "failure_kind": "anti_blind_editing_verification_required",
-        "verification_required": true,
-        "pending_mutations": pending_mutations,
-        "pending_mutation_count_known": pending_mutations.is_some(),
-        "fix_edits_remaining": fix_edits_remaining,
-        "error": message,
-        "next_action": format!(
-            "Workspace mutations are blocked until a verifier exits 0. Run your project's build/test/lint command \
-             (e.g. `cargo check --locked`, `go test ./...`, `npm test`, or `pytest -q`) with `exec_command`, standalone or as a \
-             pure `&&` chain of verifiers. {VERIFIER_SHELL_FORM_NOTE} A failed check grants \
-             {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation before the next verification is required."
-        ),
-        "retryable": true,
-    })
-}
-
-pub(crate) fn block_mutation_until_verification(
-    ctx: &mut TurnProcessingContext<'_>,
-    repeated_tool_attempts: &mut super::helpers::LoopTracker,
-    tool_call_id: &str,
-    tool_name: &str,
-    args_val: &serde_json::Value,
-) -> Result<MutationVerificationResult> {
-    if ctx.tool_registry.is_completion_verifier_call(tool_name, args_val)
-        || !mutation_blocked_until_verification(repeated_tool_attempts, tool_name, args_val)
-    {
-        return Ok(MutationVerificationResult::Allowed);
-    }
-
-    let pending_mutations =
-        (repeated_tool_attempts.consecutive_mutations > 0).then_some(repeated_tool_attempts.consecutive_mutations);
-    let fix_hint = if repeated_tool_attempts.fix_edits_remaining > 0 {
-        format!(
-            " {} fix-up edit(s) remain from the last failed verifier; use them to repair, then re-run a standalone verifier.",
-            repeated_tool_attempts.fix_edits_remaining
-        )
-    } else {
-        String::new()
-    };
-    let message = pending_mutations.map_or_else(
-        || {
-            format!(
-                "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain. {VERIFIER_SHELL_FORM_NOTE}{fix_hint}"
-            )
-        },
-        |count| {
-            // `count` is consecutive mutating *commands* (fail-closed
-            // classification counts mutation-capable compounds too), not the
-            // number of files touched — say so instead of claiming "file
-            // changes" (session-vtcode-20260912T083718Z: counted 4 with one
-            // file edited). The clearing recipe belongs in `error` itself:
-            // filtering-piped or `;`-joined verifiers never clear the gate
-            // (pure `head`/`tail` pipes run standalone), and the model
-            // reading the rejection must not have to guess. Examples
-            // span ecosystems because `is_verification_invocation` admits
-            // cargo/go/npm/bun/deno/make/ruff/tsc/eslint/pytest/gradle/scripts/check.sh,
-            // not just cargo. Docs-only prose edits stay allowed while pending.
-            format!(
-                "Mutation blocked until verification: {count} mutating command(s) since the last successful verification are awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, or `pytest` — standalone or as a pure `&&` chain. {VERIFIER_SHELL_FORM_NOTE} Docs-only edits stay allowed.{fix_hint}"
-            )
-        },
-    );
-    if !repeated_tool_attempts.verification_block_notice_emitted {
-        ctx.renderer.line(MessageStyle::Warning, &message)?;
-        // Plan-mode QoL: the verification recipe above misleads when planning
-        // is active — plan mode is read-only by design, so a verifier does not
-        // unblock edits. Keep the model-facing `error`/`next_action` unchanged
-        // (prompt contract) and add user-facing guidance only. Never
-        // auto-switch modes; the user chooses on the next turn.
-        if ctx.is_planning_active() {
-            ctx.renderer.line(
-                MessageStyle::Info,
-                "Plan mode is read-only — to implement, approve the plan or run `/mode build` (`/mode auto` for unattended).",
-            )?;
-        }
-        repeated_tool_attempts.verification_block_notice_emitted = true;
-    }
-    let guard_response_expected = !ctx.is_recovery_active() || ctx.recovery_pass_used();
-    let guard_outcome = enforce_blocked_tool_call_guard(ctx, tool_call_id, tool_name, args_val);
-    if let Some(outcome) = guard_outcome {
-        if !guard_response_expected {
-            ctx.push_rejected_tool_response(
-                tool_call_id,
-                Some(tool_name),
-                Some(args_val),
-                verification_required_payload(
-                    tool_name,
-                    pending_mutations,
-                    repeated_tool_attempts.fix_edits_remaining,
-                    &message,
-                )
-                .to_string(),
-            );
-        }
-        return Ok(MutationVerificationResult::Outcome(outcome));
-    }
-
-    ctx.push_rejected_tool_response(
-        tool_call_id,
-        Some(tool_name),
-        Some(args_val),
-        verification_required_payload(
-            tool_name,
-            pending_mutations,
-            repeated_tool_attempts.fix_edits_remaining,
-            &message,
-        )
-        .to_string(),
-    );
-    Ok(MutationVerificationResult::Blocked)
 }
 
 /// Validates a tool call against all safety and permission checks.

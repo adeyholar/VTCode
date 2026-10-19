@@ -2150,17 +2150,14 @@ pub(super) async fn run_session_iteration(state: SessionLoopState<'_>) -> Result
                 };
                 // Progress-reset: any newly completed tracker step restores
                 // the cross-turn auto-continue episode budget plus the
-                // verification auto-recovery turn budget (failures preserved
-                // so a never-passing suite still escalates). Long-running
-                // work that keeps completing steps must not stall on stale
-                // verification misses for new work.
+                // tracker continuation budget. Verification recovery stays
+                // bounded to one corrective pass for the original request.
                 if tracker_kill_switch
                     && tracker_adoption_allowed
                     && let Some(completed) = tracker_continue::tracker_completed_count(&tool_registry).await
                     && session_stats.note_tracker_completed_count(completed)
                 {
                     session_stats.reset_tracker_continuation_budget();
-                    session_stats.reset_verification_auto_recovery_turns();
                 }
                 let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
                 // A rolled-back refused turn left no final text; the latest

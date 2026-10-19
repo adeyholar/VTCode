@@ -82,8 +82,8 @@ pub(crate) const VERIFICATION_AUTO_RECOVERY_PREFIX: &str = "Continue autonomousl
 pub(super) fn verification_auto_recovery_follow_up(verifier: Option<&str>) -> String {
     let verifier = verifier_reference(verifier);
     format!(
-        "{VERIFICATION_AUTO_RECOVERY_PREFIX} Verification is still pending; the request resumes once \
-        {verifier} runs with `exec_command`, standalone or as a pure `&&` chain, and exits 0. {VERIFIER_SHELL_FORM_NOTE} \
+        "{VERIFICATION_AUTO_RECOVERY_PREFIX} One corrective pass remains for this request. Repair the reported failure within scope; edits remain available. Then run only missing checks. Completion requires \
+        {verifier} to run with `exec_command`, standalone or as a pure `&&` chain, and exits 0. {VERIFIER_SHELL_FORM_NOTE} \
         A text-only reply leaves the gate pending, so this turn would end blocked again."
     )
 }
@@ -561,7 +561,9 @@ mod tests {
         let follow_up = verification_auto_recovery_follow_up(Some("go test ./..."));
 
         assert!(is_follow_up_prompt_like(&follow_up));
-        assert!(follow_up.contains("`go test ./...` runs with `exec_command`"));
+        assert!(follow_up.contains("`go test ./...` to run with `exec_command`"));
+        assert!(follow_up.contains("One corrective pass"));
+        assert!(follow_up.contains("edits remain available"));
         assert!(follow_up.contains(VERIFIER_SHELL_FORM_NOTE));
         assert!(!follow_up.contains("no pipes"), "piping into head/tail alone counts: {follow_up}");
         assert!(!follow_up.contains("Do not"), "states the consequence instead: {follow_up}");
@@ -571,7 +573,7 @@ mod tests {
     fn auto_recovery_follow_up_without_verifier_names_generic_description() {
         let follow_up = verification_auto_recovery_follow_up(None);
 
-        assert!(follow_up.contains(&format!("once {GENERIC_VERIFIER_DESCRIPTION} runs")));
+        assert!(follow_up.contains(&format!("requires {GENERIC_VERIFIER_DESCRIPTION} to run")));
         assert!(!follow_up.contains("once `cargo check --locked`"), "no single command is presumed: {follow_up}");
     }
 

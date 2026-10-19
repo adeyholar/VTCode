@@ -76,8 +76,12 @@ async fn tracker_polling_runs_missing_verifier_then_can_complete_without_more_li
         let outcome = drive_tracker_poll(&mut backing, &mut tracker, &mut modified, step).await;
         assert!(matches!(outcome, TurnHandlerOutcome::Continue));
         let ctx = backing.turn_processing_context();
-        assert_eq!(ctx.tool_registry.completion_verification_pending(), step == 1);
+        assert!(ctx.tool_registry.completion_verification_pending());
     }
+    assert!(matches!(
+        drive_pending_texts(&mut backing, &mut tracker, &mut modified, 1).await,
+        TurnHandlerOutcome::Continue
+    ));
     let ctx = backing.turn_processing_context();
     assert!(ctx.working_history.iter().any(|m| m.role == uni::MessageRole::Tool
         && m.tool_call_id.as_deref() == Some(super::helpers::HARNESS_AUTO_VERIFY_CALL_ID)));
@@ -122,7 +126,7 @@ async fn tracker_polling_stops_when_verification_is_disabled_or_correction_is_ig
                 ctx.tool_registry.restore_completion_verification_debt();
             }
         }
-        let limit = if pending { 2 } else { 4 };
+        let limit = 4;
         for step in 1..=limit {
             let outcome = drive_tracker_poll(&mut backing, &mut tracker, &mut modified, step).await;
             if step < limit {
@@ -189,8 +193,12 @@ async fn unrelated_passing_verifiers_cannot_starve_the_required_check() {
         };
         assert!(matches!(outcome, TurnHandlerOutcome::Continue));
         let ctx = backing.turn_processing_context();
-        assert_eq!(ctx.tool_registry.completion_verification_pending(), step < 6);
+        assert!(ctx.tool_registry.completion_verification_pending());
     }
+    assert!(matches!(
+        drive_pending_texts(&mut backing, &mut tracker, &mut modified, 1).await,
+        TurnHandlerOutcome::Continue
+    ));
     let ctx = backing.turn_processing_context();
     assert!(ctx.tool_registry.completion_verifier_passed("rustc --help"));
     assert_eq!(
@@ -295,141 +303,6 @@ async fn recovery_tool_calls_break_turn_as_blocked() {
     ));
 }
 
-#[tokio::test]
-async fn anti_blind_guard_does_not_allow_final_response_before_verification() {
-    let mut backing = TestTurnProcessingBacking::new(4).await;
-    let mut repeated_tool_attempts = LoopTracker::new();
-    repeated_tool_attempts.consecutive_mutations =
-        crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
-    let mut turn_modified_files = BTreeSet::new();
-
-    let outcome = {
-        let mut ctx = backing.turn_processing_context();
-        handle_turn_processing_result(HandleTurnProcessingResultParams {
-            ctx: &mut ctx,
-            processing_result: TurnProcessingResult::TextResponse {
-                text: "The README update is complete.".to_string(),
-                reasoning: Vec::new(),
-                reasoning_details: None,
-                proposed_plan: None,
-            },
-            response_streamed: false,
-            step_count: 1,
-            repeated_tool_attempts: &mut repeated_tool_attempts,
-            turn_modified_files: &mut turn_modified_files,
-            max_tool_loops: 4,
-            tool_repeat_limit: 4,
-        })
-        .await
-        .expect("anti-blind guard should handle the unverified response")
-    };
-
-    assert!(matches!(outcome, TurnHandlerOutcome::Continue));
-    assert!(backing.last_history_message_contains(
-        crate::agent::runloop::unified::turn::tool_outcomes::helpers::ANTI_BLIND_EDITING_DIRECTIVE
-    ));
-}
-
-#[tokio::test]
-async fn anti_blind_guard_blocks_repeated_unverified_text_responses() {
-    use crate::agent::runloop::unified::turn::tool_outcomes::helpers::MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS;
-
-    let mut backing = TestTurnProcessingBacking::new(4).await;
-    let mut repeated_tool_attempts = LoopTracker::new();
-    repeated_tool_attempts.consecutive_mutations =
-        crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
-    let mut turn_modified_files = BTreeSet::new();
-
-    // The per-turn text cap is 2, but each cap-hit now consumes one
-    // bounded autonomous recovery attempt (fresh streak + project-aware
-    // directive) instead of blocking immediately. With
-    // MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS grants, the turn blocks only
-    // after 2 * (1 + MAX) text responses.
-    let expected_texts = 2 * (1 + u32::from(MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS));
-    for step in 1..=expected_texts {
-        let outcome = {
-            let mut ctx = backing.turn_processing_context();
-            handle_turn_processing_result(HandleTurnProcessingResultParams {
-                ctx: &mut ctx,
-                processing_result: TurnProcessingResult::TextResponse {
-                    text: "The change is complete.".to_string(),
-                    reasoning: Vec::new(),
-                    reasoning_details: None,
-                    proposed_plan: None,
-                },
-                response_streamed: false,
-                step_count: step as usize,
-                repeated_tool_attempts: &mut repeated_tool_attempts,
-                turn_modified_files: &mut turn_modified_files,
-                max_tool_loops: 4,
-                tool_repeat_limit: 4,
-            })
-            .await
-            .expect("anti-blind response should be handled")
-        };
-        if step < expected_texts {
-            assert!(matches!(outcome, TurnHandlerOutcome::Continue), "step {step} should continue");
-        } else {
-            assert!(
-                matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(_) })),
-                "step {step} should block after auto-recovery exhaustion"
-            );
-        }
-    }
-
-    assert!(!backing.last_history_message_contains("The change is complete."));
-    assert_eq!(
-        repeated_tool_attempts.verification_auto_recovery_attempts(),
-        MAX_VERIFICATION_AUTO_RECOVERY_ATTEMPTS
-    );
-}
-
-#[tokio::test]
-async fn anti_blind_auto_recovery_names_project_verifier() {
-    let mut backing = TestTurnProcessingBacking::new(4).await;
-    backing.set_verification_override_for_test("rustc --version");
-    let mut repeated_tool_attempts = LoopTracker::new();
-    repeated_tool_attempts.consecutive_mutations =
-        crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
-    let mut turn_modified_files = BTreeSet::new();
-
-    for step in 1..=2 {
-        let mut ctx = backing.turn_processing_context();
-        let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
-            ctx: &mut ctx,
-            processing_result: TurnProcessingResult::TextResponse {
-                text: "Still working.".to_string(),
-                reasoning: Vec::new(),
-                reasoning_details: None,
-                proposed_plan: None,
-            },
-            response_streamed: false,
-            step_count: step,
-            repeated_tool_attempts: &mut repeated_tool_attempts,
-            turn_modified_files: &mut turn_modified_files,
-            max_tool_loops: 4,
-            tool_repeat_limit: 4,
-        })
-        .await
-        .expect("auto-recovery response should be handled");
-        assert!(matches!(outcome, TurnHandlerOutcome::Continue));
-    }
-
-    assert_eq!(
-        repeated_tool_attempts.verification_auto_recovery_attempts(),
-        0,
-        "second text response should run the verifier without reminder rounds"
-    );
-    assert!(
-        !repeated_tool_attempts.verification_is_pending(),
-        "the configured verifier must clear the gate at the text cap"
-    );
-    assert!(
-        backing.last_history_message_contains("gate is cleared"),
-        "recovery must report the observed verifier outcome"
-    );
-}
-
 /// Drive `step` text responses through the handler, returning the last outcome.
 async fn drive_pending_texts(
     backing: &mut TestTurnProcessingBacking,
@@ -476,6 +349,11 @@ async fn harness_auto_verification_success_clears_gate_and_continues() {
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     let mut turn_modified_files = BTreeSet::new();
 
     // The text cap fires one harness execution before directive retries.
@@ -524,7 +402,7 @@ async fn required_verifier_recovery_advances_checks_instead_of_repeating_the_def
     use vtcode_core::config::constants::tools;
     let mut backing = TestTurnProcessingBacking::new(8).await;
     let mut cfg = vtcode_core::config::loader::VTCodeConfig::default();
-    cfg.agent.harness.verification.auto_execute = false;
+    cfg.agent.harness.verification.auto_execute = true;
     cfg.agent.harness.verification.default_verifier_override = Some("rustc --version".into());
     backing.set_vt_cfg_for_test(cfg);
     let mut tracker = LoopTracker::new();
@@ -546,16 +424,13 @@ async fn required_verifier_recovery_advances_checks_instead_of_repeating_the_def
         super::helpers::resolve_pending_verifier_command(ctx.vt_cfg, ctx.tool_registry, ctx.working_history).as_deref(),
         Some("rustc --help")
     );
-    for _ in 0..2 {
-        assert!(matches!(
-            ctx.handle_pending_verification_text_response(&mut tracker, "Still checking.")
-                .unwrap(),
-            super::PendingVerificationTextOutcome::Continue
-        ));
-    }
-    let directive = ctx.working_history.last().unwrap().content.as_text();
-    assert!(directive.contains("rustc --help"), "{directive}");
-    assert!(!directive.contains("rustc --version"), "{directive}");
+    let super::PendingVerificationTextOutcome::AutoVerify { command } = ctx
+        .handle_pending_verification_text_response(&mut tracker, "Still checking.")
+        .unwrap()
+    else {
+        panic!("completion should run the missing check");
+    };
+    assert_eq!(command, "rustc --help");
     assert_eq!(ctx.session_stats.verification_consecutive_failures(), 0);
 }
 
@@ -683,7 +558,7 @@ async fn required_custom_verifiers_cross_the_interactive_gate_and_preserve_repai
             let mut modified = BTreeSet::new();
             if harness_issued {
                 let outcome = drive_pending_texts(&mut backing, &mut tracker, &mut modified, 6).await;
-                assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+                assert_eq!(matches!(outcome, TurnHandlerOutcome::Continue), exit_code == 0, "exit={exit_code}");
             } else {
                 drive_model_tool_call(
                     &mut backing,
@@ -704,14 +579,6 @@ async fn required_custom_verifiers_cross_the_interactive_gate_and_preserve_repai
                 exit_code != 0
             );
             assert_eq!(tracker.consecutive_mutations, 0, "a declared check is not a repair edit");
-            assert_eq!(
-                tracker.fix_edits_remaining,
-                if exit_code == 0 {
-                    0
-                } else {
-                    super::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE
-                }
-            );
         }
     }
 }
@@ -790,23 +657,24 @@ fn verification_failure_attribution_requires_an_observed_exit() {
 }
 
 #[tokio::test]
-async fn harness_auto_verification_failure_grants_fix_window_and_records_episode() {
+async fn harness_auto_verification_failure_blocks_attempt_and_records_episode() {
     // Unrecognized rustc flag: fast deterministic non-zero exit, no files.
     let mut backing = TestTurnProcessingBacking::new(8).await;
     backing.set_verification_override_for_test("rustc --invalid-flag-xyz");
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     let mut turn_modified_files = BTreeSet::new();
 
     let outcome = drive_pending_texts(&mut backing, &mut repeated_tool_attempts, &mut turn_modified_files, 6).await;
-    assert!(matches!(outcome, TurnHandlerOutcome::Continue));
+    assert!(matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Blocked { .. })));
     assert!(repeated_tool_attempts.verification_is_pending(), "a failed verifier must keep the gate pending");
-    assert_eq!(
-        repeated_tool_attempts.fix_edits_remaining,
-        crate::agent::runloop::unified::turn::tool_outcomes::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE,
-        "harness-executed failure must grant the same fix window as a model-run verifier"
-    );
+
     assert!(
         repeated_tool_attempts.auto_verification_executed,
         "the one-shot flag must stick while the gate stays pending"
@@ -858,6 +726,11 @@ async fn piped_verifier_executes_standalone_with_truthful_status() {
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     assert!(repeated_tool_attempts.verification_is_pending());
     let mut turn_modified_files = BTreeSet::new();
 
@@ -886,6 +759,11 @@ async fn piped_verifier_failure_surfaces_instead_of_tail_success() {
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     let mut turn_modified_files = BTreeSet::new();
 
     drive_model_tool_call(
@@ -900,11 +778,6 @@ async fn piped_verifier_failure_surfaces_instead_of_tail_success() {
     assert!(
         repeated_tool_attempts.verification_is_pending(),
         "truthful verifier failure must keep the gate pending"
-    );
-    assert_eq!(
-        repeated_tool_attempts.fix_edits_remaining,
-        crate::agent::runloop::unified::turn::tool_outcomes::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE,
-        "truthful failure must grant the fix window"
     );
 }
 
@@ -928,31 +801,6 @@ fn auto_verification_attribution_ignores_prior_turn_responses() {
     assert_eq!(last_tool_response_text(&history, "call-other", 0), None);
 }
 
-#[test]
-fn completion_claim_detector_targets_done_assertions_not_progress_chatter() {
-    use super::is_completion_claim_text;
-
-    for claim in [
-        "The change is complete.",
-        "All done — implementation complete.",
-        "Done. All tests pass.",
-        "The build passes with no errors.",
-        "Fixed and verified.",
-        "READY FOR REVIEW",
-    ] {
-        assert!(is_completion_claim_text(claim), "should detect claim: {claim}");
-    }
-    for chatter in [
-        "Still working on the refactor.",
-        "Let me check the remaining files.",
-        "Running the next batch of edits now.",
-        "",
-        "ok",
-    ] {
-        assert!(!is_completion_claim_text(chatter), "must not fire on chatter: {chatter}");
-    }
-}
-
 #[tokio::test]
 async fn completion_claim_jumps_straight_to_harness_verification() {
     // A "done" assertion on the FIRST pending text must not spend
@@ -962,6 +810,11 @@ async fn completion_claim_jumps_straight_to_harness_verification() {
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     let mut turn_modified_files = BTreeSet::new();
 
     let mut ctx = backing.turn_processing_context();
@@ -1003,6 +856,11 @@ async fn harness_auto_execute_disabled_falls_back_to_block() {
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     let mut turn_modified_files = BTreeSet::new();
 
     let outcome = drive_pending_texts(&mut backing, &mut repeated_tool_attempts, &mut turn_modified_files, 6).await;
@@ -1029,6 +887,11 @@ async fn harness_auto_verification_escalated_suite_blocks_without_executing() {
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     let mut turn_modified_files = BTreeSet::new();
 
     let outcome = drive_pending_texts(&mut backing, &mut repeated_tool_attempts, &mut turn_modified_files, 6).await;
@@ -1051,6 +914,11 @@ async fn tool_free_recovery_texts_bypass_verification_accounting() {
     let mut repeated_tool_attempts = LoopTracker::new();
     repeated_tool_attempts.consecutive_mutations =
         crate::agent::runloop::unified::turn::tool_outcomes::helpers::BLIND_EDITING_THRESHOLD;
+    repeated_tool_attempts.mark_verification_pending();
+    backing
+        .turn_processing_context()
+        .tool_registry
+        .restore_completion_verification_debt();
     let mut turn_modified_files = BTreeSet::new();
 
     let mut ctx = backing.turn_processing_context();
@@ -1082,47 +950,6 @@ async fn tool_free_recovery_texts_bypass_verification_accounting() {
     assert!(repeated_tool_attempts.verification_is_pending());
     assert_eq!(repeated_tool_attempts.verification_auto_recovery_attempts(), 0);
     assert!(!repeated_tool_attempts.auto_verification_executed);
-}
-
-#[tokio::test]
-async fn pending_verification_notice_reports_failed_verifier_during_fix_window() {
-    use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        ANTI_BLIND_EDITING_DIRECTIVE, FAILED_VERIFICATION_FIX_ALLOWANCE,
-    };
-
-    let mut backing = TestTurnProcessingBacking::new(4).await;
-    let mut repeated_tool_attempts = LoopTracker::with_verification_snapshot((true, FAILED_VERIFICATION_FIX_ALLOWANCE));
-    let mut turn_modified_files = BTreeSet::new();
-
-    let outcome = {
-        let mut ctx = backing.turn_processing_context();
-        handle_turn_processing_result(HandleTurnProcessingResultParams {
-            ctx: &mut ctx,
-            processing_result: TurnProcessingResult::TextResponse {
-                text: "The build failure is in the parser module.".to_string(),
-                reasoning: Vec::new(),
-                reasoning_details: None,
-                proposed_plan: None,
-            },
-            response_streamed: false,
-            step_count: 1,
-            repeated_tool_attempts: &mut repeated_tool_attempts,
-            turn_modified_files: &mut turn_modified_files,
-            max_tool_loops: 4,
-            tool_repeat_limit: 4,
-        })
-        .await
-        .expect("fix-window notice should be handled")
-    };
-
-    assert!(matches!(outcome, TurnHandlerOutcome::Continue));
-    // The active fix window means the verifier already ran and failed: the
-    // notice must say so instead of implying verification was never run.
-    assert!(backing.last_history_message_contains("verification command ran and failed"));
-    assert!(
-        !backing.last_history_message_contains(ANTI_BLIND_EDITING_DIRECTIVE),
-        "generic never-ran directive must not be used while fix edits are granted"
-    );
 }
 
 #[tokio::test]
@@ -1838,7 +1665,7 @@ async fn completion_verification_short_edit_arms_gate_without_completion_wording
         r#"{"input":"*** Begin Patch\n*** Add File: main.rs\n+fn main() {}\n*** End Patch"}"#,
     )
     .await;
-    assert!(!tracker.verification_is_pending(), "one edit must not trip the six-edit pacing checkpoint");
+    assert!(!tracker.verification_is_pending(), "mutation debt belongs to the registry until completion");
     assert!(
         backing
             .turn_processing_context()
@@ -2239,4 +2066,40 @@ async fn passing_local_check_accepts_external_limitation_without_another_recover
             .as_ref()
             .is_some_and(|calls| calls.iter().any(|call| call.id == super::helpers::HARNESS_AUTO_VERIFY_CALL_ID))
     }));
+}
+
+#[tokio::test]
+async fn failed_optional_check_without_mutations_cannot_create_completion_obligations() {
+    let mut backing = TestTurnProcessingBacking::new(8).await;
+    let mut tracker = LoopTracker::new();
+    let mut modified = BTreeSet::new();
+    drive_model_tool_call(
+        &mut backing,
+        &mut tracker,
+        &mut modified,
+        "exec_command",
+        r#"{"cmd":"rustc --invalid-flag-xyz"}"#,
+    )
+    .await;
+    assert!(tracker.verification_is_pending(), "local diagnostics retain the checker failure");
+    let mut ctx = backing.turn_processing_context();
+    assert!(!ctx.tool_registry.completion_verification_pending(), "no code edits or mandatory checks");
+    let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+        ctx: &mut ctx,
+        processing_result: TurnProcessingResult::TextResponse {
+            text: "Inspection complete. The optional checker failed; no files were changed.".into(),
+            reasoning: vec![],
+            reasoning_details: None,
+            proposed_plan: None,
+        },
+        response_streamed: false,
+        step_count: 2,
+        repeated_tool_attempts: &mut tracker,
+        turn_modified_files: &mut modified,
+        max_tool_loops: 8,
+        tool_repeat_limit: 4,
+    })
+    .await
+    .unwrap();
+    assert!(matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Completed { .. })));
 }

@@ -516,6 +516,7 @@ impl AgentRunner {
         let max_budget_usd = setup.max_budget_usd;
         let max_revision_rounds = setup.max_revision_rounds;
         let mut revision_rounds_used = 0usize;
+        let mut verification_recovery_used = false;
         let mut should_write_blocked_handoff = false;
         let mut planning_synthesis_required = false;
 
@@ -1416,6 +1417,35 @@ impl AgentRunner {
 
                             let post_verification =
                                 continuation_controller.after_verification(&verification_results).await?;
+                            if let CompletionAssessment::Continue { reason, .. } = &post_verification {
+                                let policy = &self.config().agent.harness.verification;
+                                if verification_recovery_used
+                                    || !policy.auto_execute
+                                    || policy.in_turn_attempts == 0
+                                    || policy.cross_turn_turns == 0
+                                    || policy.max_consecutive_failures <= 1
+                                {
+                                    let evidence = verification_results
+                                        .iter()
+                                        .find(|result| !result.success || result.exit_code != Some(0))
+                                        .map(super::continuation::build_verification_failure_payload)
+                                        .unwrap_or_else(|| reason.clone());
+                                    let evidence = vtcode_commons::formatting::truncate_byte_budget(
+                                        &evidence,
+                                        2000,
+                                        "\n[verification evidence truncated]",
+                                    );
+                                    runtime.state.outcome = TaskOutcome::failed(
+                                        format!("Unverified: completion verification did not pass. {evidence}"),
+                                        vec![],
+                                        None,
+                                        None,
+                                    );
+                                    should_write_blocked_handoff = true;
+                                    break;
+                                }
+                                verification_recovery_used = true;
+                            }
                             match self
                                 .resolve_completion_assessment(
                                     post_verification,

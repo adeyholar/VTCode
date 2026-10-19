@@ -9,7 +9,6 @@ use super::post_tool_recovery::POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON;
 use crate::agent::runloop::unified::run_loop_context::HarnessTurnState;
 use crate::agent::runloop::unified::run_loop_context::budget_exhaustion_cause;
 use crate::agent::runloop::unified::turn::context::TurnLoopResult;
-use crate::agent::runloop::unified::turn::tool_outcomes::helpers::FAILED_VERIFICATION_FIX_ALLOWANCE;
 use anyhow::Result;
 use vtcode_core::core::agent::refusal;
 use vtcode_core::llm::provider as uni;
@@ -42,7 +41,7 @@ fn pending_verification_final_response() -> String {
          Inspection-only checks do not clear the verification gate. To clear it, run \
          {GENERIC_VERIFIER_DESCRIPTION} with `exec_command`, standalone or as a pure `&&` chain of verifiers, \
          and let it exit 0. {VERIFIER_SHELL_FORM_NOTE} Then type `continue` to resume with the gate preserved. \
-         A failed verifier grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits before the next verification."
+         Repair failed checks before attempting completion again."
     )
 }
 const CONTEXT_CAPACITY_FINAL_RESPONSE: &str = "The turn is blocked because context capacity or compaction failed. \
@@ -265,8 +264,9 @@ pub(crate) fn format_blocked_turn_final_response(reason: &str) -> String {
         // with its own next step; wrapping it would repeat that guidance.
         return reason.trim().to_string();
     }
-    if reason.contains(PENDING_VERIFICATION_BLOCK_REASON) {
-        pending_verification_final_response()
+    if super::super::tool_outcomes::helpers::is_pending_verification_block(reason) {
+        let evidence = vtcode_commons::formatting::truncate_byte_budget(reason, 2000, " [truncated]");
+        format!("{}\n\n{evidence}", pending_verification_final_response())
     } else if reason.contains(POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON) {
         CONTEXT_CAPACITY_FINAL_RESPONSE.to_string()
     } else if budget_exhaustion_cause(reason).is_some() {
