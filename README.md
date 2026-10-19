@@ -121,8 +121,6 @@ prerequisites, other install methods, and optional search tools.
 
 On Windows, install with PowerShell:
 
-<!-- markdownlint-disable-next-line MD013 -->
-
 ```powershell
 irm https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.ps1 | iex
 ```

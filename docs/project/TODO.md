@@ -72,3 +72,59 @@ Turn-boundary harness follow-ups are still tagged user_input at runtime/mod.rs:7
 CRITICAL: check session: and fix vtcode harness. it seems performing worse than expected. and failed repeatedly, also the infinite turns end and summarization output is still repeated infinitely loop and vtcode seems take a lot of effort to end turn with self-check and verification loop. deep dive and check for tool issues and potential improvements. also check for redundancy and optimization opportunities in the planning and execution flow. also check for wasted resources and context usage.
 
 session: session-vtcode-20261019T032124Z_109529-30055 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261019T032124Z_109529-30055
+
+---
+
+it seeems that the plan approval flow still has lot of error failure when planning and execute plan. CRITICAL. it failed repeately
+
+Planning research has reached its safe limit. I’m stopping research and synthesizing a plan from the evidence
+already collected.
+
+Inspection repeated retained evidence; continue from the existing context.
+Planning research has reached its safe limit. I’m stopping research and synthesizing a plan from the evidence
+already collected. also Harness auto-verification: running the project verifier: `./scripts/update-contributors-readme.sh --dry-run`
+Tool 'exec_command' failed: Tool preflight validation failed for 'exec_command': Tool preflight validation failed
+for 'exec_command': Command security check failed: Command injection patt…
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+Mutation blocked until verification: 3 mutating command(s) since the last successful verification are awaiting a
+verifier. Run one with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, or `
+pytest` — standalone or as a pure `&&` chain. Cap output with `max_output_tokens`. Pure `head`/`tail` verifier
+tails run standalone; static read-only filtering pipelines run with fail-closed `pipefail`. Only terminal exit 0
+clears the gate; `;`, `||`, dynamic syntax, and mutating tails do not qualify. Docs-only edits stay allowed.
+• Ran python3 scripts/check_docs_links.py · Ctrl+T transcript · click to expand
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one
+with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain. Cap output with `
+max_output_tokens`. Pure `head`/`tail` verifier tails run standalone; static read-only filtering pipelines run with
+fail-closed `pipefail`. Only terminal exit 0 clears the gate; `;`, `||`, dynamic syntax, and mutating tails do not
+qualify. and ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+The turn stopped: verification is still pending: Unverified: changed code requires fresh verification before
+successful completion. Last command: cargo check --locked; terminal exit: Some(0); launch generation: 3; current
+generation: 3. Next required tracker check: ./scripts/update-contributors-readme.sh --dry-run. Run this exact
+command; a different passing check does not satisfy it. Resume the request or give updated instructions to
+continue.
+Verification is still pending: Unverified: changed code requires fresh verification before successful completion.
+Last command: `cargo check --locked`; terminal exit: Some(0); launch generation: 3; current generation: 3. Next
+required tracker check: `./scripts/update-contributors-readme.sh --dry-run`. Run this exact command; a different
+passing check does not satisfy it.
+Execution summary: blocked; changed files: README.md; verification: see the final response and task tracker;
+blockers: recovery ended with a deterministic fallback and did not confirm the requested work.
+[i] Verification gate auto-recovery turn 1/2: retrying `./scripts/update-contributors-readme.sh --dry-run`
+without manual `continue`.
+Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one
+with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain. Cap output with `
+max_output_tokens`. Pure `head`/`tail` verifier tails run standalone; static read-only filtering pipelines run with
+fail-closed `pipefail`. Only terminal exit 0 clears the gate; `;`, `||`, dynamic syntax, and mutating tails do not
+qualify.
+• Ran cargo check --locked · … +1 lines · Ctrl+T transcript · click to expand
+[!] Verification checkpoint: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let
+it exit 0 before further edits.
+Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one
+with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain. Cap output with `
+max_output_tokens`. Pure `head`/`tail` verifier tails run standalone; static read-only filtering pipelines run with
+fail-closed `pipefail`. Only terminal exit 0 clears the gate; `;`, `||`, dynamic syntax, and mutating tails do not
+qualify. /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261019T075619Z_862610-57915
+
+the agent loop is very fragile and can't not even complete or fulfill a simple prompt. check for major regression
