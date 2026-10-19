@@ -210,7 +210,19 @@ pub(crate) fn handle_preflight_failure(
         "error": if repeated {
             format!("Repeated preflight rejection for '{tool_name}'; use schema_correction.")
         } else {
-            format!("Tool preflight validation failed for '{tool_name}': {}", error.strip_prefix("Tool preflight validation failed: ").unwrap_or(error))
+            // The kernel message already carries the
+            // "Tool preflight validation failed for '<tool>': " prefix, and
+            // nested hop rejections re-wrap it; strip every layer down to the
+            // root cause so the payload adds the prefix exactly once.
+            let tool_prefix = format!("Tool preflight validation failed for '{tool_name}': ");
+            let mut inner = error.trim_start();
+            while let Some(stripped) = inner
+                .strip_prefix(&tool_prefix)
+                .or_else(|| inner.strip_prefix("Tool preflight validation failed: "))
+            {
+                inner = stripped;
+            }
+            format!("Tool preflight validation failed for '{tool_name}': {inner}")
         },
         "failure_kind": failure_kind,
         "tool_name": tool_name,

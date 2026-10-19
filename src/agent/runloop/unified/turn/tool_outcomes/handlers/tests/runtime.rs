@@ -3929,6 +3929,45 @@ async fn placeholder_policy_failure_keeps_policy_correction_and_single_prefix() 
 }
 
 #[tokio::test]
+async fn preflight_failure_deduplicates_nested_kernel_prefixes() {
+    // Regression (session-vtcode-20261019T075619Z_862610-57915): the kernel
+    // error arrives as "Tool preflight validation failed for 'exec_command':
+    // …" and hop rejections re-wrap it, so the payload must strip every
+    // existing prefix layer before adding its own exactly once.
+    let mut backing = TestContextBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    let args = json!({"cmd":"`./script.sh --dry-run`"});
+    for (index, error) in [
+        "Tool preflight validation failed for 'exec_command': Command security check failed: Command injection pattern detected",
+        "Tool preflight validation failed for 'exec_command': Tool preflight validation failed for 'exec_command': Command security check failed: Command injection pattern detected",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let call_id = format!("dedup-preflight-{index}");
+        super::super::handle_preflight_failure(&mut ctx, &call_id, tool_names::EXEC_COMMAND, error, Some(&args), None);
+        let message_text = ctx
+            .working_history
+            .iter()
+            .rev()
+            .find(|m| m.tool_call_id.as_deref() == Some(call_id.as_str()))
+            .map(|m| m.content.as_text().to_string())
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&message_text).unwrap();
+        let error_text = payload["error"].as_str().unwrap();
+        assert_eq!(
+            error_text.matches("Tool preflight validation failed").count(),
+            1,
+            "{error_text}"
+        );
+        assert!(
+            error_text.contains("for 'exec_command': Command security check failed"),
+            "{error_text}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn preflight_placeholder_and_invalid_arguments_allow_schema_correct_execution() {
     for (invalid, command_key) in [
         (r#"{"cleared":"tool_input"}"#, "cmd"),
