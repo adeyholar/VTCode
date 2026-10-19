@@ -766,9 +766,10 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                 }
 
                 if params.ctx.is_planning_active() && matches!(recovery_mode, RecoveryMode::ToolFreeSynthesis) {
-                    return params
-                        .ctx
-                        .break_planning_recovery_with_handoff("the model returned an empty synthesis response", None);
+                    return params.ctx.break_planning_recovery_with_handoff(
+                        crate::agent::runloop::unified::turn::context::PLANNING_RECOVERY_EMPTY_SYNTHESIS_DETAIL,
+                        None,
+                    );
                 }
                 let recovery_reason = if params.ctx.recovery_is_tool_free() {
                     "Recovery mode requested a final synthesis pass, but the model returned no answer."

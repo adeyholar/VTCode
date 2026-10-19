@@ -29,6 +29,26 @@ fn terminal_plan_rejection_message(notice: &str, error: &PlanArtifactError) -> S
     format!("{notice}\n\n{}", plan_rejection_history_feedback(error))
 }
 
+/// Frozen opening of the `break_planning_recovery_with_handoff` message.
+/// `is_plan_empty_synthesis_handoff_text` (auto-continue) matches this prefix
+/// by substring, so the two must move together: the constant is the single
+/// source the handoff builder and its marker test share, so a wording change
+/// fails loudly instead of silently disabling the consecutive-empty cap.
+pub(crate) const PLANNING_RECOVERY_HANDOFF_PREFIX: &str =
+    "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan";
+
+/// Detail for a tool-free pass that returned no content. The consecutive-empty
+/// auto-continue cap counts only this exact detail; validation-failure and
+/// tool-call-violation handoffs carry different details and stay resumable.
+pub(crate) const PLANNING_RECOVERY_EMPTY_SYNTHESIS_DETAIL: &str = "the model returned an empty synthesis response";
+
+/// Blocked reason for every `break_planning_recovery_with_handoff` failure.
+/// It contains the plan-mode deny token "approval-ready plan", so
+/// `RECOVERABLE_BLOCK_ALLOW_TOKENS` must allow-list the "did not produce an
+/// approval-ready plan" shape or the handoff parks at the user prompt.
+pub(crate) const PLANNING_RECOVERY_HANDOFF_REASON: &str =
+    "planning recovery did not produce an approval-ready plan; planning remains active";
+
 impl<'a> TurnProcessingContext<'a> {
     /// End a failed plan-mode recovery pass with an explicit resumable
     /// handoff. This path intentionally emits a `Blocked` outcome: no plan
@@ -55,10 +75,9 @@ impl<'a> TurnProcessingContext<'a> {
             detail.to_string()
         };
         let mut message = format!(
-            "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan ({detail}). The latest request and bounded evidence are preserved. The next attempt can reuse the tool outputs above instead of re-reading files, and should emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. Each `verify:` must be a concrete command or observable check: valid examples are `verify: [cargo nextest run -p vtcode]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, and `verify: [grep -n 'symbol' src/file.rs]`; invalid examples are `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`. Re-state the planning request or type `keep planning` to try again; no changes were applied."
+            "{PLANNING_RECOVERY_HANDOFF_PREFIX} ({detail}). The latest request and bounded evidence are preserved. The next attempt can reuse the tool outputs above instead of re-reading files, and should emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. Each `verify:` must be a concrete command or observable check: valid examples are `verify: [cargo nextest run -p vtcode]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, and `verify: [grep -n 'symbol' src/file.rs]`; invalid examples are `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`. Re-state the planning request or type `keep planning` to try again; no changes were applied."
         );
-        let mut reason =
-            "planning recovery did not produce an approval-ready plan; planning remains active".to_string();
+        let mut reason = PLANNING_RECOVERY_HANDOFF_REASON.to_string();
         if let Some(cause) = self.harness_state.budget_recovery_reason() {
             message = format!("{cause}. {message}");
             reason = format!("{cause}. {reason}");

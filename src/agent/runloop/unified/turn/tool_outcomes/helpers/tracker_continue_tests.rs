@@ -185,21 +185,31 @@ fn detects_plan_empty_fallback_text() {
 
 #[test]
 fn detects_empty_tool_free_synthesis_handoff_text() {
-    // Production `break_planning_recovery_with_handoff` message shape for the
-    // empty case (detail in parentheses); the surrounding prose is fixed.
-    let empty_handoff = "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan (the model returned an empty synthesis response). The latest request and bounded evidence are preserved. The next attempt can reuse the tool outputs above instead of re-reading files, and should emit one complete `<proposed_plan>`.";
-    assert!(is_plan_empty_synthesis_handoff_text(empty_handoff));
-    assert!(is_plan_empty_turn_text(empty_handoff));
+    use crate::agent::runloop::unified::turn::context::{
+        PLANNING_RECOVERY_EMPTY_SYNTHESIS_DETAIL, PLANNING_RECOVERY_HANDOFF_PREFIX,
+    };
+    // Compose the production handoff message from its real constants (not a
+    // copy) so a wording change fails here instead of silently disabling the
+    // consecutive-empty cap for a blank model.
+    let empty_handoff = format!(
+        "{PLANNING_RECOVERY_HANDOFF_PREFIX} ({PLANNING_RECOVERY_EMPTY_SYNTHESIS_DETAIL}). The latest request and bounded evidence are preserved. The next attempt can reuse the tool outputs above instead of re-reading files."
+    );
+    assert!(is_plan_empty_synthesis_handoff_text(&empty_handoff));
+    assert!(is_plan_empty_turn_text(&empty_handoff));
     // A budget-cause prefix prepended by the handoff builder stays matched.
     assert!(is_plan_empty_synthesis_handoff_text(&format!("turn budget exhausted. {empty_handoff}")));
     // Only the empty detail counts. A synthesized-but-invalid draft or a
     // tool-call violation must keep auto-continuing (still resumable), so it
     // must not increment the empty-turn cap.
-    let invalid_draft_handoff = "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan (the synthesized draft failed validation: missing `verify:` command). The latest request and bounded evidence are preserved.";
-    assert!(!is_plan_empty_synthesis_handoff_text(invalid_draft_handoff));
-    assert!(!is_plan_empty_turn_text(invalid_draft_handoff));
-    let tool_violation_handoff = "Planning remains active, but the one tool-free recovery synthesis did not produce an approval-ready plan (the synthesis response attempted a tool call while tools were disabled). The latest request and bounded evidence are preserved.";
-    assert!(!is_plan_empty_synthesis_handoff_text(tool_violation_handoff));
+    let invalid_draft_handoff = format!(
+        "{PLANNING_RECOVERY_HANDOFF_PREFIX} (the synthesized draft failed validation: missing `verify:` command). The latest request and bounded evidence are preserved."
+    );
+    assert!(!is_plan_empty_synthesis_handoff_text(&invalid_draft_handoff));
+    assert!(!is_plan_empty_turn_text(&invalid_draft_handoff));
+    let tool_violation_handoff = format!(
+        "{PLANNING_RECOVERY_HANDOFF_PREFIX} (the synthesis response attempted a tool call while tools were disabled). The latest request and bounded evidence are preserved."
+    );
+    assert!(!is_plan_empty_synthesis_handoff_text(&tool_violation_handoff));
     // The deterministic fallback is still recognized by the combined gate.
     assert!(is_plan_empty_turn_text(
         crate::agent::runloop::unified::turn::turn_loop::PLANNING_COMPLETED_FALLBACK_RESPONSE
@@ -810,7 +820,7 @@ fn planning_recovery_handoff_without_a_ready_plan_auto_continues() {
     // the plan-mode deny token "approval-ready plan" but is a *failure* to
     // produce one, so it must stay recoverable (session-vtcode-20261019T022628Z
     // parked at the user `continue` prompt after an empty tool-free synthesis).
-    let reason = "planning recovery did not produce an approval-ready plan; planning remains active";
+    let reason = crate::agent::runloop::unified::turn::context::PLANNING_RECOVERY_HANDOFF_REASON;
     assert!(plan_mode_recoverable_block(reason));
     assert!(tracker_auto_continue_is_recoverable_block(Some(reason)));
     assert!(should_queue_plan_mode_auto_continue(true, true, false, false, Some(reason), false, 8, 0));
