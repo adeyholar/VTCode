@@ -23,9 +23,24 @@ This is repository development guidance, shared through the root
    from verified behavior. Use `gh api repos/openai/codex/...` or a scoped source
    checkout if needed. Read relevant primary OpenAI research or guidance when it
    addresses the problem.
-4. Record source URLs, commit, source paths, observed behavior, and limits. If
-   upstream access is unavailable, state the gap and proceed using local evidence;
-   do not describe unverified upstream behavior as confirmed.
+4. If DeepWiki MCP or upstream fetch is unavailable, fall back to a local
+   `openai/codex` checkout. Resolve it from `$CODEX_REF_DIR`, defaulting to
+   `~/developer/helpers/codex` only when that variable is unset:
+
+   ```bash
+   CODEX_REF_DIR="${CODEX_REF_DIR:-$HOME/developer/helpers/codex}"
+   git -C "$CODEX_REF_DIR" fetch origin main
+   git -C "$CODEX_REF_DIR" rev-parse origin/main
+   ```
+
+   Read source at that commit, for example
+   `git -C "$CODEX_REF_DIR" show origin/main:codex-rs/...`, and cite the resolved
+   commit. Point `$CODEX_REF_DIR` at any clone of `openai/codex`; contributors can
+   set it in their shell or in a gitignored `.vtcode/`-local file rather than
+   relying on the author's path.
+5. Record source URLs, commit, source paths, observed behavior, and limits. If no
+   source is available, state the gap and proceed using local evidence; do not
+   describe unverified upstream behavior as confirmed.
 
 ## Compare and apply
 
