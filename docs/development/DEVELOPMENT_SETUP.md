@@ -45,7 +45,12 @@ For debug or release launches:
 On macOS 14 and later, `run-debug.sh` packages the freshly built CLI into a local app bundle and uses `gktool` to
 prewarm Gatekeeper before launching it. This avoids the brief first-launch “Verifying…” sheet after a debug rebuild. If
 Gatekeeper cannot scan the bundle, the launcher stops instead of starting a process that could repeatedly show the sheet
-when VT Code starts its helpers.
+when VT Code starts its helpers. The bundle is only re-copied, re-signed, and re-scanned when the debug binary actually
+changed, so relaunching without edits skips that work and keeps the bundle signature stable for Gatekeeper's cache.
+
+`run-debug.sh` also forwards extra command-line arguments to the binary, so `./scripts/run-debug.sh --resume` runs a
+resumed debug session. It appends those arguments after the built-in defaults and after the `MODEL`, `PROVIDER`, and
+`WORKSPACE` environment variables, so an explicit argument overrides the environment-derived one.
 
 ## Daily Development Loop
 
