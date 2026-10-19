@@ -274,7 +274,7 @@ pub enum ModelId {
     MinimaxM3,
 
     // OpenRouter models
-    /// DeepSeek V4.1 Flash - Latest flash model via OpenRouter
+    /// DeepSeek V4.1 Flash 1017 - Latest flash model via OpenRouter
     OpenRouterDeepSeekFlash,
     /// OpenAI gpt-oss-120b - Open-weight 120B reasoning model via OpenRouter
     OpenRouterOpenAIGptOss120b,

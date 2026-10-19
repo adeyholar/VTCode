@@ -284,7 +284,7 @@ async fn reasoning_capability_rejection_does_not_poison_tool_vendor_cache() {
             ResponseTemplate::new(400).set_body_json(json!({
                 "error": {
                     "type": "invalid_request_error",
-                    "message": "Model 'deepseek/deepseek-v4.1-flash' has no vendor that supports the requested capabilities (['reasoning', 'tools']).",
+                    "message": "Model 'deepseek/deepseek-v4.1-flash-1017' has no vendor that supports the requested capabilities (['reasoning', 'tools']).",
                     "source": "gateway",
                     "code": "capability_unavailable",
                     "param": "model"

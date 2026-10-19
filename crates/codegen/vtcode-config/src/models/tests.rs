@@ -414,11 +414,11 @@ fn test_core_capability_helpers() {
 
 #[test]
 fn catalog_reasoning_does_not_imply_configurable_effort() {
-    assert!(Provider::OpenRouter.supports_reasoning("deepseek-ai/DeepSeek-V4.1-Flash"));
-    assert!(!Provider::OpenRouter.supports_reasoning_effort("deepseek-ai/DeepSeek-V4.1-Flash"));
+    assert!(Provider::OpenRouter.supports_reasoning("deepseek/deepseek-v4.1-flash-1017"));
+    assert!(!Provider::OpenRouter.supports_reasoning_effort("deepseek/deepseek-v4.1-flash-1017"));
     assert!(
         Provider::OpenRouter
-            .supported_reasoning_efforts("deepseek-ai/DeepSeek-V4.1-Flash")
+            .supported_reasoning_efforts("deepseek/deepseek-v4.1-flash-1017")
             .is_empty()
     );
 }
@@ -719,6 +719,7 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             | ModelId::MergeGatewayOpenAIGpt6Astra
             | ModelId::MergeGatewayOpenAIGpt6Sol
             | ModelId::MergeGatewayOpenAIGpt6Luna
+            | ModelId::MergeGatewayDeepseekFlash
             | ModelId::MergeGatewayMetaMuseSparkOpen => continue,
             // Vercel AI Gateway reuses `vendor/model` ids that overlap with
             // OpenRouter/Merge Gateway; bare parsing preserves the existing

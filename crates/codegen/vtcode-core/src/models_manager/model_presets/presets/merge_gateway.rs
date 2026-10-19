@@ -83,8 +83,8 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
         ),
         (
             models::merge_gateway::DEEPSEEK_FLASH,
-            "DeepSeek V4.1 Flash (Merge Gateway)",
-            "DeepSeek V4.1 Flash through Merge Gateway",
+            "DeepSeek V4.1 Flash 1017 (Merge Gateway)",
+            "DeepSeek V4.1 Flash 1017 through Merge Gateway",
             1_000_000,
             false,
         ),

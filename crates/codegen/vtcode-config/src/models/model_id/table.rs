@@ -354,8 +354,8 @@ model_id_table! {
         provider: MergeGateway,
         id: models::merge_gateway::DEEPSEEK_FLASH,
         parse: [models::merge_gateway::DEEPSEEK_FLASH],
-        display: "DeepSeek V4.1 Flash (Merge Gateway)",
-        description: "DeepSeek V4.1 Flash accessed through Merge Gateway's OpenAI-compatible endpoint",
+        display: "DeepSeek V4.1 Flash 1017 (Merge Gateway)",
+        description: "DeepSeek V4.1 Flash 1017 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
     MergeGatewayXaiGrok46 {
         provider: MergeGateway,

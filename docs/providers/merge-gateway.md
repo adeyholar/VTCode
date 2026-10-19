@@ -61,8 +61,7 @@ vtcode --provider merge-gateway --model anthropic/claude-opus-5
 | `google/gemini-3.6-flash` | 1M | Yes | Google route |
 | `google/gemini-3.7-flash` | 1M | Yes | Google route |
 | `google/gemini-4-argon` | 1.05M | Yes | Google route, flagship reasoning model |
-| `deepseek/deepseek-v4-pro-0813` | 1M | No | DeepSeek route |
-| `deepseek/deepseek-v4-flash-0731` | 1M | No | DeepSeek route |
+| `deepseek/deepseek-v4.1-flash-1017` | 1M | No | DeepSeek route |
 | `xai/grok-4.6` | 500k | No | xAI route |
 | `qwen/qwen3.8-max` | 1M | Yes | Qwen route |
 | `minimax/minimax-h3` | 131k | No | MiniMax route |

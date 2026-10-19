@@ -47,9 +47,9 @@ pub(crate) fn openrouter_presets() -> Vec<ModelPreset> {
             context_window: Some(1_048_576),
         },
         ModelPreset {
-            id: "openrouter/deepseek-ai/DeepSeek-V4.1-Flash".to_string(),
-            model: "deepseek-ai/DeepSeek-V4.1-Flash".to_string(),
-            display_name: "DeepSeek V4.1 Flash (OpenRouter)".to_string(),
+            id: "openrouter/deepseek/deepseek-v4.1-flash-1017".to_string(),
+            model: "deepseek/deepseek-v4.1-flash-1017".to_string(),
+            display_name: "DeepSeek V4.1 Flash 1017 (OpenRouter)".to_string(),
             description: "Latest DeepSeek flash model with improved reasoning and efficiency via OpenRouter"
                 .to_string(),
             provider: Provider::OpenRouter,

@@ -30,8 +30,7 @@ anthropic/claude-sonnet-5-5
 google/gemini-3.6-flash
 google/gemini-3.7-flash
 google/gemini-4-argon
-deepseek/deepseek-v4-pro-0813
-deepseek/deepseek-v4-flash-0731
+deepseek/deepseek-v4.1-flash-1017
 xai/grok-4.6
 qwen/qwen3.8-max
 minimax/minimax-h3
@@ -60,7 +59,7 @@ vtcode --provider merge-gateway --model default_routing
 For arbitrary valid Merge routes:
 
 ```bash
-vtcode --provider merge-gateway --model deepseek/deepseek-v4-pro
+vtcode --provider merge-gateway --model deepseek/deepseek-v4.1-flash-1017
 ```
 
 Create keys in the [Merge dashboard](https://dashboard.merge.dev/). See the
