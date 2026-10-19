@@ -130,7 +130,6 @@ if [[ "$RUN_MSRV" == true ]]; then
 	done < <(find . -name 'Cargo.toml' -not -path './target/*' -not -path './.worktrees/*' -not -path './patches/*' -not -path './fuzz/*' -not -path './extensions/*')
 	check_pin 'clippy.toml' "$(grep -E '^msrv[[:space:]]*=' clippy.toml | sed 's/.*"\([^"]*\)".*/\1/')"
 	check_pin 'Dockerfile.build' "$(grep -E '^FROM rust:' Dockerfile.build | sed 's/.*rust:\([^-]*\).*/\1/')"
-	check_pin '.github/workflows/ci.yml (MSRV job)' "$(grep -A18 'MSRV Check' .github/workflows/ci.yml | grep -o 'toolchain: "[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)".*/\1/')"
 	if [[ "$PINS_CONSISTENT" == true ]]; then
 		echo -e "${GREEN}✓ All toolchain pins agree on $PINNED${NC}"
 	else

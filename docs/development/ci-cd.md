@@ -4,39 +4,9 @@ This document describes the CI/CD pipeline and code quality tools used in the vt
 
 ## GitHub Actions Workflows
 
-The project uses several GitHub Actions workflows to ensure code quality and automate testing:
+The project runs two GitHub Actions workflows.
 
-### 1. CI Workflow (`ci.yml`)
-
-**Triggers:**
-
-- Push to `main` (filtered by `.rs`, `.toml`, `.lock`, `.yml`, `.json`, `.md`, `scripts/`)
-- Pull requests to `main` (same path filters)
-- Weekly schedule (Monday 5 AM UTC)
-- Manual `workflow_dispatch`
-
-**Jobs:**
-
-- **Format Check (rustfmt)**: Ensures code is properly formatted
-- **Lint Check (clippy)**: Runs comprehensive linting with `-D warnings`
-- **Test**: Runs `cargo nextest run` on Ubuntu and focused harness regressions using the same Cargo `ci` profile
-- **Windows**: Workspace compilation and Clippy, plus focused UI, input, terminal, and private-file persistence regressions
-- **Security Audit**: Workflow policy, `cargo audit`, and license-notice checks
-- **Documentation**: Markdown linting, documentation placement, and core link checks
-- **Scheduled/manual checks**: Cross-platform compilation and an advisory nightly smoke check
-
-### 2. Tool Eval Workflow (`tool-eval.yml`)
-
-**Triggers:**
-
-- Manual `workflow_dispatch` and weekly schedule (Monday 6 AM UTC)
-
-**Jobs:**
-
-- **Tool Evaluation**: Validates built-in tool behavior and safety gateways
-- **Integration tests**: End-to-end tool execution checks
-
-### 3. Build Linux & Windows (`build-linux-windows.yml`)
+### 1. Build Linux & Windows (`build-linux-windows.yml`)
 
 **Triggers:**
 
@@ -70,6 +40,10 @@ the two successful post-optimization runs' average of 41.7 runner-minutes per bu
 - **Build Windows**: Compiles `x86_64-pc-windows-msvc` binary (`--jobs 4`, `timeout 45m`)
 - **Upload Artifacts**: Stores compiled binaries + extension-stripped `.sha256` sidecars for release
   (`retention-days: 2`, `compression-level: 0` — archives already compressed)
+- **Wait for tag**: every build job first polls the remote (inline `bash`) until the release tag is
+  visible before checkout, deriving the repo URL from `GITHUB_REPOSITORY` so forks and renames stay
+  correct. It must stay inline: a local `uses: ./.github/actions/...` cannot run before
+  `actions/checkout`, because the action file is not in the workspace yet.
 
 **Compiler-cache pilot:** the dispatch/reusable-workflow input `compiler_cache_pilot` defaults to
 `false`. Set it to `true` to install sccache for native GNU Linux and Windows, with incremental
@@ -97,20 +71,21 @@ compiled clap command tree as `--help`; there is no separately maintained comman
 errors propagate to the caller. Existing files with matching names are overwritten; other files
 in the directory are retained, so use a fresh staging directory when packaging.
 
-### Selecting affected CI checks
+### 2. WebMCP application (`webmcp.yml`)
 
-`ci.yml` selects Rust and dependency checks before heavy jobs start. Documentation-only changes
-keep lightweight invariant/security/Markdown checks and skip Rust compilation. Embedded source and
-fixture directories, scripts, Cargo/configuration files, and the embedded config-field reference
-still select Rust checks. License/dependency jobs select their manifests, lockfile, notice inputs,
-and workflow changes. Scheduled and manual runs select the full existing check set.
-The `changes` job has read-only pull-request permission for fork-safe path discovery.
+**Triggers:** push to `main` touching `apps/webmcp/**` or the workflow itself, plus manual
+`workflow_dispatch`.
 
-CI, coverage, and tool-eval concurrency groups include the event and branch/PR, allowing successive
-pushes to cancel obsolete runs without cancelling separate manual or scheduled checks. These
-definitions do not re-enable workflows disabled in GitHub. Lightweight contract tests run with
-`python3 scripts/tests/test_ci_load.py`; daily-budget tests run with
-`python3 scripts/tests/test_release_ci_budget.py`.
+**Jobs:** one `deploy` job sets up Bun, installs the browser dependencies with a frozen lockfile,
+runs the editor typecheck and tests in `parallel:`, builds the Vite app, and publishes it to
+GitHub Pages.
+
+### Release build budget
+
+`scripts/release.sh` enforces a one-build-per-UTC-day budget before spending CI. The release
+contract tests run with `./scripts/check.sh contracts` (or directly via
+`python3 scripts/tests/test_ci_load.py` and `python3 scripts/tests/test_release_ci_budget.py`) and
+also in the full `./scripts/check.sh`.
 
 Selective musl/ARM64/Windows omission is an alternative to daily batching and is not enabled:
 the release publisher and legacy updater bridge require complete platform coverage by default.
@@ -202,18 +177,7 @@ retrieval, commits, and tap publication. Run the fixture checks without publishi
 python3 scripts/tests/test_homebrew_formula.py
 ```
 
-### 4. Coverage (`coverage.yml`)
-
-**Triggers:**
-
-- Manual `workflow_dispatch` and weekly schedule (Monday 6 AM UTC)
-
-**Jobs:**
-
-- **Code Coverage**: `cargo llvm-cov` with LCOV output
-- **Coverage Report**: Uploads to code coverage service
-
-### 5. Release (driven by `scripts/release.sh`, no dedicated workflow)
+### 3. Release (driven by `scripts/release.sh`, no dedicated workflow)
 
 **Flow:**
 
@@ -318,6 +282,7 @@ Use the provided development check script to run the same checks locally:
 ./scripts/check.sh build    # Build project
 ./scripts/check.sh docs     # Generate docs
 ./scripts/check.sh unsafe-docs # Gate unsafe SAFETY/allowance + type-position contract docs
+./scripts/check.sh contracts # Release-artifact and CI-budget contract tests
 ```
 
 ### Manual Setup
@@ -389,19 +354,17 @@ Configure branch protection rules in GitHub:
 
 1. Go to repository Settings → Branches
 2. Add rule for `main`/`master` branch
-3. Require status checks to pass:
-   - `fmt`
-   - `clippy`
-   - `test`
-   - `security-audit`
+3. Require the status checks your branches rely on. `build-linux-windows.yml` is
+   `workflow_dispatch`/`workflow_call` only, so add checks for whichever workflows you run on pull
+   requests (for example `webmcp.yml` for browser-editor changes).
 
 ### Status Badges
 
 Add these badges to your README:
 
 ```markdown
-[![CI](https://github.com/yourusername/vtcode/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/vtcode/actions/workflows/ci.yml)
-[![Code Quality](https://github.com/yourusername/vtcode/actions/workflows/code-quality.yml/badge.svg)](https://github.com/yourusername/vtcode/actions/workflows/code-quality.yml)
+[![Build Linux and Windows](https://github.com/yourusername/vtcode/actions/workflows/build-linux-windows.yml/badge.svg)](https://github.com/yourusername/vtcode/actions/workflows/build-linux-windows.yml)
+[![WebMCP](https://github.com/yourusername/vtcode/actions/workflows/webmcp.yml/badge.svg)](https://github.com/yourusername/vtcode/actions/workflows/webmcp.yml)
 ```
 
 ## Troubleshooting
@@ -493,40 +456,22 @@ and the [June 2026 changelog](https://github.blog/changelog/2026-06-25-actions-s
 - Do not parallelize steps that share one output file (e.g. two harnesses `tee`ing to the same log)
   or that both invoke `cargo` on the same workspace (e.g. `cargo build` + `cargo tree`).
 
-Current uses: `webmcp.yml` typecheck + test, `ci.yml` `large-files` (5 Python checks),
-`zen-governance` (3 baselines), `lint-markdown` (2 selector tests + lint), and independent Rust setup tasks.
+Current use: `webmcp.yml` typecheck + test.
 
-In `ci.yml`, Clippy and scheduled cross-platform checks restore Cargo caches alongside sccache setup. The Ubuntu test
-job also installs pinned nextest in that group; Windows overlaps Cargo cache restoration with nextest installation.
-Toolchain setup completes first because the cache action needs compiler metadata. These groups have two or three
-members, and their implicit barrier finishes before any Cargo command runs. `cache-bin: false` prevents cache
-restoration from overwriting binaries that a concurrent installer writes into `~/.cargo/bin`. Cache keys retain their
-existing job and target isolation. The nextest installer uses `fallback: none`, so missing prebuilt binaries fail instead
-of starting a Cargo build inside the parallel group.
-
-The focused PTY, pipe, and inline-event suites run through one nextest command with
-`--profile ci-harness --cargo-profile ci`.
-This reuses the main test job's build profile, schedules tests through nextest's bounded runner, and reports all selected
-suites even when one fails. It remains a separate step with `if: success() || failure()` so a main-suite failure does not
-skip focused regressions. Cargo processes remain sequential within each job to avoid target-directory lock contention.
-
-All CI nextest commands explicitly load the tracked `.github/nextest.toml`; local `.config/nextest.toml` is intentionally
-ignored and cannot provide profiles on a clean checkout. `ci-harness`, `ci-windows-ui`, and `ci-windows-terminal` inherit
-the nextest `ci` settings. Their separate profile
-directories preserve each suite's JUnit report; using `--profile ci` for every sequential command would overwrite earlier
-reports, including failure evidence. The Ubuntu test job runs `scripts/tests/test_ci_nextest_reports.py` against the
-configured workflow profiles to verify that a passing follow-up suite preserves an earlier failing report.
+`webmcp.yml` restores dependencies before running its `parallel:` typecheck + test group, so the
+barrier finishes before the build step. Keep `cache-bin: false` when cache restoration overlaps a
+tool installer, so a concurrent install does not write binaries into a directory the cache step is
+restoring.
 
 This applies the batching, bounded-concurrency, and shared-resource lessons from
 [Principles for fast Tokio applications](https://dial9-rs.github.io/blog/principles-for-fast-tokio-applications/)
 and [uv PR #21372](https://github.com/astral-sh/uv/pull/21372) to CI scheduling. It is an analogy, not a Tokio runtime
-optimization. The existing Python check groups already follow this pattern.
+optimization.
 
-To validate a scheduling change, check dependency barriers, action inputs, isolated output paths, nonzero nextest
-selection, and failure propagation before comparing hosted job/step durations on the same commit and cache state.
-Separate queue/setup time, compilation time, and test runtime. Do not infer a speedup from local Rust runtime benchmarks
-or from a shorter YAML file. As of 2026-10-07, the registered CI workflow is `disabled_manually`; source changes and local
-checks do not establish a hosted performance result or re-enable the workflow.
+To validate a scheduling change, check dependency barriers, action inputs, isolated output paths, and
+failure propagation before comparing hosted job/step durations on the same commit and cache state.
+Separate queue/setup time, compilation time, and test runtime. Do not infer a speedup from local Rust
+runtime benchmarks or from a shorter YAML file.
 
 ## Security
 
@@ -556,9 +501,9 @@ scripts/generate-notices.sh          # regenerate the file
 scripts/generate-notices.sh --check  # CI mode: exit 1 if out of date
 ```
 
-The `license-notices` CI job runs `scripts/generate-notices.sh --check` on every PR to catch stale license notices
-before merge. The file has a manual header (`scripts/templates/third-party-header.txt` for in-tree source ports) and an
-auto-generated dependency listing (`scripts/templates/third-party-notices.hbs` via cargo-about).
+Run `scripts/generate-notices.sh --check` before merge to catch stale license notices. The file has a manual header
+(`scripts/templates/third-party-header.txt` for in-tree source ports) and an auto-generated dependency listing
+(`scripts/templates/third-party-notices.hbs` via cargo-about).
 
 ## References
 

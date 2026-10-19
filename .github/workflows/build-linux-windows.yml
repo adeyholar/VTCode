@@ -70,9 +70,11 @@ jobs:
     steps:
       - name: Wait for tag to exist
         shell: bash
+        # Must stay inline: a local `uses: ./...` cannot run before
+        # actions/checkout because the action file is not in the workspace yet.
         run: |
           for i in $(seq 1 12); do
-            if git ls-remote --exit-code --tags "https://github.com/vinhnx/VTCode.git" "${{ inputs.tag }}"; then
+            if git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "${{ inputs.tag }}"; then
               echo "Tag ${{ inputs.tag }} found"
               exit 0
             fi
@@ -236,9 +238,11 @@ jobs:
     steps:
       - name: Wait for tag to exist
         shell: bash
+        # Must stay inline: a local `uses: ./...` cannot run before
+        # actions/checkout because the action file is not in the workspace yet.
         run: |
           for i in $(seq 1 12); do
-            if git ls-remote --exit-code --tags "https://github.com/vinhnx/VTCode.git" "${{ inputs.tag }}"; then
+            if git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "${{ inputs.tag }}"; then
               echo "Tag ${{ inputs.tag }} found"
               exit 0
             fi
@@ -325,7 +329,7 @@ jobs:
           compression-level: 0
 
   build-windows:
-    if: ${{ inputs.build_windows == true || github.event.inputs.build_windows == 'true' }}
+    if: ${{ inputs.build_windows }}
     name: Build (x86_64-pc-windows-msvc)
     runs-on: windows-latest
     timeout-minutes: 45
@@ -342,9 +346,11 @@ jobs:
     steps:
       - name: Wait for tag to exist
         shell: bash
+        # Must stay inline: a local `uses: ./...` cannot run before
+        # actions/checkout because the action file is not in the workspace yet.
         run: |
           for i in $(seq 1 12); do
-            if git ls-remote --exit-code --tags "https://github.com/vinhnx/VTCode.git" "${{ inputs.tag }}"; then
+            if git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "${{ inputs.tag }}"; then
               echo "Tag ${{ inputs.tag }} found"
               exit 0
             fi

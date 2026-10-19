@@ -22,14 +22,14 @@ Last reviewed: 2026-03-03
 | 6 | Sparse is better than dense. | Prefer concise structures over dense prose in governance output. | Structured tables and remediation sections in checks | Active |
 | 7 | Readability counts. | Diagnostics must be readable and actionable. | Remediation-oriented messages across custom checks | Active |
 | 8 | Special cases aren't special enough to break the rules. | Exceptions must be limited and audited. | `python3 scripts/check_zen_allowlist.py --mode warn` | Added |
-| 9 | Although practicality beats purity. | Use staged rollout over disruptive hard-fail adoption. | Warn-first CI (`zen-governance`) | Active |
+| 9 | Although practicality beats purity. | Use staged rollout over disruptive hard-fail adoption. | Warn-first baselines (`./scripts/check.sh zen`) | Active |
 | 10 | Errors should never pass silently. | Checks must surface failures with details. | Non-zero exits in enforce mode + explicit findings | Active |
 | 11 | Unless explicitly silenced. | Every allowlisted exception must state rationale. | `check_zen_allowlist.py` requires `\| rationale` | Added |
 | 12 | In the face of ambiguity, refuse the temptation to guess. | Require explicit mode (`warn`/`enforce`) in governance checks. | Script CLI mode flags | Active |
 | 13 | There should be one-- and preferably only one --obvious way to do it. | One local governance path for developers. | `./scripts/check.sh zen` | Active |
 | 14 | Although that way may not be obvious at first unless you're Dutch. | Document the path clearly so discoverability is fast. | `docs/harness/INDEX.md` + this file | Active |
 | 15 | Now is better than never. | Fix drift as soon as detected. | Link/allowlist cleanup applied | Active |
-| 16 | Although never is often better than right now. | Delay strict gating until baseline is understood. | `continue-on-error: true` in CI warn stage | Active |
+| 16 | Although never is often better than right now. | Delay strict gating until baseline is understood. | Warn-mode baselines before enforce mode | Active |
 | 17 | If the implementation is hard to explain, it's a bad idea. | Keep governance tools single-purpose and small. | Focused scripts under `scripts/` | Active |
 | 18 | If the implementation is easy to explain, it may be a good idea. | Favor checks with clear, teachable remediation. | Remediation blocks in scripts and docs | Active |
 | 19 | Namespaces are one honking great idea -- let's do more of those! | Keep boundaries explicit by domain and path. | Docs domain folders + crate/module boundaries | Active |

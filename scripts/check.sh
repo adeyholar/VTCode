@@ -195,6 +195,20 @@ run_workflow_security_lint() {
     fi
 }
 
+# Release-artifact and CI-budget contract tests. These were only run by the
+# (now removed) ci.yml workflow, so keep them reachable from the local gate.
+run_release_contract_tests() {
+    print_status "Running release contract tests..."
+    if python3 scripts/tests/test_ci_load.py \
+        && python3 scripts/tests/test_release_ci_budget.py; then
+        print_success "Release contract tests passed."
+        return 0
+    else
+        print_error "Release contract tests failed."
+        return 1
+    fi
+}
+
 run_ast_grep_scan() {
     local require_binary="${1:-optional}"
     if [ "$require_binary" != "required" ]; then
@@ -360,6 +374,7 @@ main() {
     run_rustfmt || ((failed_checks++))
     run_shell_scripts_lint || ((failed_checks++))
     run_workflow_security_lint || ((failed_checks++))
+    run_release_contract_tests || ((failed_checks++))
     run_structured_logging_lint || ((failed_checks++))
     run_zen_governance || ((failed_checks++))
     run_unsafe_docs_gate || ((failed_checks++))
@@ -431,6 +446,7 @@ case "${1:-}" in
         echo "  docs    - Generate documentation"
         echo "  legibility - Run agent legibility hotspot checks"
         echo "  workflow-security - Validate GitHub workflow trigger/action security policy"
+        echo "  contracts - Run release-artifact and CI-budget contract tests"
         echo "  zen     - Run Zen governance checks (warn mode)"
         echo "  unsafe-docs - Gate platform-gated unsafe missing SAFETY/unsafe_code docs"
         echo "  miri    - Run Miri (Tree Borrows) to detect Undefined Behavior (slow; scoped to pure-Rust unsafe)"
@@ -452,6 +468,9 @@ case "${1:-}" in
         ;;
     "workflow-security")
         run_workflow_security_lint
+        ;;
+    "contracts")
+        run_release_contract_tests
         ;;
     "miri")
         run_miri

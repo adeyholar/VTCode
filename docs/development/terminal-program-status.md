@@ -106,7 +106,7 @@ and screen-reader settings remain independent.
 Run focused regressions with:
 
 ```sh
-cargo nextest run --locked --config-file .github/nextest.toml -p vtcode-commons -p vtcode-ui -p vtcode-config -p vtcode -p vtcode-core -E 'test(program_status) | test(background_completion) | test(local_agents)'
+cargo nextest run --locked --config-file .config/nextest.toml -p vtcode-commons -p vtcode-ui -p vtcode-config -p vtcode -p vtcode-core -E 'test(program_status) | test(background_completion) | test(local_agents)'
 ```
 
 PTY captures validate default-off silence, live enabling/disabling, cancellation, failure, wire ordering, and silence
