@@ -68,6 +68,12 @@ pub(crate) const RECOVERABLE_BLOCK_ALLOW_TOKENS: &[&str] = &[
     "recovery could not confirm",
     "recovery exhausted",
     "recovery was exhausted",
+    // `break_planning_recovery_with_handoff` failure reason. It contains the
+    // plan-mode deny token "approval-ready plan", so it must be allow-listed
+    // explicitly (plan mode evaluates allow entries before that deny) or a
+    // recoverable planning block parks at the user `continue` prompt instead
+    // of auto-continuing (session-vtcode-20261019T022628Z).
+    "did not produce an approval-ready plan",
     "reached the safety cap",
     "safety cap",
     "preview budget",

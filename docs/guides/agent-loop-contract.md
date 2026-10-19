@@ -46,8 +46,9 @@ has incomplete steps, and when a turn ends on a recoverable block — in every m
 - Resume: restored sessions use the same current-request adoption gate before probing workspace tracker state or
   auto-queuing one continuation turn. Restoring an informational session does not adopt an unrelated checklist.
 - Plan mode: while planning is active and no validated plan is ready for approval, **recoverable blocked** planning ends
-  (budget / safety-cap / tool-free recovery, including blocked-tool fuse trips and turns ending without a
-  harness-visible final assistant response) auto-queue another planning turn (same `cross_turn_turns` budget).
+  (budget / safety-cap / tool-free recovery, including blocked-tool fuse trips, turns ending without a
+  harness-visible final assistant response, and a failed tool-free synthesis that
+  *did not produce an approval-ready plan*) auto-queue another planning turn (same `cross_turn_turns` budget).
   Deterministic empty-turn fallbacks cannot self-loop: after 2 consecutive empty fallback turns the gate closes and the
   user must `continue` manually. Ordinary completed planning turns are not auto-continued — they may be interview or
   approval handoffs. Planning never auto-approves or auto-implements. Plan-mode and tracker auto-continue share the

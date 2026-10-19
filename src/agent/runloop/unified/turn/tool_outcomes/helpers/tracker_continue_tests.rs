@@ -781,6 +781,33 @@ fn plan_mode_recoverable_allows_planning_fallback_constant() {
 }
 
 #[test]
+fn planning_recovery_handoff_without_a_ready_plan_auto_continues() {
+    // Production `break_planning_recovery_with_handoff` reason. It contains
+    // the plan-mode deny token "approval-ready plan" but is a *failure* to
+    // produce one, so it must stay recoverable (session-vtcode-20261019T022628Z
+    // parked at the user `continue` prompt after an empty tool-free synthesis).
+    let reason = "planning recovery did not produce an approval-ready plan; planning remains active";
+    assert!(plan_mode_recoverable_block(reason));
+    assert!(tracker_auto_continue_is_recoverable_block(Some(reason)));
+    assert!(should_queue_plan_mode_auto_continue(true, true, false, false, Some(reason), false, 8, 0));
+    // A compound budget cause keeps the reason recoverable.
+    assert!(plan_mode_recoverable_block(&format!("turn budget exhausted. {reason}")));
+    // Genuine approval handoffs remain denied: the allow list must not shadow
+    // a ready plan that is waiting for the user.
+    assert!(!plan_mode_recoverable_block("Approval-ready plan remains available for approval in a later turn."));
+    assert!(!should_queue_plan_mode_auto_continue(
+        true,
+        true,
+        false,
+        false,
+        Some("Approval-ready plan remains available for approval in a later turn."),
+        false,
+        8,
+        0
+    ));
+}
+
+#[test]
 fn session_stats_progress_resets_tracker_budget() {
     let mut stats = crate::agent::runloop::unified::state::SessionStats::default();
     assert!(stats.record_tracker_continuation_turn_with_limit(32));
