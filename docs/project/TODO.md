@@ -14,6 +14,9 @@ Inspect code changes from the last 24 hours for high-confidence risks involving 
 
 gui
 
+gpui
+gpui-kit
+
 --
 
 computer use https://developers.openai.com/api/docs/guides/tools-computer-use
