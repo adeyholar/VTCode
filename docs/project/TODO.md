@@ -63,3 +63,9 @@ try: https://api-docs.deepseek.com/guides/search/
 
 fix Deferred (needs separate work)
 Turn-boundary harness follow-ups are still tagged user_input at runtime/mod.rs:758; fixing that requires provenance on QueuedFollowUpIntent and should not be bolted onto this change.
+
+---
+
+CRITICAL: check session: and fix vtcode harness. it seems performing worse than expected. and failed repeatedly, also the infinite turns end and summarization output is still repeated infinitely loop and vtcode seems take a lot of effort to end turn with self-check and verification loop. deep dive and check for tool issues and potential improvements. also check for redundancy and optimization opportunities in the planning and execution flow. also check for wasted resources and context usage.
+
+session: session-vtcode-20261019T032124Z_109529-30055 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261019T032124Z_109529-30055
