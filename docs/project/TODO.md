@@ -43,7 +43,7 @@ Turn blocked: planning recovery did not produce an approval-ready plan; planning
 MCP tools ready (3 registered). Use /mcp tools to inspect the catalog.
 ```
 
-session-vtcode-20261019T022628Z_872242-02937
+session-vtcode-20261019T022628Z_872242-02937 /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20261019T022628Z_872242-02937
 
 ---
 

@@ -224,7 +224,7 @@ below based on the topic area.
 
 - **File**: `docs/development/completion-verification.md`
   - **Content**: Fresh verification before successful completion
-  - **Topics**: Implementation boundaries, Research provenance
+  - **Topics**: Implementation boundaries, Research provenance, External evidence and terminal completion
   - **User Questions**: "What can you tell me about Fresh verification before successful completion?", "How does
     Implementation boundaries work?", "How does Research provenance work?"
 
